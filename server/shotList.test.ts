@@ -2109,3 +2109,237 @@ describe("a typed redo prompt owns the picture (job 383 scenes 20, 33 and 40)", 
     expect(s.keyThing).toBe("coaster");
   });
 });
+
+describe("a general head before its examples is not a list item (job 400 at 0:47)", () => {
+  // "…usually in some ordinary place, a waiting room, a church pew, the kitchen table at two in the
+  // morning…": "some ordinary place" only says what kind of place the others are. It was item 1 — a
+  // picture of its own (a woman at a sink) and row 1 of the list graphic.
+  const LINE =
+    "Most people past sixty have — usually in silence, usually in some ordinary place, a waiting room, a church pew, the kitchen table at two in the morning when the house is too quiet.";
+
+  it("knows a head from a thing", async () => {
+    const { generalHead } = await import("./shotList");
+    for (const t of [
+      "some ordinary place,",
+      "Somewhere",
+      "something small",
+      "someone you trust",
+      "any old thing",
+      "some other way",
+      "a certain kind of wood",
+      "any sort of place",
+      "everything",
+    ])
+      expect([t, generalHead(t)]).toEqual([t, true]);
+    for (const t of [
+      "some glue",
+      "some scrap pine",
+      "some kind of glue", // "some kind of glue, a clamp, and a rag" is three things to get
+      "somebody's barn",
+      "anybody with a porch", // job 110: "…to anybody with a porch, a patio, or a houseplant habit"
+      "a quiet place",
+      "the kitchen table",
+      "some people",
+      "a waiting room",
+    ])
+      expect([t, generalHead(t)]).toEqual([t, false]);
+  });
+
+  it("drops the head only in front of two or more examples, never when the next item is a head too", async () => {
+    const { withoutGeneralHead, ledByGeneralHead } = await import("./shotList");
+    expect(withoutGeneralHead(["some ordinary place", "a waiting room", "a church pew"])).toEqual(["a waiting room", "a church pew"]);
+    const one = ["some quiet spot", "a porch"];
+    expect(withoutGeneralHead(one)).toBe(one);
+    expect(ledByGeneralHead(one)).toBe(true);
+    const three = ["Something sweet", "something salty", "something to drink"];
+    expect(withoutGeneralHead(three)).toBe(three);
+    const things = ["a saw", "a drill", "something to clamp it with"];
+    expect(withoutGeneralHead(things)).toBe(things);
+  });
+
+  it("a host line of a head and its examples is a list of the examples", async () => {
+    const { spokenListItems } = await import("./shotList");
+    expect(spokenListItems("Some ordinary place, a waiting room, a church pew.")).toEqual(["a waiting room", "a church pew"]);
+    expect(spokenListItems("Some quiet spot, a porch swing.")).toBeNull();
+    // A real thing first stays an item.
+    expect(spokenListItems("Some glue, a clamp, and a rag.")).toEqual(["Some glue", "a clamp", "a rag"]);
+  });
+
+  it("a picture of the head and its examples is cut per example, the head leading the first", async () => {
+    const { splitListPieces } = await import("./shotList");
+    const split = splitListPieces([scene(8, "some ordinary place, a waiting room, a church pew,", { showSubject: "quiet places" })]);
+    expect(split.map(s => [s.scriptText, s.showSubject, !!s.listCut])).toEqual([
+      ["some ordinary place, a waiting room,", "a waiting room", true],
+      ["a church pew,", "a church pew", true],
+    ]);
+    // A head with one example is no list: the picture is left whole.
+    const one = scene(8, "some quiet spot, a porch swing,", { showSubject: "a porch swing" });
+    expect(splitListPieces([one])).toEqual([one]);
+    // Unchanged: a real first thing is its own picture.
+    expect(splitListPieces([scene(3, "some glue, a clamp, a rag,", { showSubject: "shop things" })]).map(s => s.scriptText)).toEqual([
+      "some glue,",
+      "a clamp,",
+      "a rag,",
+    ]);
+  });
+
+  it("the shot list's own cut never marks the head a list item", () => {
+    const b = scene(7, LINE);
+    const { scenes } = applyShotPlan(
+      [b],
+      [
+        {
+          scene: 7,
+          shots: [
+            { from: "Most people past sixty", show: "an older man alone on a chair against a pale wall" },
+            { from: "some ordinary place", show: "a woman at a sink by a window" },
+            { from: "a waiting room", show: "a row of waiting room chairs" },
+            { from: "a church pew", show: "a church pew seen from the side" },
+            { from: "the kitchen table", show: "a kitchen table at night" },
+          ],
+        },
+      ]
+    );
+    expect(scenes.map(s => [s.scriptText, !!s.listCut])).toEqual([
+      ["Most people past sixty have — usually in silence, usually in", false],
+      ["some ordinary place,", false],
+      ["a waiting room,", true],
+      ["a church pew,", true],
+      ["the kitchen table at two in the morning when the house is too quiet.", false],
+    ]);
+  });
+});
+
+describe("describing words in front of ONE thing are never list items (job 400 at 1:41)", () => {
+  // "Two thousand years ago, a man named Lucius Annaeus Seneca wrote a short, furious, loving essay to
+  // a man named Paulinus…" was cut "Two thousand years ago," / "…wrote a short," / "furious," — three
+  // pictures and a list graphic for one essay.
+  const ESSAY =
+    "Two thousand years ago, a man named Lucius Annaeus Seneca wrote a short, furious, loving essay to a man named Paulinus, the official in charge of Rome’s grain supply — busy, important, and worn down to the rims.";
+
+  it("one describing word, and a time a sentence opens on, name nothing", async () => {
+    const { notAThing } = await import("./shotList");
+    for (const [t, why] of [
+      ["furious,", "a describing word"], // job 400
+      ["busy,", "a describing word"], // job 400: "— busy, important, and worn down to the rims"
+      ["important,", "a describing word"],
+      ["coziest", "a describing word"],
+      ["and careless", "a describing word"],
+      ["Two thousand years ago,", "a length of time"], // job 400
+      ["Years ago,", "a length of time"],
+      ["a century ago", "a length of time"],
+      ["months later", "a length of time"],
+      ["Long ago,", "a time"],
+      ["that night,", "a time"],
+      ["the next morning", "a time"],
+      ["last summer", "a time"],
+      ["back in 1850", "a time"],
+      ["ago", "a time"],
+    ])
+      expect([t, notAThing(t)]).toEqual([t, why]);
+    // Things stay things: a material, a food, a stage of making (jobs 159/174/178), an amount, a word
+    // that is as often a thing ("cooler", "light"), a colour, and a thing with its own describing word.
+    for (const t of ["oak", "flour", "quilted", "bound", "handful", "cooler", "light", "Ivory", "forest", "harvest", "a short", "a warm coral", "a night out", "a weekend bag", "this spring", "a second bag of pretzels", "back"])
+      expect([t, notAThing(t)]).toEqual([t, null]);
+  });
+
+  it("finds the commas inside a run of describing words, and only those", async () => {
+    const { seriesCommas } = await import("./shotList");
+    const at = (s: string) => Array.from(seriesCommas(s)).map(c => s.slice(0, c).split(/\s+/).pop());
+    expect(at(ESSAY)).toEqual(["short", "furious"]);
+    expect(at("The tea tray, a plain, low serving tray, and it only moved up this list once I started putting names on it.")).toEqual(["plain"]); // Hank's script
+    expect(at("It sells for $120 to $170, mostly to folks who want a real, honest quilt without paying heirloom prices.")).toEqual(["real"]); // Ruth's
+    // More from the practice scripts, and a degree word or a describing word of the run itself.
+    for (const [s, want] of [
+      ["a solid, matte, uniform shade", ["solid", "matte"]],
+      ["my two biggest, coziest things", ["biggest"]],
+      ["the slow, smoldering fire", ["slow"]],
+      ["a long, wet night", ["long"]],
+      ["a really long, very slow walk", ["long"]],
+      ["a nice, pretty, little house", ["nice", "pretty"]],
+    ] as [string, string[]][])
+      expect([s, at(s)]).toEqual([s, want]);
+    // Lists of things, and words that only look like the start of a run.
+    for (const s of [
+      "standing in a garage with a saw, a drill, and a stack of sandpaper,",
+      "You need a hammer, nails, and wood glue.",
+      "The batting, backing, and thread run about $28",
+      "Matte black, dull tarnish, heavy dark wood, all of those take it away.",
+      "Bring something warm, dry socks, and a hat.",
+      "Simple, warm, and impossible to argue with.",
+      "One short, check the other end.",
+    ])
+      expect([s, at(s)]).toEqual([s, []]);
+  });
+
+  it("a piece that is one describing word is no bare list item; 'flour,' still is", async () => {
+    const { looksLikeBareListItem } = await import("./shotList");
+    expect(looksLikeBareListItem("furious,")).toBe(false);
+    expect(looksLikeBareListItem("Years ago,")).toBe(false);
+    expect(looksLikeBareListItem("flour,")).toBe(true);
+    expect(looksLikeBareListItem("and wood glue.")).toBe(true);
+  });
+
+  it("a picture of one described thing is never split into items; 'a saw, a drill,' still is", async () => {
+    const { splitListPieces } = await import("./shotList");
+    const essay = scene(22, "a short, heartfelt, loving essay", { showSubject: "an essay on a desk" });
+    expect(splitListPieces([essay])).toEqual([essay]);
+    expect(splitListPieces([scene(3, "a saw, a drill,", { showSubject: "tools on the workbench" })]).map(s => s.scriptText)).toEqual(["a saw,", "a drill,"]);
+  });
+
+  it("pieces cut at those commas are never marked as list items; a real run still is", async () => {
+    const { markListPieces } = await import("./shotList");
+    const cut = [
+      scene(1, "a man wrote a short,", { shotGroup: 1 }),
+      scene(2, "heartfelt,", { shotGroup: 1 }),
+      scene(3, "loving essay to his friend.", { shotGroup: 1 }),
+    ];
+    expect(markListPieces(cut)).toBe(0);
+    expect(cut.map(s => !!s.listCut)).toEqual([false, false, false]);
+    const tools = [scene(1, "a saw,", { shotGroup: 2 }), scene(2, "a drill,", { shotGroup: 2 }), scene(3, "and a plane.", { shotGroup: 2 })];
+    expect(markListPieces(tools)).toBe(3);
+  });
+});
+
+describe("a run of describing words starts only where one can (review of job 400's describing-run rule)", () => {
+  const at = async (s: string) => {
+    const { seriesCommas } = await import("./shotList");
+    return Array.from(seriesCommas(s)).map(c => s.slice(0, c).split(/\s+/).pop());
+  };
+
+  it("never after a verb: the words say what something IS, and the comma separates nothing", async () => {
+    // Job 400's own script, and another practice script: "too" after "is" read as "a REALLY long, …".
+    for (const s of [
+      "Everyone complains that life is too short, Seneca says.",
+      "The title says lost, which is too strong, since folk schools still teach plenty of these.",
+      "That's too short, my doctor says.",
+      "It's simple, folks tell me.",
+    ])
+      expect([s, await at(s)]).toEqual([s, []]);
+    // A degree word that itself stands where a run may start still leads one.
+    expect(await at("a really long, very slow walk")).toEqual(["long"]);
+    expect(await at("Very long, dull meetings wear everyone out.")).toEqual(["long"]);
+    expect(await at("Grandma's old, worn quilt")).toEqual(["old"]);
+  });
+
+  it("a describing word that is a whole piece starts the next thing; one after 'and' never continues a run", async () => {
+    // "and warm," used to be pulled into a run starting at "blanket", which joined the blanket and the
+    // socks into one item and lost a list of three.
+    expect(await at("Pack a flashlight, a blanket, and warm, dry socks.")).toEqual(["warm"]);
+    expect(await at("They hewed green, right after felling, and tall, straight tulip poplar was a favorite.")).toEqual(["tall"]); // a practice script
+    expect(await at("A big, heavy, and sturdy table")).toEqual(["big", "heavy"]);
+    // Still no run where nothing describes ("Pilot holes, long screws, snug." / "busy, important, and worn down").
+    expect(await at("Pilot holes, long screws, snug.")).toEqual([]);
+    expect(await at("the official in charge of the grain supply — busy, important, and worn down to the rims.")).toEqual([]);
+  });
+
+  it("a thing ending in -ous is still a thing", async () => {
+    const { describingWord, notAThing } = await import("./shotList");
+    for (const w of ["couscous", "rendezvous", "bayous"]) {
+      expect([w, describingWord(w)]).toEqual([w, false]);
+      expect([w, notAThing(w)]).toEqual([w, null]);
+    }
+    expect(describingWord("furious")).toBe(true);
+    expect(describingWord("generous")).toBe(true);
+  });
+});

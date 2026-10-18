@@ -2352,3 +2352,644 @@ describe("an icon is the object its words name, or none (round 10 graphics revie
     expect(props.after).not.toHaveProperty("icon");
   });
 });
+
+describe("a general head before its examples is no list item (job 400 at 0:47, 'some ordinary place')", () => {
+  // The list graphic numbered "1 Some ordinary place" under the title "Ordinary places", and the head
+  // got its own picture (scene 8, a woman at a sink): the voice names three places, the film showed four.
+  const LINE =
+    "Most people past sixty have — usually in silence, usually in some ordinary place, a waiting room, a church pew, the kitchen table at two in the morning when the house is too quiet.";
+
+  it("the model's head is dropped and the film is cut on the examples only", async () => {
+    const r = await findSpokenLists(`Maybe you have done that arithmetic. ${LINE}`, {
+      ask: async () => '{"lists":[{"sentence":1,"kind":"things","items":["some ordinary place","a waiting room","a church pew"]}]}',
+    });
+    expect(r.lists).toEqual([{ sentence: 1, items: ["a waiting room", "a church pew"] }]);
+    const scenes = [
+      pic(1, "Maybe you have done that arithmetic.", "an older man at a pharmacy counter"),
+      pic(2, "Most people past sixty have — usually in silence, usually in some ordinary place, a waiting room, a church pew,", "an older man alone on a grey padded chair"),
+      pic(3, "the kitchen table at two in the morning when the house is too quiet.", "a kitchen table at night"),
+      host(4, "And the math always presents itself as the problem."),
+    ];
+    const cut = applySpokenLists(scenes, r.lists);
+    expect(cut.scenes.map(s => [s.scriptText, !!s.listCut])).toEqual([
+      ["Maybe you have done that arithmetic.", false],
+      ["Most people past sixty have — usually in silence, usually in some ordinary place,", false],
+      ["a waiting room,", true],
+      ["a church pew,", true],
+      ["the kitchen table at two in the morning when the house is too quiet.", false],
+      ["And the math always presents itself as the problem.", false],
+    ]);
+    // The shape rules agree when the call fails.
+    expect(spokenListsByShape([LINE])).toEqual([{ sentence: 0, items: ["a waiting room", "a church pew"] }]);
+  });
+
+  it("a real first thing stays item 1: job 110's porch, and 'some glue'", () => {
+    expect(
+      spokenListsByShape(["…and they go for $38 to $60 to anybody with a porch, a patio, or a houseplant habit."]).map(l => l.items)
+    ).toEqual([["a porch", "a patio", "a houseplant habit"]]);
+    expect(spokenListsByShape(["You'll need some glue, a clamp, and a rag."]).map(l => l.items)).toEqual([["some glue", "a clamp", "a rag"]]);
+  });
+});
+
+describe("the head's picture of its own is gone, not turned into a group picture (job 400 scene 8)", () => {
+  it("right after the host, the head the planner cut leads the waiting room's picture", () => {
+    const scenes = [
+      host(7, "Maybe you have done that arithmetic. Most people past sixty have — usually in silence, usually in"),
+      pic(8, "some ordinary place,", "an older woman standing alone at a sink by a window", { listCut: true }),
+      pic(9, "a waiting room,", "a row of grey padded waiting room chairs against a pale wall", { listCut: true }),
+      pic(10, "a church pew,", "a long empty dark polished wooden church pew", { listCut: true }),
+      pic(11, "the kitchen table at two in the morning when the house is too quiet.", "a wooden kitchen table at night"),
+      host(12, "And the math always presents itself as the problem."),
+    ];
+    // The list as job 400 saved it, head and all.
+    const r = applySpokenLists(scenes, [{ sentence: 1, items: ["some ordinary place", "a waiting room", "a church pew"] }]);
+    // The bridge rule had made it "a waiting room and a church pew together, laid out side by side".
+    expect(r.scenes.some(s => s.listSet)).toBe(false);
+    expect(r.scenes.map(s => [s.scriptText, s.showSubject])).toEqual([
+      ["Maybe you have done that arithmetic. Most people past sixty have — usually in silence, usually in", "the host"],
+      ["some ordinary place, a waiting room,", "a row of grey padded waiting room chairs against a pale wall"],
+      ["a church pew,", "a long empty dark polished wooden church pew"],
+      ["the kitchen table at two in the morning when the house is too quiet.", "a wooden kitchen table at night"],
+      ["And the math always presents itself as the problem.", "the host"],
+    ]);
+  });
+});
+
+describe("one essay is not a list (job 400 at 1:41, 'a short, furious, loving essay')", () => {
+  // The voice says one sentence; the film cut it into a forum (1.5 s), a quill (3.7 s) and the host
+  // writing as Seneca (0.8 s, "furious,"), under a list graphic "Seneca's essay: 1 Two thousand years
+  // ago / 2 Seneca wrote a short / 3 Furious / 4 Loving essay".
+  const CUT = [
+    host(19, "Today, with the help of a Roman who wrote the sharpest essay on time ever put to paper, I want to show you that the arithmetic"),
+    pic(20, "was never your problem. Your problem is theft, and by the end of this video you will be able to name all seven of the thieves.", "a papyrus scroll tied with a cord"),
+    pic(21, "Two thousand years ago,", "ancient Roman stone columns and a forum under a clear sky", { listCut: true }),
+    pic(22, "a man named Lucius Annaeus Seneca wrote a short,", "a dark feather quill in a round glass inkwell", { listCut: true }),
+    pic(23, "furious,", "a hand gripping a feather quill, pressing it hard to papyrus", { listCut: true }),
+    pic(24, "loving essay to a man named Paulinus, the official in charge of Rome’s grain supply — busy, important, and worn down to the rims.", "Roman grain sacks in a stone warehouse"),
+    pic(25, "Seneca was no monk on a hillside.", "a Roman palace hall with an empty throne"),
+  ];
+  const text = CUT.map(s => s.scriptText).join(" ");
+  const essay = splitSentences(text).findIndex(s => s.startsWith("Two thousand years ago"));
+
+  it("no list is kept in the sentence — job 400's own answer, the adjectives, or 'busy, important, worn down'", async () => {
+    expect(essay).toBe(2);
+    for (const items of [
+      ["Two thousand years ago", "a man named Lucius Annaeus Seneca wrote a short", "furious"], // as job 400 saved it
+      ["a short", "furious", "loving essay"],
+      ["busy", "important", "worn down to the rims"],
+    ]) {
+      const r = await findSpokenLists(text, { ask: async () => JSON.stringify({ lists: [{ sentence: essay, kind: "things", items }] }) });
+      expect([items, r.lists]).toEqual([items, []]);
+    }
+    expect(lists(CUT)).toEqual([]); // the sentence shape agrees when the call fails
+  });
+
+  it("the film's cut loses its list marks, so its pieces join like any pictures of one sentence", () => {
+    const r = applySpokenLists(CUT, []);
+    expect(r.cleared).toBe(3);
+    expect(r.scenes.map(s => !!s.listCut)).toEqual([false, false, false, false, false, false, false]);
+  });
+
+  it("a real list in the same film is still cut, one picture per item", () => {
+    expect(spokenListsByShape(["You'll want a penny, a nickel, a dime, and a quarter."]).map(l => l.items)).toEqual([
+      ["a penny", "a nickel", "a dime", "a quarter"],
+    ]);
+  });
+});
+
+describe("a series keeps its last member (job 400 at 2:36, 'everyone complains')", () => {
+  // The voice says "The farmer complains, the senator complains, the old complain, and the young are
+  // already rehearsing the complaint." The list graphic "Everyone complains" read 1 The farmer / 2 The
+  // senator / 3 The old and closed at 160.97 s, just as "and the young" — the line's point — began on a
+  // full-frame watch picture outside the list. The list was saved with three items.
+  const CUT = [
+    pic(29, "Everyone complains that life is too short, Seneca says.", "a crowd of people in a Roman street gesturing and complaining to each other", { narrationStartSec: 151.76, narrationEndSec: 156.29 }),
+    pic(30, "The farmer complains,", "a farmer leaning on a hoe in a dry field, shaking his head", { listCut: true, narrationStartSec: 156.29, narrationEndSec: 157.78 }),
+    pic(31, "the senator complains,", "a Roman senator in an off-white draped toga gesturing in frustration in a marble hall", { listCut: true, narrationStartSec: 157.78, narrationEndSec: 159.45 }),
+    pic(32, "the old complain,", "an old man sitting on a bench, sighing, hands on his cane", { listCut: true, narrationStartSec: 159.45, narrationEndSec: 160.96 }),
+    pic(33, "and the young are already rehearsing the complaint.", "a young man checking a wristwatch impatiently on a street corner", { narrationStartSec: 160.96, narrationEndSec: 164.23 }),
+    pic(34, "Then he turns the whole thing over in a single motion: life is not short.", "an aged papyrus scroll unrolled open on a heavy carved dark desk", { narrationStartSec: 164.23, narrationEndSec: 170.62 }),
+  ];
+  const SAVED = ["The farmer complains", "the senator complains", "the old complain"]; // as job 400 saved it
+  const FOUR = [...SAVED, "the young are already rehearsing the complaint"];
+  const text = CUT.map(s => s.scriptText).join(" ");
+
+  it("found either way, the list has all four — the model's three get the fourth back", async () => {
+    expect(lists(CUT)).toEqual([{ sentence: 1, items: FOUR }]);
+    const r = await findSpokenLists(text, { ask: async () => JSON.stringify({ lists: [{ sentence: 1, kind: "things", items: SAVED }] }) });
+    expect(r.lists).toEqual([{ sentence: 1, items: FOUR }]);
+  });
+
+  it("'and the young…' is the fourth item's picture, and the list graphic runs to 'complaint'", async () => {
+    const r = applySpokenLists(CUT, lists(CUT));
+    expect(r.scenes.map(s => [s.scriptText, !!s.listCut])).toEqual(CUT.map((s, k) => [s.scriptText, k >= 1 && k <= 4]));
+    // The fallback list window (built when the planner leaves a list without one) has a fourth row,
+    // said from "the young" to the end of the clause.
+    const { missingListCues } = await import("../graphics/src/plan/planner");
+    const words = CUT.flatMap(s => {
+      const w = (s.scriptText ?? "").split(" ");
+      const a = s.narrationStartSec!;
+      const step = (s.narrationEndSec! - a) / w.length;
+      return w.map((t, k) => ({ text: t, start: a + k * step, end: a + (k + 0.9) * step }));
+    });
+    const film = { scenes: CUT.map(s => ({ index: s.index, narrationStartSec: s.narrationStartSec!, narrationEndSec: s.narrationEndSec! })) };
+    const [cue] = missingListCues([], words, film, [{ items: FOUR }]);
+    const rows = cue.props.items as { text: string; at: string; say: string }[];
+    expect(rows.map(x => x.say)).toEqual(FOUR);
+    expect(rows[3].at).toBe("@the young");
+  });
+
+  it("a series ended by a clause about something else stays three; a list of things is untouched", () => {
+    expect(spokenListsByShape(["The farmer complains, the senator complains, the old complain, and the truth is nobody listens."]).map(l => l.items)).toEqual([SAVED]);
+    expect(spokenListsByShape(["Get a saw, a drill, a plane, and the whole thing cost me forty dollars."]).map(l => l.items)).toEqual([["a saw", "a drill", "a plane"]]);
+  });
+});
+
+describe("the big QR starts on the scan line, however it is worded (jobs 399 and 400)", () => {
+  // Neither block carries the fixed trigger line, so the card starts on the first sentence that
+  // tells the viewer to scan. Job 399 said "Hold your phone up to the screen…" and job 400 "lift
+  // your phone toward the pattern in the corner of the screen…"; neither was recognised, so 399's
+  // card came on the later "tap the link" sentence and 400's on the block's last words — 7-8 s of
+  // scan instruction spoken over the host with only the small corner code.
+  const cta = (index: number, scriptText: string) =>
+    ({ index, scriptText, hostPresent: true, cta: true, ctaIndex: 0, showSubject: "x" }) as StoryboardScene;
+  const order = (out: StoryboardScene[]) =>
+    out.filter(s => s.cta).map(s => (s.qrHero ? "Q" : s.coverHero ? "B" : "H")).join("");
+
+  it("job 399: the card starts on 'Hold your phone up to the screen…', not on the backup line after it", () => {
+    const scenes = [
+      host(1, "So wait until everyone's been served, then catch a flight attendant as they pass.", { hostOpener: true }),
+      cta(2, "Two asks in, you might wonder how anyone keeps this straight. I read what nobody else bothers to, the federal rules airlines must honor and the policies they never mention, and I gathered it into one digital book."),
+      cta(3, "It's called A Hundred Air Hostess Secrets, a four hundred eighty-five page PDF, and every secret gives you the exact words,"),
+      cta(4, "who to say them to, and the moment in the trip when they work. Chapter four covers in-flight requests, so when the right sentence won't come to you at the galley, it's already in your pocket. Hold your phone up to the screen with its camera on, and aim it at the little black and white code. A link appears, and you tap it."),
+      cta(5, "Or look underneath this video, open the description, and tap the link at the top. None of that needs doing today, and it'll keep just fine. Back in row fourteen, the next ask skips the cart entirely."),
+      host(6, "Bye."),
+    ];
+    const out = markCtaQrBlock(scenes, { qrImageUrl: "q.png", bookTitle: "100 Air Hostess Secrets", bookCoverImageUrl: "c.png" } as any, true);
+    expect(order(out)).toBe("HBHQQ");
+    expect(out.find(s => s.coverHero)?.scriptText).toMatch(/^It's called A Hundred Air Hostess Secrets/);
+    expect(out.find(s => s.qrHero)?.scriptText).toMatch(/^Hold your phone up to the screen with its camera on/);
+    // The pitch before it stays the host's.
+    expect(out.find(s => /it's already in your pocket\.$/.test(s.scriptText ?? ""))?.hostPresent).toBe(true);
+  });
+
+  it("job 400: the card starts on 'Getting there is one small motion: lift your phone…', not on the block's last words", () => {
+    const scenes = [
+      host(1, "Then he turns the whole thing over in a single motion: life is not short.", { hostOpener: true }),
+      cta(2, "Some of you are already a page ahead of me, wondering where all of this lives in one place."),
+      cta(3, "The thinking belongs to Seneca and the Stoics after him;"),
+      cta(4, "my work was gathering it into a digital book called The Stoic Way — a hundred and one lessons on money, grief, people, and more. Thirteen chapters, each lesson built the same way: the real struggle, the principle underneath it, a boxed exercise to run before the day ends, and an honest note on where the advice breaks down. Chapter twelve stands on today’s exact ground — time, legacy, and what the remaining years are for. Getting there is one small motion: lift your phone toward the pattern in the corner of the screen and tap what rises, or find the first line of the description below."),
+      cta(5, "No timer on this — a lesson about hurry is a poor place to hurry you. Now, back to that door you have been holding open."),
+      host(6, "Bye."),
+    ];
+    const out = markCtaQrBlock(scenes, { qrImageUrl: "q.png", bookTitle: "The Stoic Way", bookCoverImageUrl: "c.png" } as any, true);
+    expect(order(out)).toMatch(/^H*BH+QQ$/);
+    expect(out.find(s => s.qrHero)?.scriptText).toMatch(/^Getting there is one small motion: lift your phone/);
+    expect(out.filter(s => s.qrHero).map(s => s.scriptText).join(" ")).toMatch(/holding open\.$/);
+  });
+
+  it("a CTA block that only mentions a phone before its scan line still opens on the host and the book", () => {
+    // The pitch's "it lands on your phone or your tablet" is not the scan line; the card waits for
+    // the line about the code on the screen.
+    const scenes = [
+      host(1, "Hello.", { hostOpener: true }),
+      cta(2, "I gathered the ones that still hold up into a book of my own."),
+      cta(3, "It's called Three Hundred Budget-Friendly Ways to Look Expensive, and it's a digital download, so it lands on your phone or your tablet."),
+      cta(4, "The chapter called The Jewelry Rules is where the necklace lengths live, set by neckline."),
+      cta(5, "There's a small patterned square on your screen right now. Lift your phone, point the camera at that square, and hold it steady for a second or two."),
+      cta(6, "Whenever you get to it is fine."),
+      host(7, "Bye."),
+    ];
+    const out = markCtaQrBlock(scenes, { qrImageUrl: "q.png", bookTitle: "300 Budget-Friendly Ways to Look Expensive", bookCoverImageUrl: "c.png" } as any, true);
+    expect(order(out)).toBe("HBHQQ");
+    expect(out.find(s => s.qrHero)?.scriptText).toMatch(/^There's a small patterned square on your screen/);
+  });
+});
+
+describe("the big QR waits for the scan line and never starts on the pitch before it (jobs 391 and 399)", () => {
+  const cta = (index: number, scriptText: string) =>
+    ({ index, scriptText, hostPresent: true, cta: true, ctaIndex: 0, showSubject: "x" }) as StoryboardScene;
+  const order = (out: StoryboardScene[]) =>
+    out.filter(s => s.cta).map(s => (s.qrHero ? "Q" : s.coverHero ? "B" : "H")).join("");
+
+  it("job 391: a scan line cut over two beats is all under the card, 'point the camera at that square' included", () => {
+    const scenes = [
+      host(1, "Hello.", { hostOpener: true }),
+      cta(2, "These length rules aren't mine originally. They come out of the way jewelers and dressmakers have always matched a piece to a neckline,"),
+      cta(3, "and I gathered the ones that still hold up into a book of my own."),
+      cta(4, "It's called Three Hundred Budget-Friendly Ways to Look Expensive, and it's a digital download."),
+      cta(5, "The chapter called The Jewelry Rules is where the necklace lengths live, set by neckline."),
+      cta(6, "There's a small patterned square on your screen right now. Lift your phone,"),
+      cta(7, "point the camera at that square, and hold it steady for a second or two."),
+      cta(8, "A little bar slides up along the top of your screen."),
+      cta(9, "Touch that bar and the book opens. If the phone feels like a nuisance, the very first line in the description under this video goes to the same place."),
+      cta(10, "Whenever you get to it is fine."),
+      host(11, "Bye."),
+    ];
+    const out = markCtaQrBlock(scenes, { qrImageUrl: "q.png", bookTitle: "300 Budget-Friendly Ways to Look Expensive", bookCoverImageUrl: "c.png" } as any, true);
+    expect(order(out)).toBe("HHBHQQQQQ");
+    expect(out.find(s => s.qrHero)?.scriptText).toMatch(/^There's a small patterned square/);
+  });
+
+  it("a pitch about the book's description or download stays the host's; the card starts on the scan line", () => {
+    // Job 399's block with two pitch lines a script could as easily have written: "a full
+    // description of every" lesson and "easy to download it to any phone" are the book, not the way
+    // to it.
+    const scenes = [
+      host(1, "So wait until everyone's been served, then catch a flight attendant as they pass.", { hostOpener: true }),
+      cta(2, "Two asks in, you might wonder how anyone keeps this straight. I gathered it into one digital book."),
+      cta(3, "It's called A Hundred Air Hostess Secrets, a four hundred eighty-five page PDF, and every secret gives you the exact words,"),
+      cta(4, "who to say them to, and the moment in the trip when they work. Inside you'll find a full description of every request, and it's easy to download it to any phone. Hold your phone up to the screen with its camera on, and aim it at the little black and white code. A link appears, and you tap it."),
+      cta(5, "Or look underneath this video, open the description, and tap the link at the top. None of that needs doing today."),
+      host(6, "Bye."),
+    ];
+    const out = markCtaQrBlock(scenes, { qrImageUrl: "q.png", bookTitle: "100 Air Hostess Secrets", bookCoverImageUrl: "c.png" } as any, true);
+    expect(order(out)).toBe("HBHQQ");
+    expect(out.find(s => s.qrHero)?.scriptText).toMatch(/^Hold your phone up to the screen/);
+    expect(out.find(s => /easy to download it to any phone\.$/.test(s.scriptText ?? ""))?.hostPresent).toBe(true);
+  });
+});
+
+describe("the book cover lands on the line that says the title, never on one word of it (job 400)", () => {
+  // "The Stoic Way" is two words, and half of two is one: "the Stoics after him" passed as naming
+  // the book, so the cover played under the clause before the title and was gone when the host
+  // said "a digital book called The Stoic Way".
+  const cta = (index: number, scriptText: string) =>
+    ({ index, scriptText, hostPresent: true, cta: true, ctaIndex: 0, showSubject: "x" }) as StoryboardScene;
+  const block = () => [
+    host(1, "Then he turns the whole thing over in a single motion: life is not short.", { hostOpener: true }),
+    cta(2, "Some of you are already a page ahead of me, wondering where all of this lives in one place."),
+    cta(3, "The thinking belongs to Seneca and the Stoics after him;"),
+    cta(4, "my work was gathering it into a digital book called The Stoic Way — a hundred and one lessons on money, grief, people, and more. Thirteen chapters, each lesson built the same way: the real struggle, the principle underneath it, a boxed exercise to run before the day ends, and an honest note on where the advice breaks down. Getting there is one small motion: lift your phone toward the pattern in the corner of the screen and tap what rises, or find the first line of the description below."),
+    cta(5, "No timer on this — a lesson about hurry is a poor place to hurry you. Now, back to that door you have been holding open."),
+    host(6, "Bye."),
+  ];
+  const params = { qrImageUrl: "q.png", bookTitle: "The Stoic Way", bookCoverImageUrl: "c.png" } as any;
+
+  it("the scan-window pass puts the cover on 'called The Stoic Way' and keeps 'the Stoics after him' on the host", () => {
+    const out = markCtaQrBlock(block(), params, true);
+    expect(out.find(s => s.coverHero)?.scriptText).toMatch(/^my work was gathering it into a digital book called The Stoic Way/);
+    expect(out.find(s => /Stoics after him;$/.test(s.scriptText ?? ""))?.coverHero).toBeFalsy();
+    const order = out.filter(s => s.cta).map(s => (s.qrHero ? "Q" : s.coverHero ? "B" : "H")).join("");
+    expect(order).toBe("HHBHQQ");
+  });
+
+  it("the cover reveal does the same on a run that has no scan window yet", async () => {
+    const { markCoverReveal } = await import("./longformVideo");
+    const out = markCoverReveal(block(), params);
+    expect(out.filter(s => s.coverHero).map(s => s.index)).toEqual([4]);
+  });
+
+  it("a two-word title said in full still gets the cover (Norbert's 'The Locksmith Way')", async () => {
+    const { markCoverReveal } = await import("./longformVideo");
+    const scenes = [
+      cta(1, "A heavy strike with long screws is everyday locksmith work,"),
+      cta(2, "and I collected a hundred and one fixes like it into a digital book called The Locksmith Way."),
+    ];
+    const out = markCoverReveal(scenes, { bookTitle: "The Locksmith Way", bookCoverImageUrl: "c.png" } as any);
+    expect(out.filter(s => s.coverHero).map(s => s.index)).toEqual([2]);
+  });
+});
+
+describe("after the book cover the host comes back on a sentence (job 399)", () => {
+  // Helena's 3-min test at 2:50: the cover ended on the storyboard's word count, "…every secret
+  // gives you the exact words,", and the host came back mid-list: "who to say them to, and the
+  // moment in the trip when they work." The cover now says the rest of that sentence.
+  const at = (index: number, from: number, to: number, scriptText: string, over: Partial<StoryboardScene>) =>
+    ({
+      index,
+      scriptText,
+      showSubject: "x",
+      narrationStartSec: from,
+      narrationEndSec: to,
+      audioDuration: to - from,
+      audioUrl: `https://example.com/${index}.mp3`,
+      cta: true,
+      ctaIndex: 0,
+      ...over,
+    }) as StoryboardScene;
+  const pitch = { hostPresent: true, qrCorner: true, hostProtected: true };
+  const cover = { coverHero: true, stillImage: true };
+  const card = { qrHero: true, qrTail: true, stillImage: true };
+  const block = (coverAt: [number, number, string], hostAt: [number, number, string]) => [
+    at(1, coverAt[0] - 6, coverAt[0], "Some of you are wondering where all of this lives in one place.", pitch),
+    at(2, ...coverAt, cover),
+    at(3, ...hostAt, pitch),
+    at(4, hostAt[1], hostAt[1] + 8, "Hold your phone up to the screen. A link appears, and you tap it.", card),
+  ];
+  const params = { faceImageUrl: "https://example.com/host.jpg" } as any;
+  const order = (scenes: StoryboardScene[]) =>
+    scenes.map(s => (s.qrHero ? "Q" : s.coverHero ? "B" : "H")).join("");
+
+  it("job 399: the cover runs on to 'when they work.' and the host comes back on 'Chapter four'", async () => {
+    const { enforcePlanRules } = await import("./planGate");
+    const scenes = block(
+      [
+        162.649,
+        170.752,
+        "It's called A Hundred Air Hostess Secrets, a four hundred eighty-five page PDF, and every secret gives you the exact words,",
+      ],
+      [
+        170.752,
+        181.8,
+        "who to say them to, and the moment in the trip when they work. Chapter four covers in-flight requests, so when the right sentence won't come to you at the galley, it's already in your pocket.",
+      ]
+    );
+    // The host take as the job's own transcript heard it, and the pause between "work." and "Chapter".
+    const words = (
+      "who@170.86-171.02 to@171.04-171.14 say@171.16-171.32 them@171.36-171.48 to,@171.54-171.78 " +
+      "and@172.12-172.20 the@172.24-172.32 moment@172.40-172.68 in@172.74-172.80 the@172.82-172.90 " +
+      "trip@172.96-173.20 when@173.26-173.38 they@173.40-173.54 work.@173.58-173.84 " +
+      "Chapter@174.48-174.82 4@175.10-175.18 covers@175.26-175.58 in-flight@175.76-176.18 " +
+      "requests,@176.24-176.76 so@177.20-177.44 when@177.70-177.84 the@177.86-177.94 right@178.00-178.18 " +
+      "sentence@178.24-178.54 won't@178.58-178.76 come@178.82-178.98 to@179.02-179.08 you@179.12-179.20 " +
+      "at@179.26-179.32 the@179.36-179.44 galley,@179.48-179.88 it's@180.12-180.28 already@180.42-180.78 " +
+      "in@180.84-180.90 your@180.94-181.08 pocket.@181.10-181.48"
+    )
+      .split(" ")
+      .map(tok => {
+        const [, word, start, end] = /^(.*)@([\d.]+)-([\d.]+)$/.exec(tok)!;
+        return { word, start: Number(start), end: Number(end) };
+      });
+    const r = enforcePlanRules(scenes, params, { words, silences: [{ start: 173.85, end: 174.47 }] });
+    const b = r.scenes.find(s => s.coverHero)!;
+    const h = r.scenes[r.scenes.indexOf(b) + 1];
+    expect(b.scriptText).toMatch(/gives you the exact words, who to say them to, and the moment in the trip when they work\.$/);
+    expect(h.scriptText).toMatch(/^Chapter four covers in-flight requests,/);
+    expect(h.hostPresent).toBe(true);
+    expect(b.narrationEndSec).toBeCloseTo(174.16, 5);
+    expect(order(r.scenes)).toBe("HBHQ");
+  });
+
+  it("jobs 397 and 398: a cover that ends its own sentence keeps its line", async () => {
+    const { checkPlan, enforcePlanRules } = await import("./planGate");
+    const films = [
+      block(
+        [103.8655, 109.497, "and I gathered it into a digital book called The Ultimate DIY Woodworking Guide."],
+        [
+          109.497,
+          117.54,
+          "It covers finishing and shop safety done right, and after every technique there's a breakdown of the common mistake that goes with it.",
+        ]
+      ),
+      block(
+        [
+          95.9197,
+          105.209,
+          "The projects that actually sell are gathered in my digital book, A Hundred Ways to Make Your First Thousand Dollars with Woodworking.",
+        ],
+        [
+          105.209,
+          121.614,
+          "That's a hundred of them, with what to make each one from and a fair price to ask, listed right beside it. So when a big fancy build starts calling your name, flip to one that sells and make that instead.",
+        ]
+      ),
+    ];
+    for (const scenes of films) {
+      const end = scenes[1].narrationEndSec;
+      expect(checkPlan(scenes, params).findings.filter(f => /after the book cover/.test(f.detail))).toEqual([]);
+      const r = enforcePlanRules(scenes, params);
+      expect(r.scenes.find(s => s.coverHero)?.narrationEndSec).toBe(end);
+    }
+  });
+});
+
+describe("a host take stops mid-sentence only at a natural break (job 400)", () => {
+  // Gideon's 3-min test at 1:31: the host stopped between subject and verb — "…I want to show you
+  // that the arithmetic | was never your problem." — and a scroll played under the rest. The first
+  // half of a picture split for length had been made a check-in, and two word-cut pieces passed as
+  // a shot-list hand-off. The same film opened on "There is a man standing in the greeting card |
+  // aisle of a pharmacy…". Scenes, words and pauses are the job's own.
+  const at = (index: number, from: number, to: number, scriptText: string, over: Partial<StoryboardScene> = {}) =>
+    ({
+      index,
+      scriptText,
+      showSubject: "x",
+      narrationStartSec: from,
+      narrationEndSec: to,
+      audioDuration: to - from,
+      audioUrl: `https://example.com/${index}.mp3`,
+      wordCut: true,
+      stillImage: over.hostPresent ? undefined : true,
+      ...over,
+    }) as StoryboardScene;
+  const heard = (line: string) =>
+    line.split(" ").map(tok => {
+      const [, word, start, end] = /^(.*)@([\d.]+)-([\d.]+)$/.exec(tok)!;
+      return { word, start: Number(start), end: Number(end) };
+    });
+  const params = { faceImageUrl: "https://example.com/host.jpg", hostName: "Gideon Grant" } as any;
+
+  const minute = () => [
+    at(18, 79.885, 83.2955, "and what the remaining years are actually for.", { listCut: true }),
+    at(
+      19,
+      83.2955,
+      91.169,
+      "Today, with the help of a Roman who wrote the sharpest essay on time ever put to paper, I want to show you that the arithmetic",
+      { hostPresent: true }
+    ),
+    at(
+      20,
+      91.169,
+      100.63,
+      "was never your problem. Your problem is theft, and by the end of this video you will be able to name all seven of the thieves."
+    ),
+    at(21, 100.63, 102.133, "Two thousand years ago,", { listCut: true }),
+  ];
+  const minuteWords = heard(
+    "Today,@83.42-83.82 with@84.141-84.281 the@84.301-84.381 help@84.441-84.641 of@84.681-84.761 " +
+      "a@84.821-84.861 Roman@84.921-85.341 who@85.402-85.522 wrote@85.582-85.762 the@85.802-85.922 " +
+      "sharpest@86.042-86.542 essay@86.702-86.983 on@87.063-87.163 time@87.223-87.543 ever@87.803-87.983 " +
+      "put@88.043-88.204 to@88.264-88.344 paper,@88.384-88.744 I@89.242-89.282 want@89.322-89.462 " +
+      "to@89.502-89.562 show@89.622-89.842 you@89.882-90.042 that@90.122-90.242 the@90.282-90.382 " +
+      "arithmetic@90.442-91.142 was@91.342-91.503 never@91.703-91.983 your@92.043-92.203 " +
+      "problem.@92.243-92.703 Your@93.243-93.443 problem@93.503-93.963 is@94.243-94.343 " +
+      "theft.@94.503-94.903 And@95.343-95.423 by@95.463-95.563 the@95.603-95.703 end@95.743-95.863 " +
+      "of@95.883-95.944 this@95.984-96.124 video,@96.184-96.624 you@96.884-97.004 will@97.044-97.184 " +
+      "be@97.224-97.304 able@97.364-97.544 to@97.584-97.664 name@97.724-97.964 all@98.284-98.464 " +
+      "seven@98.604-98.944 of@98.984-99.044 the@99.104-99.204 thieves.@99.244-100.905"
+  );
+  const minutePauses = [
+    { start: 88.68, end: 89.1286 },
+    { start: 90.9832, end: 91.2883 },
+    { start: 92.4921, end: 93.1914 },
+    { start: 93.8825, end: 94.1527 },
+  ];
+
+  it("rule 7 names the take: two word-cut pieces at no break are not a hand-off", async () => {
+    const { checkPlan } = await import("./planGate");
+    const found = checkPlan(minute(), params).findings.filter(f => f.rule === 7);
+    expect(found.map(f => [f.scene, f.detail])).toEqual([
+      [19, expect.stringMatching(/^host take ends mid-sentence, at no natural break/)],
+    ]);
+  });
+
+  it("with host minutes to spare the host finishes the sentence, cut in the pause after 'problem.'", async () => {
+    const { enforcePlanRules } = await import("./planGate");
+    const r = enforcePlanRules(minute(), params, { words: minuteWords, silences: minutePauses });
+    const host = r.scenes.find(s => s.hostPresent)!;
+    const pic = r.scenes[r.scenes.indexOf(host) + 1];
+    expect(host.scriptText).toMatch(/I want to show you that the arithmetic was never your problem\.$/);
+    expect(pic.scriptText).toMatch(/^Your problem is theft, and by the end of this video/);
+    expect(host.narrationEndSec!).toBeGreaterThanOrEqual(92.703); // "problem." has ended
+    expect(host.narrationEndSec!).toBeLessThanOrEqual(93.243); // "Your" has not begun
+    expect(pic.narrationStartSec).toBe(host.narrationEndSec);
+    expect(r.unresolved.filter(f => f.rule === 7)).toEqual([]);
+  });
+
+  it("with the host minutes spent (the job's own state) the host hands over at 'put to paper,'", async () => {
+    const { enforcePlanRules } = await import("./planGate");
+    const r = enforcePlanRules(minute(), params, {
+      words: minuteWords,
+      silences: minutePauses,
+      budgetSec: 91.169 - 83.2955,
+    });
+    const host = r.scenes.find(s => s.hostPresent)!;
+    const pic = r.scenes[r.scenes.indexOf(host) + 1];
+    expect(host.scriptText).toBe(
+      "Today, with the help of a Roman who wrote the sharpest essay on time ever put to paper,"
+    );
+    expect(pic.scriptText).toMatch(/^I want to show you that the arithmetic was never your problem\. Your problem/);
+    expect(host.narrationEndSec!).toBeGreaterThanOrEqual(88.744); // "paper," has ended
+    expect(host.narrationEndSec!).toBeLessThanOrEqual(89.242); // "I" has not begun
+    expect(pic.narrationStartSec).toBe(host.narrationEndSec);
+    expect(host.wordCut && pic.wordCut).toBe(true);
+    expect(r.unresolved.filter(f => f.rule === 7)).toEqual([]);
+  });
+
+  it("the opening hands over after 'aisle of', right before 'a pharmacy' — never inside 'greeting card aisle'", async () => {
+    const { checkPlan, enforcePlanRules } = await import("./planGate");
+    const opening = () => [
+      at(1, 0, 2.50044, "There is a man standing in the greeting card", {
+        hostPresent: true,
+        hostOpener: true,
+        hostProtected: true,
+      }),
+      at(
+        2,
+        2.50044,
+        12.88,
+        "aisle of a pharmacy on a Tuesday morning, buying his third sympathy card since spring, and doing a kind of arithmetic nobody ever taught him."
+      ),
+      at(3, 12.88, 17.3236, "He is counting backward. He is sixty-four.", { hostPresent: true, hostProtected: true }),
+    ];
+    expect(checkPlan(opening(), params).findings.filter(f => f.rule === 7).map(f => f.scene)).toEqual([1]);
+    const words = heard(
+      "There@0.22-0.38 is@0.44-0.54 a@0.58-0.62 man@0.7-1.04 standing@1.18-1.601 in@1.621-1.681 " +
+        "the@1.721-1.801 greeting@1.861-2.181 card@2.241-2.521 aisle@2.721-2.921 of@2.981-3.021 " +
+        "a@3.041-3.061 pharmacy@3.221-3.862 on@4.022-4.102 a@4.142-4.162 Tuesday@4.242-4.682 " +
+        "morning,@4.742-5.122 buying@5.643-5.983 his@6.063-6.203 third@6.343-6.643 " +
+        "sympathy@6.743-7.163 card@7.223-7.564 since@7.604-7.824 spring@7.904-8.344 and@8.944-9.024 " +
+        "doing@9.064-9.324 a@9.365-9.425 kind@9.485-9.705 of@9.745-9.805 arithmetic@9.885-10.605 " +
+        "nobody@10.785-11.185 ever@11.285-11.486 taught@11.546-11.826 him.@11.886-12.046"
+    );
+    // The whole sentence would make a 12.9 s opening — past the hook's 8 s, which the shot list
+    // makes hand over — and 2.5 s of host has nothing to give back.
+    const r = enforcePlanRules(opening(), params, { words });
+    const [host, pic] = r.scenes;
+    expect(host.scriptText).toBe("There is a man standing in the greeting card aisle of");
+    expect(pic.scriptText).toMatch(/^a pharmacy on a Tuesday morning,/);
+    expect(host.narrationEndSec!).toBeGreaterThanOrEqual(3.021); // "of" has ended
+    expect(host.narrationEndSec!).toBeLessThanOrEqual(3.041); // "a" has not begun
+    expect(r.unresolved.filter(f => f.rule === 7)).toEqual([]);
+  });
+
+  it("the hand-offs these films made at a break stay exactly as they were (jobs 398, 399, 400)", async () => {
+    const { checkPlan, enforcePlanRules } = await import("./planGate");
+    const pairs: [StoryboardScene, StoryboardScene][] = [
+      [
+        at(1, 0, 9.786905, "Out of 10 Japanese woodworking projects you can build from cheap box-store lumber, the one that paid me best for my time came out of", { hostPresent: true, hostOpener: true }),
+        at(2, 9.786905, 14.8299, "a coffee can of burnt scraps I almost threw in the trash."),
+      ],
+      [
+        at(1, 5.96425, 12.173, "By the time the beverage cart had come and gone, one of them was sitting in an empty row closer to the front, holding", { hostPresent: true }),
+        at(2, 12.173, 13.8031, "the whole can of ginger ale,", { listCut: true }),
+      ],
+      [
+        at(1, 39.9348, 47.253, "Maybe you have done that arithmetic. Most people past sixty have — usually in silence, usually in", { hostPresent: true }),
+        at(2, 47.253, 49.2444, "some ordinary place,", { listCut: true }),
+      ],
+      [
+        at(1, 67.7626, 70.934, "My name is Gideon Grant, and this channel is for", { hostPresent: true, hostIntro: true }),
+        at(2, 70.934, 76.935, "men and women in their fifties, sixties, and beyond — people carrying real questions about"),
+      ],
+    ];
+    for (const pair of pairs) {
+      expect(checkPlan(pair, params).findings.filter(f => f.rule === 7)).toEqual([]);
+      const end = pair[0].narrationEndSec;
+      const r = enforcePlanRules(pair, params);
+      expect(r.scenes[0].narrationEndSec).toBe(end);
+    }
+  });
+});
+
+describe("a host take that finishes its sentence never leaves a blink before the next take (job 352)", () => {
+  // Dale's opening: "You drive to the big box store for four boards of oak, and you spend twenty
+  // minutes | digging through the rack. Half the boards are bowed. | A couple have a split…" (host |
+  // picture | host). Finishing the sentence took "digging through the rack." and left "Half the
+  // boards are bowed." for 1.8 s between the two takes: rule 7b gave it to the host, the takes stood
+  // back to back, and a check-in at 9:30 went to a picture to pay for it. Ranges and pauses are the
+  // job's own.
+  const at = (index: number, from: number, to: number, scriptText: string, over: Partial<StoryboardScene> = {}) =>
+    ({
+      index,
+      scriptText,
+      showSubject: "x",
+      narrationStartSec: from,
+      narrationEndSec: to,
+      audioDuration: to - from,
+      audioUrl: `https://example.com/${index}.mp3`,
+      wordCut: true,
+      stillImage: over.hostPresent ? undefined : true,
+      ...over,
+    }) as StoryboardScene;
+  const opening = () => [
+    at(1, 0, 4.791905, "You drive to the big box store for four boards of oak, and you spend twenty minutes", {
+      hostPresent: true,
+      hostOpener: true,
+      hostProtected: true,
+      minHoldSec: 2,
+    }),
+    at(2, 4.791905, 7.95719, "digging through the rack. Half the boards are bowed.", { minHoldSec: 1.2 }),
+    at(3, 7.95719, 10.7867, "A couple have a split running off the end.", { hostPresent: true, hostProtected: true, minHoldSec: 2 }),
+    at(4, 10.7867, 15.3756, "The one straight board in the pile is too narrow for your tabletop.", { minHoldSec: 1.2 }),
+  ];
+  const silences = [
+    { start: 5.86919, end: 6.36844 },
+    { start: 7.80037, end: 7.99719 },
+    { start: 10.2676, end: 10.8267 },
+    { start: 14.8376, end: 15.4156 },
+  ];
+  const params = { faceImageUrl: "https://example.com/host.jpg", hostName: "Dale Oakfield" } as any;
+
+  it("hands over at the take's own comma instead: the picture keeps both of its sentences", async () => {
+    const { enforcePlanRules } = await import("./planGate");
+    const r = enforcePlanRules(opening(), params, { silences });
+    const [host, pic, next] = r.scenes;
+    expect(host.hostPresent).toBe(true);
+    expect(host.scriptText).toBe("You drive to the big box store for four boards of oak,");
+    expect(pic.hostPresent).toBeFalsy();
+    expect(pic.scriptText).toBe(
+      "and you spend twenty minutes digging through the rack. Half the boards are bowed."
+    );
+    expect(pic.narrationStartSec).toBe(host.narrationEndSec);
+    expect(next.hostPresent).toBe(true);
+    expect([next.narrationStartSec, next.narrationEndSec]).toEqual([7.95719, 10.7867]);
+    expect(r.fixes.some(f => /picture blink/.test(f))).toBe(false);
+    expect(r.unresolved.filter(f => f.rule === 7)).toEqual([]);
+  });
+
+  it("a picture after the take that runs on past the next take's floor is still taken, as before", async () => {
+    const { enforcePlanRules } = await import("./planGate");
+    // The same opening with a longer second sentence: what is left reads for 2 s and more.
+    const scenes = opening();
+    scenes[1] = at(2, 4.791905, 9.5, "digging through the rack. Half the boards are bowed and the rest are cupped.");
+    scenes[2] = at(3, 9.5, 12.3, "A couple have a split running off the end.", { hostPresent: true, hostProtected: true });
+    scenes[3] = at(4, 12.3, 16, "The one straight board in the pile is too narrow for your tabletop.");
+    const r = enforcePlanRules(scenes, params, { silences: [{ start: 5.86919, end: 6.36844 }] });
+    expect(r.scenes[0].scriptText).toMatch(/twenty minutes digging through the rack\.$/);
+    expect(r.scenes[1].scriptText).toBe("Half the boards are bowed and the rest are cupped.");
+    expect(r.scenes[1].hostPresent).toBeFalsy();
+  });
+});

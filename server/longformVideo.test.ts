@@ -63,6 +63,7 @@ import {
   hostTheCtaPitch,
   markCoverReveal,
   markCtaQrBlock,
+  SCAN_INTENT,
   parseCtaMarkers,
   validateCtaMarkers,
   markCtaFromSpans,
@@ -3926,6 +3927,49 @@ describe("titleMatcher", () => {
       )("it's all in the Whitetail Bible")
     ).toBe(true);
   });
+
+  it("never takes one word for a title of two or more (job 400)", () => {
+    const stoic = titleMatcher("The Stoic Way");
+    expect(stoic("The thinking belongs to Seneca and the Stoics after him;")).toBe(false);
+    expect(stoic("my work was gathering it into a digital book called The Stoic Way")).toBe(true);
+    const lock = titleMatcher("The Locksmith Way");
+    expect(lock("A heavy strike with long screws is everyday locksmith work,")).toBe(false);
+    expect(lock("or had fixed exactly the way you wanted it.")).toBe(false);
+    expect(lock("it's in The Locksmith Way, my digital book.")).toBe(true);
+  });
+
+  it("still takes half the words from two up, and one word for a one-word title", () => {
+    // The host drops their own name from the title.
+    expect(
+      titleMatcher("Lance Kavanaugh's Lockdown Playbook")("It's my Lockdown Playbook, a digital download.")
+    ).toBe(true);
+    // "A Hundred" and "Thousand" miss the number tokens; the four other words are enough.
+    expect(
+      titleMatcher("100 Ways to Make Your First $1,000 with Woodworking")(
+        "The projects that actually sell are gathered in my digital book, A Hundred Ways to Make Your First Thousand Dollars with Woodworking."
+      )
+    ).toBe(true);
+    expect(titleMatcher("Homesteading")("a little book I call Homesteading")).toBe(true);
+    expect(titleMatcher("Homesteading")("a quiet morning on the porch")).toBe(false);
+  });
+
+  it("reads a curly apostrophe in the script as the title's straight one", () => {
+    // Job 400's script reached its scenes with curly apostrophes; a two-word possessive title
+    // needs both words now, so the possessive must still match.
+    const shop = titleMatcher("Grandpa's Workshop");
+    expect(shop("it's all in Grandpa’s Workshop, my digital book")).toBe(true);
+    expect(shop("it's all in Grandpa's Workshop, my digital book")).toBe(true);
+    expect(shop("Grandpa’s old saw still hangs by the door")).toBe(false);
+    expect(shop("back in the workshop, the light was going")).toBe(false);
+    // A curly title is tokenised without its apostrophe and still finds either spelling.
+    expect(titleMatcher("Grandpa’s Workshop")("it's in Grandpa's Workshop")).toBe(true);
+    // The mismatch is real: Luca's 3-min script marks its CTA "Can't" and says "Can’t".
+    expect(
+      titleMatcher("Everything Your Cat Can't Tell You")(
+        "into my book, Everything Your Cat Can’t Tell You."
+      )
+    ).toBe(true);
+  });
 });
 
 describe("markCoverReveal", () => {
@@ -4419,6 +4463,114 @@ describe("markCtaQrBlock", () => {
     expect(out.filter(s => s.qrTail).map(s => s.index)).toEqual([5, 11]);
     expect(out.filter(s => s.coverHero).map(s => s.index)).toEqual([2, 8]);
     expect(out[0].qrHero).toBeFalsy();
+  });
+});
+
+describe("SCAN_INTENT", () => {
+  // The first scan sentence of every marked CTA block in the local practice scripts
+  // (scripts/stress/scripts), each worded its own way. The first group was missed before
+  // (jobs 399 and 400 shipped the big card 7-8 s late over the host).
+  const MISSED_BEFORE = [
+    "Hold your phone up to the screen with its camera on, and aim it at the little black and white code.",
+    "Getting there is one small motion: lift your phone toward the pattern in the corner of the screen and tap what rises, or find the first line of the description below.",
+    "There's a small patterned square on your screen right now.",
+    "If your phone’s within reach, point its camera at the code in this video, and when a link shows on the phone, tap it.",
+    "You'll find it at the top of the description, and the code is on the screen if your phone is close by.",
+    "To download it, open the description below this video, and the link is the first thing in it.",
+  ];
+  const FOUND_BEFORE = [
+    "Grab your phone, point the camera at the little black-and-white code on the screen, and give the link that pops up a tap.",
+    "Pick up your phone, point it at the code there on the screen, and tap the little link that shows up.",
+    "To get it, open the camera app on your phone and aim it at the code on the screen.",
+    "There's a code on your screen.",
+    "There’s a QR code on your screen — aim your phone’s camera at it, and the page opens on its own.",
+    "Now go ahead and grab your phone, open up your camera, and point it at that code on your screen.",
+    "That code is right there on your screen, so just point your camera at it and let it carry you on over.",
+    "Aim your phone’s camera at the code on your screen, hold steady, and tap the message that appears.",
+    "To get it, hold your phone up to the screen with the camera on and aim it at the code.",
+    "To get it, use the link in the description below this video.",
+  ];
+
+  it("catches every way the practice scripts word the scan line", () => {
+    for (const line of [...MISSED_BEFORE, ...FOUND_BEFORE]) expect(SCAN_INTENT.test(line), line).toBe(true);
+  });
+
+  it("catches the parts of a scan line on their own", () => {
+    for (const part of [
+      "and aim it at the little black and white code.",
+      "Point the camera at the little black-and-white code.",
+      "Raise your phone toward the screen.",
+      "A link appears, and you tap it.",
+      "When a little link pops up, tap it.",
+      "Or scroll down to the description below the video.",
+      // Job 391's own second half of the scan line, cut into its own beat: "that square" is the
+      // one just pointed out on the screen.
+      "point the camera at that square, and hold it steady for a second or two.",
+      "Lift your phone toward the pattern in the corner and tap what rises.",
+      "Hover your phone over the code and wait a second.",
+      "Hold it up to the screen and wait for the link.",
+      "The code's on your screen right now.",
+      "There's a little square code in the corner of your screen.",
+      "Look in the description of this video.",
+      "Open this video's description.",
+      "To download it, open the camera on your phone.",
+    ]) expect(SCAN_INTENT.test(part), part).toBe(true);
+  });
+
+  it("never reads a book pitch as the way to the book", () => {
+    // What a pitch says about the book itself — its description, its download, a code book —
+    // sits right before the scan line, and the card must not start there.
+    for (const line of [
+      "Inside you'll find a full description of every stitch and how to fix it.",
+      "You'll find a short description of each project, with the price it sells for.",
+      "Inside you'll find the description of each lesson.",
+      "Check each description before you buy a used lock.",
+      "It's a digital download, easy to download it to any phone or tablet.",
+      "The code book opens right on your screen.",
+      "Every code requirement laid out on your screen in plain words.",
+      "I'd hold it to the same code.",
+      "Aim the camera at the corner of your porch so you see who knocks.",
+      "Hold your phone over the pattern and take a picture before you start.",
+    ]) expect(SCAN_INTENT.test(line), line).toBe(false);
+  });
+
+  it("never catches narration that only mentions a phone, a screen, a code or a pattern", () => {
+    for (const line of [
+      // Real lines from the practice scripts, outside the CTA blocks…
+      "Keep your phone by the bed, charged, and write your address on a card where you can read it out loud.",
+      "Look at the two side by side on your phone.",
+      "Bring a card reader that plugs into your phone and a cash box with $100 in small bills for change.",
+      "Getting a notification on your phone while you're at work is a genuinely useful thing, especially if you've got an older parent living alone.",
+      "Put the phone in another room.",
+      "A phone buzzing in another county doesn't wake the person in the bedroom.",
+      "There's another one popping up on your screen if you can sit a spell longer.",
+      "When your door's squared away, pick another video up on the screen and keep going.",
+      "People decide on them because they're already holding one, and that moment is hard to recreate on a screen.",
+      "You will take a photograph two weeks later and assume the camera was kind to you.",
+      "The code's written for your main exit door, and I'd hold every outside door in the house to it.",
+      "Everywhere the pattern shells out, you have to count your stitches dead on, or the whole thing leans off to one side.",
+      "Here's an easy way to get it right the first time.", // the old list caught this one
+      // …and pitch lines inside them, before the scan line.
+      "It's called Three Hundred Budget-Friendly Ways to Look Expensive, and it's a digital download, so it lands on your phone or your tablet.",
+      "Chapter four covers in-flight requests, so when the right sentence won't come to you at the galley, it's already in your pocket.",
+      // A phone held or aimed at something that is not the screen or its code.
+      "Hold your phone up to your ear and listen for the click.",
+      "Hold your phone over the board and take the picture from straight above.",
+      "Aim the camera at the square so buyers can see it's true.",
+      "Hold your phone sideways and fill the screen with the board.",
+      "Hold your phone up to the window and you'll see the screen go dark.",
+      "Bring your phone to the market so buyers can tap to pay on the screen.",
+      "When someone rings, a notification pops up on your phone.",
+    ]) expect(SCAN_INTENT.test(line), line).toBe(false);
+  });
+
+  it("stays fast on a long line with no scan in it", () => {
+    const long = "hold your phone up to the window and turn the camera toward the board ".repeat(400);
+    const long2 = "find the code is right there just now still in the full description of each ".repeat(400);
+    const t0 = Date.now();
+    expect(SCAN_INTENT.test(long)).toBe(false);
+    expect(SCAN_INTENT.test(long2)).toBe(false);
+    expect(Date.now() - t0).toBeLessThan(500);
   });
 });
 
@@ -11526,6 +11678,14 @@ describe("titleMatcher — a word the title repeats counts once (Diane, job 245)
     const m = titleMatcher(
       "The French Way: 101 Style Hair and Makeup Secrets The French Use To Look 20 Years Younger"
     );
+    expect(m("None of this is secret. It is ordinary French habit that nobody bothers to write down, so I did.")).toBe(false);
+    expect(m("A digital book of mine, called The French Way.")).toBe(true);
+  });
+
+  it("does the same on the channel's stored two-word title, 'The French Way'", () => {
+    // The book row holds only the main title, and half of two words is one: "French" alone used
+    // to name it, the same wrong line as job 245.
+    const m = titleMatcher("The French Way");
     expect(m("None of this is secret. It is ordinary French habit that nobody bothers to write down, so I did.")).toBe(false);
     expect(m("A digital book of mine, called The French Way.")).toBe(true);
   });

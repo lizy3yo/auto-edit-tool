@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { LongformInputParams, StoryboardScene } from "@shared/types";
-import { capMovingLength, checkPlan, enforcePlanRules, len, topicOf } from "./planGate";
+import { breakBetween, capMovingLength, checkPlan, enforcePlanRules, len, topicOf } from "./planGate";
 
 const params = {
   faceImageUrl: "https://example.com/host.jpg",
@@ -623,5 +623,447 @@ describe("every beat can be seen (the audit's production snapshot, 2026-10-18)",
     });
     expect(led?.audioUrl).toBeUndefined();
     expect(r.unresolved.filter(f => f.rule === 7 && /flash shot/.test(f.detail))).toEqual([]);
+  });
+});
+
+describe("after the book cover the host comes back on a sentence (job 399)", () => {
+  // Helena's 3-min test, 2:50: the cover ended on the storyboard's word count, "…every secret gives
+  // you the exact words,", and the host came back mid-list on "who to say them to, and the moment
+  // in the trip when they work." The cover is a fixed frame, so rule 7 used to count it as an edge
+  // and let the host in anywhere.
+  const COVER =
+    "It's called A Hundred Air Hostess Secrets, a four hundred eighty-five page PDF, and every secret gives you the exact words,";
+  const HOST =
+    "who to say them to, and the moment in the trip when they work. Chapter four covers in-flight requests, so when the right sentence won't come to you at the galley, it's already in your pocket. Hold your phone up to the screen with its camera on, and aim it at the little black and white code. A link appears, and you tap it.";
+  /** The job's own transcript over the cover and the host take. */
+  const TRANSCRIPT =
+    "It's@162.80-162.92 called@162.98-163.30 A@163.42-163.46 Hundred@163.58-163.94 Air@164.06-164.20 Hostess@164.24-164.62 Secrets.@164.66-165.10 a@165.55-166.43 485-page@166.47-167.05 PDF,@167.11-167.65 and@168.05-168.15 every@168.35-168.59 secret@168.68-169.03 gives@169.09-169.28 you@169.29-169.41 the@169.46-169.53 exact@169.63-170.09 words,@170.16-170.54 who@170.86-171.02 to@171.04-171.14 say@171.16-171.32 them@171.36-171.48 to,@171.54-171.78 and@172.12-172.20 the@172.24-172.32 moment@172.40-172.68 in@172.74-172.80 the@172.82-172.90 trip@172.96-173.20 when@173.26-173.38 they@173.40-173.54 work.@173.58-173.84 Chapter@174.48-174.82 4@175.10-175.18 covers@175.26-175.58 in-flight@175.76-176.18 requests,@176.24-176.76 so@177.20-177.44 when@177.70-177.84 the@177.86-177.94 right@178.00-178.18 sentence@178.24-178.54 won't@178.58-178.76 come@178.82-178.98 to@179.02-179.08 you@179.12-179.20 at@179.26-179.32 the@179.36-179.44 galley,@179.48-179.88 it's@180.12-180.28 already@180.42-180.78 in@180.84-180.90 your@180.94-181.08 pocket.@181.10-181.48 Hold@182.08-182.24 your@182.28-182.40 phone@182.44-182.66 up@182.72-182.78 to@182.82-182.92 the@182.96-183.04 screen@183.08-183.40 with@183.44-183.54 its@183.60-183.70 camera@183.74-184.10 on@184.26-184.38 and@184.56-184.66 aim@184.80-184.96 it@185.00-185.06 at@185.12-185.20 the@185.24-185.32 little@185.38-185.58 black@185.64-185.86 and@185.88-185.98 white@186.02-186.20 code.@186.26-186.58 A@187.22-187.26 link@187.30-187.48 appears,@187.52-187.94 and@188.08-188.16 you@188.20-188.30 tap@188.32-188.56 it.@188.63-189.49";
+  const words = TRANSCRIPT.split(" ").map(tok => {
+    const [, start, end] = /@([\d.]+)-([\d.]+)$/.exec(tok)!;
+    return { start: Number(start), end: Number(end) };
+  });
+
+  type Kind = "H" | "B" | "Q" | "A";
+  const beat = (index: number, kind: Kind, from: number, to: number, text: string, cta = true) =>
+    ({
+      index,
+      scriptText: text,
+      narration: text,
+      visualPrompt: `picture ${index}`,
+      narrationStartSec: from,
+      narrationEndSec: to,
+      audioDuration: to - from,
+      audioUrl: `https://example.com/${index}.mp3`,
+      hostPresent: kind === "H",
+      stillImage: kind !== "H",
+      coverHero: kind === "B" ? true : undefined,
+      qrHero: kind === "Q" ? true : undefined,
+      qrTail: kind === "Q" ? true : undefined,
+      qrCorner: kind === "H" && cta ? true : undefined,
+      assetImageUrl: kind === "A" ? "https://example.com/asset.png" : undefined,
+      cta: cta ? true : undefined,
+      ctaIndex: cta ? 0 : undefined,
+      hostProtected: kind === "H" && cta ? true : undefined,
+    }) as StoryboardScene;
+
+  /** Job 399's CTA block as stored (scenes 27-30), after a host line before it. */
+  const block = (cover = COVER, host = HOST, coverKind: Kind = "B") => [
+    beat(1, "H", 144.655, 148.646, "And that is the second ask.", false),
+    beat(
+      2,
+      "H",
+      148.646,
+      162.649,
+      "Two asks in, you might wonder how anyone keeps this straight. I read what nobody else bothers to, the federal rules airlines must honor and the policies they never mention, and I gathered it into one digital book."
+    ),
+    beat(3, coverKind, 162.649, 170.752, cover),
+    beat(4, "H", 170.752, 189.022, host),
+    beat(
+      5,
+      "Q",
+      189.022,
+      202.13,
+      "Or look underneath this video, open the description, and tap the link at the top. None of that needs doing today, and it'll keep just fine."
+    ),
+  ];
+  const order = (scenes: StoryboardScene[]) =>
+    scenes
+      .filter(s => s.cta)
+      .map(s => (s.qrHero ? "Q" : s.coverHero ? "B" : s.assetImageUrl ? "A" : "H"))
+      .join("");
+  const afterCover = (f: { rule: number; detail: string }) =>
+    f.rule === 7 && /starts mid-sentence after the book cover/.test(f.detail);
+
+  it("rule 7 names a host take that comes back inside the cover's sentence", () => {
+    expect(checkPlan(block(), params).findings).toContainEqual(
+      expect.objectContaining({
+        rule: 7,
+        scene: 4,
+        detail: expect.stringMatching(/after the book cover: "who to say them to/),
+      })
+    );
+  });
+
+  it("the cover finishes the sentence and the host comes back on 'Chapter four', between the two words", () => {
+    const r = enforcePlanRules(block(), params, { words });
+    expect(r.unresolved.filter(afterCover)).toEqual([]);
+    const cover = r.scenes.find(s => s.coverHero)!;
+    const host = r.scenes[r.scenes.indexOf(cover) + 1];
+    expect(cover.scriptText).toBe(`${COVER} who to say them to, and the moment in the trip when they work.`);
+    expect(host.hostPresent).toBe(true);
+    expect(host.scriptText).toMatch(/^Chapter four covers in-flight requests,/);
+    // In the gap after "work." (173.84) and before "Chapter" (174.48), never inside a word.
+    expect(cover.narrationEndSec!).toBeGreaterThanOrEqual(173.84);
+    expect(cover.narrationEndSec!).toBeLessThanOrEqual(174.48);
+    expect(host.narrationStartSec).toBeCloseTo(cover.narrationEndSec!, 5);
+    expect(len(cover)).toBeLessThanOrEqual(15);
+    // Both ranges moved, so both are re-cut from the master; the CTA order is untouched.
+    expect(cover.audioUrl).toBeUndefined();
+    expect(host.audioUrl).toBeUndefined();
+    expect(order(r.scenes)).toBe("HBHQ");
+    expect(checkPlan(r.scenes, params).findings.filter(afterCover)).toEqual([]);
+  });
+
+  it("without a transcript the cut goes on the sentence's pause", () => {
+    const silences = [{ start: 173.85, end: 174.47 }];
+    const r = enforcePlanRules(block(), params, { silences });
+    const cover = r.scenes.find(s => s.coverHero)!;
+    expect(cover.scriptText).toMatch(/when they work\.$/);
+    expect(cover.narrationEndSec).toBeCloseTo(174.16, 5);
+  });
+
+  it("a host who already comes back on a sentence is left alone", () => {
+    const scenes = block(
+      "It's called A Hundred Air Hostess Secrets, a four hundred eighty-five page PDF.",
+      "Every secret gives you the exact words, who to say them to, and the moment in the trip when they work. A link appears, and you tap it."
+    );
+    expect(checkPlan(scenes, params).findings.filter(f => f.rule === 7)).toEqual([]);
+    const r = enforcePlanRules(scenes, params, { words });
+    expect(r.scenes.find(s => s.coverHero)?.narrationEndSec).toBe(170.752);
+  });
+
+  it("a cover that would run past its ceiling keeps its line: the host comes in inside the sentence", () => {
+    // 8.1 s of cover + a sentence that only ends deep inside the host take (~13 s of it).
+    const long =
+      "who to say them to, the moment in the trip when they work, the seat to be in when the cart starts down the aisle, the galley you can walk back to, and the crew member who has the spare cans in the drawer. A link appears, and you tap it.";
+    const scenes = block(COVER, long);
+    expect(checkPlan(scenes, params).findings.filter(f => f.rule === 7)).toEqual([]);
+    const r = enforcePlanRules(scenes, params, { words });
+    expect(r.scenes.find(s => s.coverHero)?.scriptText).toBe(COVER);
+  });
+
+  it("a host take that is only the end of the cover's sentence stays the host and is named, never folded into the cover", () => {
+    // Taking it would leave book → card, with no host between.
+    const scenes = block(COVER, "who to say them to, and the moment in the trip when they work.");
+    scenes[3].narrationEndSec = 174.16;
+    scenes[3].audioDuration = 174.16 - 170.752;
+    scenes[4].narrationStartSec = 174.16;
+    scenes[4].audioDuration = 202.13 - 174.16;
+    const r = enforcePlanRules(scenes, params, { words });
+    expect(r.unresolved.some(afterCover)).toBe(true);
+    expect(order(r.scenes)).toBe("HBHQ");
+    expect(r.scenes.find(s => s.coverHero)?.scriptText).toBe(COVER);
+  });
+
+  it("an operator's asset is not the cover: the host after it is not held to this", () => {
+    const scenes = block(COVER, HOST, "A");
+    expect(checkPlan(scenes, params).findings.filter(afterCover)).toEqual([]);
+    const r = enforcePlanRules(scenes, params, { words });
+    expect(r.scenes.find(s => s.assetImageUrl)?.scriptText).toBe(COVER);
+  });
+});
+
+describe("a sentence cut goes right after the word the script ends it on (job 400)", () => {
+  // Job 400 as stored: the cover ended on a semicolon, "…the Stoics after him;", and the host came
+  // back on "my work was gathering it into a digital book called The Stoic Way — a hundred and one
+  // lessons on money, grief, people, and more." The script says "a hundred and one" and a dash where
+  // the voice was heard as "101" and a full stop, so the word share lands one word late, between
+  // "13" and "chapters," — inside the next sentence.
+  const HEARD =
+    "My@180.92-181.12 work@181.16-181.44 was@181.50-181.64 gathering@181.72-182.18 it@182.24-182.32 into@182.42-182.62 a@182.66-182.70 digital@182.78-183.18 book@183.22-183.46 called@183.60-183.94 The@183.96-184.28 Stoic@184.38-184.80 Way.@184.86-185.16 101@185.82-186.38 lessons@186.44-186.84 on@186.98-187.06 money,@187.16-187.48 grief,@187.86-188.20 people,@188.64-189.06 and@189.40-189.48 more.@189.54-189.82 13@190.54-190.87 chapters,@190.91-191.43 each@191.87-192.04 lesson@192.13-192.49 built@192.55-192.79 the@192.85-192.95 same@193.01-193.25 way.@193.33-193.57";
+  const heard = HEARD.split(" ").map(tok => {
+    const [, word, start, end] = /^(.*)@([\d.]+)-([\d.]+)$/.exec(tok)!;
+    return { word, start: Number(start), end: Number(end) };
+  });
+  const scenes = () => {
+    const s = film([
+      ["H", 6.36, "Some of you are already a page ahead of me, wondering where all of this lives in one place."],
+      ["P", 3.783, "The thinking belongs to Seneca and the Stoics after him;"],
+      [
+        "H",
+        12.839,
+        "my work was gathering it into a digital book called The Stoic Way — a hundred and one lessons on money, grief, people, and more. Thirteen chapters, each lesson built the same way.",
+      ],
+      ["P", 8, "No timer on this. Now, back to that door you have been holding open."],
+    ]);
+    // On the master's own clock, as the film has it.
+    s.forEach(x => {
+      x.narrationStartSec! += 170.618;
+      x.narrationEndSec! += 170.618;
+      Object.assign(x, { cta: true, ctaIndex: 0 });
+    });
+    Object.assign(s[1], { coverHero: true });
+    Object.assign(s[3], { qrHero: true, qrTail: true });
+    return s;
+  };
+
+  it("the cover ends after 'and more.', where it was heard, not where the word share puts it", () => {
+    const r = enforcePlanRules(scenes(), params, { words: heard });
+    const cover = r.scenes.find(s => s.coverHero)!;
+    const host = r.scenes[r.scenes.indexOf(cover) + 1];
+    expect(cover.scriptText).toMatch(/people, and more\.$/);
+    expect(host.scriptText).toBe("Thirteen chapters, each lesson built the same way.");
+    expect(cover.narrationEndSec!).toBeGreaterThanOrEqual(189.82); // "more." has ended
+    expect(cover.narrationEndSec!).toBeLessThanOrEqual(190.54); // "13" has not begun
+  });
+
+  it("without what was heard, the cut stays on the word share (the transcript's count alone)", () => {
+    const counted = heard.map(({ start, end }) => ({ start, end }));
+    const r = enforcePlanRules(scenes(), params, { words: counted });
+    const cover = r.scenes.find(s => s.coverHero)!;
+    // One word late: after "13", before "chapters," — which is why the heard word is used.
+    expect(cover.narrationEndSec!).toBeGreaterThanOrEqual(190.87);
+    expect(cover.narrationEndSec!).toBeLessThanOrEqual(190.91);
+  });
+});
+
+describe("a host take stops mid-sentence only at a natural break (job 400)", () => {
+  // Job 400 at 1:31: "…I want to show you that the arithmetic | was never your problem." — the
+  // first half of a picture split for length, made a check-in, and passed as a shot-list hand-off
+  // because both pieces were word-cut.
+  const cut = (scenes: StoryboardScene[], ...at: number[]) => {
+    for (const k of at) scenes[k].wordCut = true;
+    return scenes;
+  };
+  const ends = (scenes: StoryboardScene[]) =>
+    checkPlan(scenes, params).findings.filter(f => f.rule === 7 && /ends mid-sentence/.test(f.detail));
+
+  it("knows a break from the words alone: a comma, a list, a joining word, an article, a name, a count, a preposition's object", () => {
+    const breaks: [string, string, boolean?][] = [
+      ["Today, with the help of a Roman who wrote the sharpest essay on time ever put to paper,", "I want to show you"],
+      ["and this one's for anybody standing in a garage with", "a saw,", true],
+      ["the one that paid me best for my time came out of", "a coffee can of burnt scraps I almost threw in the trash."],
+      ["Two thousand years ago, a man named", "Lucius Annaeus Seneca wrote a short,"],
+      ["My name is Gideon Grant, and this channel is for", "men and women in their fifties, sixties,"],
+      ["Every one comes out a little different", "and folks loved picking out the one that spoke to them."],
+      ["by the end of this video you will be able to name all", "seven of the thieves."],
+      ["men and women in their fifties, sixties, and beyond", "— people carrying real questions about"],
+    ];
+    for (const [before, after, list] of breaks) expect(breakBetween(before, after, { list }), before).toBe(true);
+    const notBreaks: [string, string][] = [
+      ["I want to show you that the arithmetic", "was never your problem."], // subject | verb (job 400)
+      ["There is a man standing in the greeting card", "aisle of a pharmacy on a Tuesday morning,"], // inside a name (job 400)
+      ["I want to show you that", "the arithmetic was never your problem."], // "that" waits for its clause
+      ["Then I", "sanded the whole thing smooth."], // a subject waits for its verb
+      ["Nobody could say what it was made of", "was a mystery to me."], // a stranded preposition, then a verb
+    ];
+    for (const [before, after] of notBreaks) expect(breakBetween(before, after), before).toBe(false);
+  });
+
+  it("two word-cut pieces at no break are not a hand-off; at a comma they are", () => {
+    const bad = cut(
+      film([
+        ["H", 5, sentence(1)],
+        ["H", 8, "Today, with the help of a Roman who wrote the sharpest essay, I want to show you that the arithmetic"],
+        ["P", 4, "was never your problem. Your problem is theft."],
+        ["H", 5, sentence(2)],
+      ]),
+      1,
+      2
+    );
+    expect(ends(bad).map(f => f.detail)).toEqual([
+      expect.stringMatching(/^host take ends mid-sentence, at no natural break: "Today, with the help/),
+    ]);
+    const good = cut(
+      film([
+        ["H", 5, sentence(1)],
+        ["H", 5, "Today, with the help of a Roman who wrote the sharpest essay on time ever put to paper,"],
+        ["P", 4, "I want to show you that the arithmetic was never your problem."],
+        ["H", 5, sentence(2)],
+      ]),
+      1,
+      2
+    );
+    expect(ends(good)).toEqual([]);
+  });
+
+  it("'too long to finish' is measured on the rest of the SENTENCE, not the whole picture after", () => {
+    // 8 s of host, then 1.5 s of its sentence inside a 9.5 s picture: the old check added the whole
+    // picture, called it past the 15 s ceiling and excused the take.
+    const short = film([
+      ["H", 5, sentence(1)],
+      ["H", 8, "Today, with the help of a Roman who wrote the sharpest essay, I want to show you that the arithmetic"],
+      ["P", 9.5, "was never your problem. Your problem is theft, and by the end of this video you will be able to name all seven of the thieves."],
+      ["H", 5, sentence(2)],
+    ]);
+    expect(ends(short)).toHaveLength(1);
+    // A sentence that really runs on past the ceiling may be left at a break — the ordinary L-cut…
+    const long = (hostText: string) =>
+      film([
+        ["H", 5, sentence(1)],
+        ["H", 8, hostText],
+        ["P", 12, "and every one of them came back with a story about the market they sold at and the people who stopped"],
+        ["P", 3, "to ask about the price."],
+        ["H", 5, sentence(2)],
+      ]);
+    expect(ends(long("Today I want to tell you about the thirty boards I made last winter,"))).toEqual([]);
+    // …but never inside a phrase.
+    expect(ends(long("Today I want to tell you about the thirty boards I made last winter for the"))).toHaveLength(1);
+  });
+
+  const arithmetic = () =>
+    cut(
+      film([
+        ["H", 5, sentence(1)],
+        ["H", 8, "Today, with the help of a Roman who wrote the sharpest essay, I want to show you that the arithmetic"],
+        ["P", 8, "was never your problem. Your problem is theft, and by the end of this video you will name the thieves."],
+        ["H", 5, sentence(2)],
+      ]),
+      1,
+      2
+    );
+
+  it("finishes the sentence when the host minutes allow it", () => {
+    const r = enforcePlanRules(arithmetic(), params);
+    expect(r.unresolved.filter(f => f.rule === 7)).toEqual([]);
+    const [host, pic] = [r.scenes[1], r.scenes[2]];
+    expect(host.hostPresent).toBe(true);
+    expect(host.scriptText).toMatch(/that the arithmetic was never your problem\.$/);
+    expect(pic.scriptText).toMatch(/^Your problem is theft,/);
+    expect(pic.narrationStartSec).toBeCloseTo(host.narrationEndSec!, 5);
+    expect(host.audioUrl).toBeUndefined();
+    expect(pic.audioUrl).toBeUndefined();
+  });
+
+  it("with the host minutes spent it hands over at its own last comma instead", () => {
+    const r = enforcePlanRules(arithmetic(), params, { budgetSec: 18 });
+    expect(r.unresolved.filter(f => f.rule === 7)).toEqual([]);
+    const [host, pic] = [r.scenes[1], r.scenes[2]];
+    expect(host.hostPresent).toBe(true);
+    expect(host.scriptText).toBe("Today, with the help of a Roman who wrote the sharpest essay,");
+    expect(pic.scriptText).toMatch(/^I want to show you that the arithmetic was never your problem\./);
+    expect(pic.narrationStartSec).toBeCloseTo(host.narrationEndSec!, 5);
+    expect(host.wordCut && pic.wordCut).toBe(true);
+    expect(r.scenes.filter(s => s.hostPresent).reduce((a, s) => a + len(s), 0)).toBeLessThanOrEqual(18.5);
+  });
+
+  it("a host take already at a break keeps its hand-off untouched", () => {
+    const scenes = cut(
+      film([
+        ["H", 5, sentence(1)],
+        ["H", 4, "Out of ten projects, the one that paid me best came out of"],
+        ["P", 4, "a coffee can of burnt scraps I almost threw in the trash."],
+        ["H", 5, sentence(2)],
+      ]),
+      1,
+      2
+    );
+    const r = enforcePlanRules(scenes, params);
+    expect(r.scenes[1].scriptText).toBe("Out of ten projects, the one that paid me best came out of");
+    expect(r.scenes[1].narrationEndSec).toBe(9);
+  });
+
+  it("a stretch without the host never takes a picture that stops at no break as its check-in", () => {
+    const rows = (a: string, b: string): [("H" | "P" | "M"), number, string][] => [
+      ["H", 5, sentence(1)],
+      ["P", 9.5, sentence(2)],
+      ["P", 9.5, sentence(3)],
+      ["P", 5, a],
+      ["P", 4, b],
+      ["P", 9.5, sentence(4)],
+      ["P", 9.5, sentence(5)],
+      ["H", 5, sentence(6)],
+    ];
+    const atComma = cut(
+      film(
+        rows(
+          "Today, with the help of a Roman who wrote the sharpest essay on time ever put to paper,",
+          "I want to show you that the arithmetic was never your problem."
+        )
+      ),
+      3,
+      4
+    );
+    expect(enforcePlanRules(atComma, params).scenes[3].hostPresent).toBe(true);
+    const noBreak = cut(
+      film(
+        rows(
+          "Today, with the help of a Roman who wrote the sharpest essay, I want to show you that the arithmetic",
+          "was never your problem. Your problem is theft."
+        )
+      ),
+      3,
+      4
+    );
+    const hosts = enforcePlanRules(noBreak, params)
+      .scenes.filter(s => s.hostPresent)
+      .map(s => s.scriptText ?? "");
+    expect(hosts.some(t => /the arithmetic$/.test(t))).toBe(false);
+    // The host comes in on the clause instead — a glimpse that leaves at the comma.
+    expect(hosts).toContain("Today, with the help of a Roman who wrote the sharpest essay,");
+  });
+});
+
+describe("a natural break, read on the films' own hand-offs (review of the job 400 fix)", () => {
+  it("a picture may open on a preposition with its object, a clause word or a clause's own subject", () => {
+    // Hand-offs the shot list made at exactly these breaks; the first cut of the rule re-cut them.
+    const breaks: [string, string][] = [
+      ["Those buyers will pay real money for one good piece", "on a bare wall,"], // job 153
+      ["Now I love a quilt, and there is nothing that sits on a bed", "in a farmhouse guest room like a hand-pieced one,"], // job 167
+      ["because that's the number that tells you", "whether your evening earned its keep."], // job 172
+      ["I round off with a little single-crochet edge", "so they lie flat on the edge of the sink"], // job 151
+      ["a woman with gray hair that catches the light will read younger", "than a woman with flawlessly dyed brown hair"], // job 320
+      ["My neighbor across the fence saw the first one and bought it off me", "before I'd even woven in the ends."], // job 170
+      ["that's about $4 for every hour", "I sat at that machine,"], // job 159
+      ["A fellow from a bonsai club bought", "three at once, one for each of his best trees,"], // job 153
+    ];
+    for (const [before, after] of breaks) expect(breakBetween(before, after), before).toBe(true);
+  });
+
+  it("…but never a preposition left before a verb, a count inside its name, 'of', or an object pronoun", () => {
+    const notBreaks: [string, string][] = [
+      ["For as long as anyone can remember, the sacks that flour and feed came", "in were printed with little flowers and checks,"], // job 163
+      ["The homemade quilt folks paid me best for", "wasn't the precision piecing."], // jobs 159 and 166
+      ["But the jump from number two to number", "one is the biggest jump on this whole list."], // jobs 153-178
+      ["A nine-patch is nine little squares", "of cloth sewn into a block,"], // job 163
+      ["My neighbor across the fence saw the first one and bought", "it off me before I'd even woven in the ends."], // job 173
+      ["Then I'll show you how", "the joint locks without a single nail."], // a clause word waits for its clause
+      ["We set up at the stall where", "the buyers stop first."],
+    ];
+    for (const [before, after] of notBreaks) expect(breakBetween(before, after), before).toBe(false);
+  });
+
+  // Jobs 153-178: "But the jump from number two to number one | is the biggest jump on this whole
+  // list." — the host take stopped between subject and verb.
+  const numberOne = () => {
+    const scenes = film([
+      ["H", 5, sentence(1)],
+      ["P", 6, sentence(2)],
+      ["H", 2.6, "But the jump from number two to number one"],
+      ["P", 6, "is the biggest jump on this whole list. Number one is the holder made from scraps."],
+      ["H", 5, sentence(3)],
+    ]);
+    scenes[2].wordCut = true;
+    scenes[3].wordCut = true;
+    return scenes;
+  };
+
+  it("with room the host finishes the sentence", () => {
+    const r = enforcePlanRules(numberOne(), params);
+    const host = r.scenes.find(s => /^But the jump/.test(s.scriptText ?? ""))!;
+    expect(host.hostPresent).toBe(true);
+    expect(host.scriptText).toBe("But the jump from number two to number one is the biggest jump on this whole list.");
+    expect(r.unresolved.filter(f => f.rule === 7)).toEqual([]);
+  });
+
+  it("with no room it is never cut inside 'number one': the take goes to a picture instead", () => {
+    // 12.6 s of host against a 12.1 s budget: no room to say even "is".
+    const r = enforcePlanRules(numberOne(), params, { budgetSec: 12.1 });
+    const takes = r.scenes.filter(s => s.hostPresent).map(s => s.scriptText ?? "");
+    expect(takes.some(t => /to number$/.test(t))).toBe(false);
+    expect(takes.some(t => /^But the jump/.test(t))).toBe(false);
+    expect(r.scenes.map(s => s.scriptText).join(" ")).toContain(
+      "But the jump from number two to number one is the biggest jump on this whole list."
+    );
   });
 });

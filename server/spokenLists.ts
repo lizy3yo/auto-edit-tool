@@ -11,7 +11,11 @@
  *  1. `findSpokenLists` — one call reads the numbered sentences and writes every list's items word
  *     for word; `validateSpokenList` keeps only items that are really there, in order, joined the
  *     way list items are (commas, "and"/"or"), and `itemsAreThings` keeps a list of things only
- *     when every item names one (never "six,", "round ten," or "as rest,"). When the call fails,
+ *     when every item names one (never "six,", "round ten," or "as rest,"). A general head in front
+ *     of examples ("some ordinary place, a waiting room, a church pew") is never an item
+ *     (`withoutGeneralHead`), and a parallel series keeps its last member when it is said differently
+ *     ("the farmer complains, the senator complains, and the young are already rehearsing the
+ *     complaint", `withLastSeriesMember`). When the call fails,
  *     `listsByShape` finds them by sentence shape alone ("X, Y, and Z") — the same rules, so a
  *     film is never worse off.
  *  2. `applySpokenLists` — re-cuts the film so every item is exactly one picture, wherever the
@@ -32,8 +36,14 @@ import {
   LIST_ITEM_CLAUSE,
   NOT_A_LIST_ITEM,
   firstWords,
+  generalHead,
+  ledByGeneralHead,
+  maskSeriesCommas,
   notAThing,
+  seriesCommas,
   tokenSpans,
+  unmaskSeriesCommas,
+  withoutGeneralHead,
 } from "./shotList";
 
 export interface SpokenList {
@@ -92,7 +102,8 @@ export function namesAThing(piece: string, maxWords = SHAPE_ITEM_MAX_WORDS): boo
   if (/ly$/.test(first)) return false;
   // A number, a length of time, a set phrase or a clause names nothing, even when it opens on a
   // number word like a counted thing does ("six and a half", "give or take", "round ten"), so a
-  // run of them never becomes a list (`notAThing`).
+  // run of them never becomes a list (`notAThing`) — nor does a time a sentence opens on ("Two
+  // thousand years ago,", "Years ago,") or one describing word on its own ("furious,", job 400).
   if (notAThing(core)) return false;
   if (DETERMINER.test(core)) return true;
   // With no "a/the/some/two…" in front, only a bare name of a few words is a thing ("flour",
@@ -107,8 +118,33 @@ const DETERMINER =
 /** Words that make a bare phrase say where, not name a thing. */
 const PLACE_WORD = new Set(["in", "on", "at", "with", "for", "from", "to", "into", "onto", "by", "near"]);
 
-/** The trailing "a/the/some … thing" of a clause, when it is short enough to be a list's first item. */
+/**
+ * Whether a clause ENDS on a general head (`generalHead`): "…usually in some ordinary place",
+ * "…I looked everywhere", "…you want a certain kind of wood". A list after such a clause is examples
+ * of the head, and the head is what the list hangs off, never its first item (job 400). Pure.
+ */
+function endsOnGeneralHead(clause: string): boolean {
+  const words = clause.trim().split(/\s+/).filter(Boolean);
+  for (let k = 1; k <= Math.min(6, words.length); k++) if (generalHead(words.slice(-k).join(" "))) return true;
+  return false;
+}
+
+/**
+ * Whether a piece's words are a general head and nothing else ("some ordinary place,", job 400), in
+ * the middle of its sentence — the words that lead a list's first example. Pure.
+ */
+function onlyAGeneralHead(text: string | undefined): boolean {
+  const t = (text ?? "").trim();
+  return !!t && !/[.!?]["')\]]?$/.test(t) && generalHead(t);
+}
+
+/**
+ * The trailing "a/the/some … thing" of a clause, when it is short enough to be a list's first item —
+ * never a general head ("…usually in some ordinary place," before "a waiting room, a church pew",
+ * job 400: the place was item 1 and got a picture of its own).
+ */
 function trailingThing(clause: string): string | null {
+  if (endsOnGeneralHead(clause)) return null;
   const m =
     /(?:^|\s)((?:a|an|the|some|my|your|our|his|her|their|one|two|three|four|five)\s+[^,;]+)$/i.exec(
       clause.trim()
@@ -140,8 +176,12 @@ function lastItemBeforeClause(piece: string): string | null {
   return namesAThing(item) ? item : null;
 }
 
-/** A clause's last word, when a list of bare names follows it ("You need flour, | sugar, and butter"). */
+/**
+ * A clause's last word, when a list of bare names follows it ("You need flour, | sugar, and butter")
+ * — never the last word of a general head ("you want a certain kind of WOOD, | oak, walnut…").
+ */
 function trailingBareThing(clause: string): string | null {
+  if (endsOnGeneralHead(clause)) return null;
   const w = /(?:^|\s)([A-Za-z][A-Za-z'-]*)$/.exec(clause.trim())?.[1];
   return w && namesAThing(w) && !DETERMINER.test(w) ? w : null;
 }
@@ -149,13 +189,16 @@ function trailingBareThing(clause: string): string | null {
 /**
  * The lists in one sentence, by shape alone: three or more comma-separated pieces that each name a
  * thing ("a churn dash here, a bear paw there, a flying geese row"), or two when the second is
- * joined by a comma AND "and"/"or" ("a saw, and a drill"). A list's first item may end the clause
- * before it ("…sitting at a kitchen table with a straight-stitch machine,"). Two things joined by a
- * bare "and" are not a list ("the potholders and the coasters were done"), nor is "the one that…".
- * Returns each list's items without their joiners. Pure.
+ * joined by a comma AND "and"/"or" ("a saw, and a drill"), or after a general head ("some quiet
+ * spot, a porch swing, a park bench" — the head is never an item). A list's first item may end the
+ * clause before it ("…sitting at a kitchen table with a straight-stitch machine,"). Two things joined
+ * by a bare "and" are not a list ("the potholders and the coasters were done"), nor is "the one
+ * that…", nor the describing words in front of ONE thing ("…wrote a short, furious, loving essay",
+ * job 400 — never cut at those commas, `seriesCommas`). Returns each list's items without their
+ * joiners. Pure.
  */
 export function listsByShape(sentence: string): string[][] {
-  const pieces = sentence
+  const pieces = maskSeriesCommas(sentence)
     .split(/[,;]/)
     .map(p => p.trim())
     .filter(Boolean);
@@ -168,8 +211,9 @@ export function listsByShape(sentence: string): string[][] {
     let j = i;
     let run: string[] = [];
     while (j < pieces.length && namesAThing(pieces[j])) {
-      // "a drill and a plane" inside a run is two items.
-      const both = /^(.*\S)\s+(?:and|or)\s+(\S.*)$/i.exec(stripJoiners(pieces[j]));
+      // "a drill and a plane" inside a run is two items — never the "and" between describing words
+      // ("a big, heavy, and sturdy table" is one table).
+      const both = inSeries(pieces[j]) ? null : /^(.*\S)\s+(?:and|or)\s+(\S.*)$/i.exec(stripJoiners(pieces[j]));
       if (run.length && both && namesAThing(both[1]) && namesAThing(both[2])) run.push(pieces[j].replace(/\s+(?:and|or)\s+\S.*$/i, ""), `and ${both[2]}`);
       else run.push(pieces[j]);
       j++;
@@ -191,15 +235,29 @@ export function listsByShape(sentence: string): string[][] {
       source && run.length >= 2
         ? (bare ? trailingBareThing(source) : trailingThing(source))
         : null;
-    const items = [...(lead ? [lead] : []), ...run];
-    const joinedByAnd = /^(?:and|or)\s/i.test(items[items.length - 1] ?? "");
-    if (items.length >= 3 || (items.length === 2 && joinedByAnd)) {
-      out.push(items.map(t => stripJoiners(t).replace(/[.!?;:,]+$/, "").trim()));
+    let items = [...(lead ? [lead] : []), ...run];
+    // A GENERAL HEAD, then examples of it (job 400: "…usually in some ordinary place, a waiting room,
+    // a church pew,"): the head is what the list hangs off, never its first item — whether it ends the
+    // clause before the list (`trailingThing` refuses it) or opens the run itself ("Some quiet spot, a
+    // porch swing, a park bench"). Two examples after a head are a list: the head says examples follow.
+    let headed = !lead && run.length >= 2 && !!source && endsOnGeneralHead(source);
+    if (items.length >= 3 && ledByGeneralHead(items)) {
+      items = items.slice(1);
+      headed = true;
     }
+    const clean = items.map(t => unmaskSeriesCommas(stripJoiners(t).replace(/[.!?;:,]+$/, "").trim()));
+    // The run stops at a parallel series' last member when it is said differently ("…, the old
+    // complain, and the young are already rehearsing the complaint", job 400) — it is still an item.
+    const full = withLastSeriesMember(sentence, clean);
+    const joinedByAnd = full !== clean || /^(?:and|or)\s/i.test(items[items.length - 1] ?? "");
+    if (full.length >= 3 || (full.length === 2 && (joinedByAnd || headed))) out.push(full);
     i = j;
   }
   return out;
 }
+
+/** Whether a piece holds a run of describing words whose commas `maskSeriesCommas` hid. */
+const inSeries = (t: string) => unmaskSeriesCommas(t) !== t;
 
 // ─── The double-check every list passes ─────────────────────────────────────────────────────────
 
@@ -221,15 +279,26 @@ const waysOf = (step: string) => step.split(/\s*[,;]\s*(?=(?:or|alternatively)\b
  * Whether `items` really are a spoken list in `sentence`: every item is there, in order, at most
  * `LIST_ITEM_MAX_WORDS` words, with at most `GAP_MAX_WORDS` words between two items, and joined the
  * way list items are — two items need a comma between them, three or more at least one. A pair
- * joined only by "and" ("the potholders and the coasters") fails. For a list of `steps` the word
- * limit holds for each WAY of a step (`waysOf`): job 399's "catch a flight attendant as they pass, or
- * step back to the galley" is one step of 13 words, two ways of 7 and 6. `maxWords` is that limit:
+ * joined only by "and" ("the potholders and the coasters") fails, and so does a list led by a general
+ * head (`ledByGeneralHead`: "some ordinary place, a waiting room, a church pew", job 400) — the head
+ * is dropped first (`withoutGeneralHead`), and a head with one example is no list at all. No item
+ * may begin or end at a comma between the describing words of ONE thing (`seriesCommas`): job 400's
+ * "…wrote a short, | furious, | loving essay" passed every other test, whether the model or the
+ * sentence shape proposed it, and became three pictures and a list graphic. For a list of `steps` the
+ * word limit holds for each WAY of a step (`waysOf`): job 399's "catch a flight attendant as they pass,
+ * or step back to the galley" is one step of 13 words, two ways of 7 and 6. `maxWords` is that limit:
  * a list graphic's rows are held to everything else but not to it (`notAListAsSaid`). Pure.
  */
 export function validateSpokenList(sentence: string, items: string[], steps = false, maxWords = LIST_ITEM_MAX_WORDS): boolean {
   if (!Array.isArray(items) || items.length < 2) return false;
+  if (ledByGeneralHead(items)) return false;
   const spans = tokenSpans(sentence);
   const toks = spans.map(t => t.tok);
+  const inner = seriesCommas(sentence);
+  const holdsInner = (from: number, to: number) => {
+    for (const c of Array.from(inner)) if (c >= from && c < to) return true;
+    return false;
+  };
   let cursor = 0;
   let prevEnd = -1;
   let commas = 0;
@@ -239,6 +308,13 @@ export function validateSpokenList(sentence: string, items: string[], steps = fa
     if (!want.length || ways.some(w => tokenSpans(w).length > maxWords)) return false;
     const at = findTokens(toks, want, cursor);
     if (at < 0) return false;
+    if (inner.size) {
+      // Before the item (past its joiner: ", and loving essay") and after it, up to the next word.
+      const b = at > 0 && JOINERS.has(toks[at - 1]) ? at - 1 : at;
+      const last = at + want.length - 1;
+      if (holdsInner(b > 0 ? spans[b - 1].end : 0, spans[b].start)) return false;
+      if (holdsInner(spans[last].end, last + 1 < spans.length ? spans[last + 1].start : sentence.length)) return false;
+    }
     if (prevEnd >= 0) {
       if (at - prevEnd > GAP_MAX_WORDS) return false;
       const between = sentence.slice(spans[prevEnd - 1].end, spans[at].start);
@@ -271,8 +347,9 @@ function describingWords(sentence: string, items: string[]): boolean {
 }
 
 /**
- * Whether every item of a list of things names a thing (`notAThing`), and the items are not
- * describing words after a linking verb (`describingWords`). One item that is not a thing means the
+ * Whether every item of a list of things names a thing (`notAThing`: never a time like "years ago",
+ * never one describing word like "busy,"), and the items are not describing words after a linking
+ * verb (`describingWords`). One item that is not a thing means the
  * sentence is not a list of things, so the WHOLE list goes — never trimmed to the items that pass:
  * trimmed, "the fence for thrifty, old-fashioned chicken keeping, tell me" (job 355) and "Two
  * thousand years ago, a man named … wrote a short, furious" (job 400) each still left two false
@@ -354,6 +431,76 @@ export function notAListAsSaid(script: string, rows: string[], opts: { points?: 
   return undefined;
 }
 
+/** What opens each clause of a parallel series ("THE farmer complains, THE senator complains"). */
+const SERIES_OPENER = new Set(["a", "an", "the", "my", "your", "our", "his", "her", "their", "every", "each"]);
+/** The most words one clause of such a series may have: an opener, who or what, and the shared word. */
+const SERIES_CLAUSE_MAX_WORDS = 6;
+/** Where the series' last member stops: the next comma, semicolon, colon or dash, or the sentence's end. */
+const MEMBER_END = /[,;:—–]|\s-\s|[.!?](?=["')\]]?(?:\s|$))/;
+/** Words that open a clause of its own right after "the truth is" / "the point was" ("…is EVERYONE complains"). */
+const OWN_CLAUSE_OPENER = new Set([
+  "that", "everyone", "everybody", "nobody", "no", "none", "someone", "somebody", "people", "there",
+  "i", "we", "you", "they", "he", "she", "it",
+]);
+
+/**
+ * A PARALLEL SERIES KEEPS ITS LAST MEMBER (2026-10-18, job 400 at 2:36): "The farmer complains, the
+ * senator complains, the old complain, and the young are already rehearsing the complaint." was cut
+ * after "the old" — the last member of a series is where a speaker says it differently, and the shape
+ * rules stop at the first piece that does not name a thing — so "the young", the point of the line,
+ * played after the list graphic had closed, on a picture outside the list. When every item is a short
+ * clause ENDING ON THE SAME WORD ("… complains", "… complain"), and right after the last one comes
+ * "and" (a comma before it or not) with a clause that opens like them ("the …") and says that word
+ * again in any form ("… rehearsing the complaint"), that clause is the series' last item, whole, up
+ * to the next comma or the sentence's end — so its picture is the whole clause, like the items before
+ * it. Nothing is added without that echo: "the farmer complains, the senator complains, and the truth
+ * is nobody listens" ends on a clause about something else (so does "…, and the truth is everyone
+ * complains", which says the word again only inside a clause of its own), and a list of things that do
+ * not end on one word ("a saw, a drill, and the whole thing cost me forty dollars") is never touched. The longer
+ * list is kept only when it still passes `validateSpokenList` and `itemsAreThings`, so a member that
+ * fails them never costs the list the items it had. Returns the same array when nothing is added. Pure.
+ */
+export function withLastSeriesMember(sentence: string, items: string[]): string[] {
+  if (!Array.isArray(items) || items.length < 2) return items;
+  const spans = tokenSpans(sentence);
+  const toks = spans.map(t => t.tok);
+  const openers = new Set<string>();
+  let shared: string | null = null;
+  let cursor = 0;
+  for (const item of items) {
+    const want = tokenSpans(String(item ?? "")).map(t => t.tok);
+    // An opener, at least one word for who or what, then the word every clause ends on.
+    if (want.length < 3 || want.length > SERIES_CLAUSE_MAX_WORDS || !SERIES_OPENER.has(want[0])) return items;
+    const end = stem(want[want.length - 1]);
+    if (shared === null) shared = end;
+    else if (end !== shared) return items;
+    const at = findTokens(toks, want, cursor);
+    if (at < 0) return items;
+    openers.add(want[0]);
+    cursor = at + want.length;
+  }
+  if (!shared || shared.length < 3 || cursor >= toks.length || toks[cursor] !== "and") return items;
+  if (!/^\s*,?\s*$/.test(sentence.slice(spans[cursor - 1].end, spans[cursor].start))) return items;
+  const open = cursor + 1;
+  if (open >= toks.length || !openers.has(toks[open])) return items;
+  const rest = sentence.slice(spans[open].start);
+  const stop = rest.search(MEMBER_END);
+  const member = (stop < 0 ? rest : rest.slice(0, stop)).trim();
+  const words = tokenSpans(member).map(t => t.tok);
+  if (words.length < 2 || words.length > LIST_ITEM_MAX_WORDS) return items;
+  const said = shared;
+  const echoes = (w: string) => stem(w) === said || (said.length >= 5 && w.startsWith(said));
+  // Said again AFTER its own who or what, like the clauses before it: "and the complaints never end"
+  // only sums the series up — its subject is the shared word itself, not one more member.
+  if (!words.slice(2).some(echoes)) return items;
+  // "and the truth is everyone complains" says the word again inside a clause of its own — a summing-up
+  // ("the truth is …", "the point was that …"), not one more member; "and the child is already learning
+  // to complain" is still one.
+  if ((words[2] === "is" || words[2] === "was") && OWN_CLAUSE_OPENER.has(words[3] ?? "")) return items;
+  const longer = [...items, member];
+  return validateSpokenList(sentence, longer) && itemsAreThings(sentence, longer) ? longer : items;
+}
+
 // ─── Finding them ───────────────────────────────────────────────────────────────────────────────
 
 export const LISTS_SYSTEM = `You read a video's spoken script, one numbered sentence per line, and
@@ -366,14 +513,19 @@ For each list give its items EXACTLY as spoken, word for word — each item with
 words up to the next comma ("a flying geese row across the middle"), without the "and"/"or" that
 joins it. A list's first item may sit at the end of a longer clause ("…sitting at a kitchen table
 with a straight-stitch machine, a rotary cutter, and a pile of scraps": the machine is the first
-item). In a sequence of steps, a CHOICE of another way to do a step ("call the office, or send an
-email") is part of that step, never the next step: give both ways as ONE item.
+item). A GENERAL word the items are examples of is never an item: in "…waits in some quiet spot, a
+porch swing, a park bench, the front seat of a parked car" the items are the porch swing, the park
+bench and the front seat — "some quiet spot" only says what kind of things they are. In a sequence of
+steps, a CHOICE of another way to do a step ("call the office, or send an email") is part of that
+step, never the next step: give both ways as ONE item.
 
 NOT a list:
 - one thing being talked about ("the one that paid me best came out of a coffee can")
 - two things together as the subject or object of a verb, joined only by "and" ("by the time the
   potholders and the coasters were done")
 - reasons, places, times, numbers, prices or describing words one after another
+- the describing words in front of ONE thing ("she wrote a long, slow, careful letter" is one letter),
+  and the time a sentence opens on ("years ago, …")
 - a story of what happened ("I went home, made dinner, and slept") — steps are things to DO
 
 Answer with JSON only: {"lists":[{"sentence":<number>,"kind":"things"|"steps","items":["…","…"]}]} —
@@ -381,7 +533,7 @@ Answer with JSON only: {"lists":[{"sentence":<number>,"kind":"things"|"steps","i
 
 /**
  * Read the model's answer: lists that pass `validateSpokenList` against their own sentence and, for
- * a list of things, `itemsAreThings`. Pure.
+ * a list of things, `itemsAreThings` — each without a general head in front of its examples. Pure.
  */
 export function parseSpokenLists(text: string, sentences: string[]): SpokenList[] | null {
   const r = safeParseJSON<{ lists?: unknown }>(text);
@@ -390,7 +542,10 @@ export function parseSpokenLists(text: string, sentences: string[]): SpokenList[
   const out: SpokenList[] = [];
   for (const raw of parsed.lists as { sentence?: unknown; items?: unknown; kind?: unknown }[]) {
     const n = Number(String(raw?.sentence ?? "").replace(/^#/, ""));
-    const items = Array.isArray(raw?.items) ? raw.items.map(i => String(i ?? "").trim()) : [];
+    // A general head the model counted as item 1 ("some ordinary place", job 400) is dropped, not
+    // the whole list: the examples after it ARE the list. Dropped before the thing check, so a head
+    // that names nothing ("anything, a mouse, a snake, a raccoon") no longer costs the list.
+    const items = withoutGeneralHead(Array.isArray(raw?.items) ? raw.items.map(i => String(i ?? "").trim()) : []);
     if (!Number.isInteger(n) || !sentences[n]) continue;
     const steps = raw?.kind === "steps";
     // The model is told numbers and describing words are not lists, and still answered "as health,
@@ -401,8 +556,11 @@ export function parseSpokenLists(text: string, sentences: string[]): SpokenList[
     // before it, never the next one (`joinChoiceSteps`). A list of things keeps its "or": "a saw,
     // a drill, or a plane" is three things to show.
     const kept = steps ? joinChoiceSteps(sentences[n], items) : items;
-    if (validateSpokenList(sentences[n], kept, steps))
-      out.push({ sentence: n, items: kept, ...(steps ? { kind: "steps" as const } : {}) });
+    if (!validateSpokenList(sentences[n], kept, steps)) continue;
+    // A parallel series the model ended one member early, at the member said differently ("…, the old
+    // complain, and the young are already rehearsing the complaint", job 400), gets it back.
+    if (steps) out.push({ sentence: n, items: kept, kind: "steps" });
+    else out.push({ sentence: n, items: withLastSeriesMember(sentences[n], kept) });
   }
   return out.sort((a, b) => a.sentence - b.sentence);
 }
@@ -472,30 +630,33 @@ export function joinChoiceSteps(sentence: string, items: string[]): string[] {
 /**
  * The steps in one sentence, by shape: three or more comma pieces, the last joined by "and"/"then",
  * each a short instruction that starts on its own verb-like word — no subject ("I went…"), no
- * determiner ("a saw" is a thing), no aside ("Honestly"), at most `STEP_MAX_WORDS`. A piece that
- * offers a choice (`OFFERS_A_CHOICE`: "…, or soak it") is part of the step before it, never a step of
- * its own — it used to sink the whole sentence instead. Pure.
+ * determiner ("a saw" is a thing), no aside ("Honestly"), at most `STEP_MAX_WORDS`. Never cut at a
+ * comma between describing words: "Cut a long, thin strip, glue it down, and clamp it" is three
+ * steps, the first with its strip whole (`maskSeriesCommas`). A piece that offers a choice
+ * (`OFFERS_A_CHOICE`: "…, or soak it") is part of the step before it, never a step of its own — it
+ * used to sink the whole sentence instead. Pure.
  */
 export function stepsByShape(sentence: string): string[] | null {
+  const masked = maskSeriesCommas(sentence);
   // Each comma piece where it sits, so a choice joined to its step keeps the sentence's own words.
   const pieces: string[] = [];
   let from = -1;
   let to = -1;
-  for (const m of Array.from(sentence.matchAll(/[^,;]+/g))) {
+  for (const m of Array.from(masked.matchAll(/[^,;]+/g))) {
     const text = m[0].trim();
     if (!text) continue;
     const [a, b] = [m.index!, m.index! + m[0].length];
     if (from >= 0 && OFFERS_A_CHOICE.test(text)) to = b;
     else {
-      if (from >= 0) pieces.push(sentence.slice(from, to).trim());
+      if (from >= 0) pieces.push(masked.slice(from, to).trim());
       [from, to] = [a, b];
     }
   }
-  if (from >= 0) pieces.push(sentence.slice(from, to).trim());
+  if (from >= 0) pieces.push(masked.slice(from, to).trim());
   if (pieces.length < 3) return null;
   const last = pieces[pieces.length - 1];
   if (!/^(?:and|then|and then)\s/i.test(last)) return null;
-  const items = pieces.map(p => p.replace(/^(?:and then|and|then)\s+/i, "").replace(/[.!?]+$/, "").trim());
+  const items = pieces.map(p => unmaskSeriesCommas(p.replace(/^(?:and then|and|then)\s+/i, "").replace(/[.!?]+$/, "").trim()));
   const isStep = (t: string) => {
     // The step itself is its first way; a choice joined to it is held only to the length limit.
     const ways = waysOf(t);
@@ -762,7 +923,10 @@ export function applySpokenLists(
   for (const list of lists) {
     const ranges: [number, number][] = [];
     let from = cursor;
-    for (const item of list.items) {
+    // A list saved before the general-head rule (job 400's "some ordinary place, a waiting room, a
+    // church pew") is cut without its head on a resume too, the same as a list found today.
+    const listItems = withoutGeneralHead(list.items);
+    for (const item of listItems) {
       const want = tokenSpans(item).map(t => t.tok);
       const at = findTokens(toks, want, from);
       if (at < 0 || (ranges.length && at - ranges[ranges.length - 1][1] > GAP_MAX_WORDS)) {
@@ -773,7 +937,7 @@ export function applySpokenLists(
       from = at + want.length;
     }
     if (ranges.length < 2) {
-      skipped.push(`"${list.items[0]}…": its words were not found in order in the film's text`);
+      skipped.push(`"${listItems[0]}…": its words were not found in order in the film's text`);
       continue;
     }
     cursor = ranges[ranges.length - 1][1];
@@ -887,6 +1051,29 @@ export function applySpokenLists(
     let leadIn: string | null = null;
     const bounds = [...r.starts, r.end];
     const names = bounds.slice(0, -1).map((a, k) => bareItem(textOf(a, bounds[k + 1])));
+    // A GENERAL HEAD right before the first item ("some ordinary place," before "a waiting room,",
+    // job 400 scene 8) gets no picture of its own: its words lead the first example's picture, as in
+    // `splitListPieces` — whether the planner cut it as a beat of its own or it opens this beat. It is
+    // never the bridge's set picture below either: right after the host it read as a bridge, and job
+    // 400's head became "a waiting room and a church pew together, laid out side by side". The
+    // examples of a head are instances of it, not things that sit together in one place.
+    const before = out[out.length - 1];
+    // Never when the first item is a head too ("something sweet, | something salty, …" is the list).
+    const headLeads = (t: string | undefined) => onlyAGeneralHead(t) && !generalHead(names[0] ?? "");
+    if (
+      !prefix &&
+      before &&
+      !before.hostPresent &&
+      !before.listCut &&
+      !before.listSet &&
+      !fixedBeat(before) &&
+      headLeads(before.scriptText)
+    ) {
+      out.pop();
+      leadIn = (before.scriptText ?? "").trim();
+    } else if (prefix && !head.hostPresent && headLeads(prefix)) {
+      leadIn = prefix;
+    }
     // THE BRIDGE (Granny Ruth's job 302): the words leading from a host take into the list ("…I'm
     // Granny Ruth, | and this one's for anybody sitting at a kitchen table with | a straight-stitch
     // machine,"). Either a short picture of their own right after the host, the head's own words
@@ -900,7 +1087,16 @@ export function applySpokenLists(
         ? last
         : null;
     const bridgeText = `${bridgePiece?.scriptText ?? ""} ${head.hostPresent ? "" : prefix}`.trim();
-    if (hostBefore && bridgeText && tokenSpans(bridgeText).length >= BRIDGE_MIN_WORDS) {
+    if (leadIn) {
+      // A general head: its words lead the first item (above).
+    } else if (
+      hostBefore &&
+      bridgeText &&
+      tokenSpans(bridgeText).length >= BRIDGE_MIN_WORDS &&
+      // A longer lead-in that ends on a general head ("usually in some ordinary place,") is no set
+      // picture either: it keeps a picture of its own, as any lead-in too long to lead an item does.
+      !endsOnGeneralHead(bridgeText)
+    ) {
       // The bridge is ONE picture of the place the line names with the whole list in it — never the
       // empty place. Always a picture, never the host: the host's minutes are planned later, and a
       // bridge the host said took a check-in's time away (Ruth's job 304 went 48 s without her).

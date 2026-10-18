@@ -7333,13 +7333,79 @@ export function talkingHeadVisualPrompt(
  *  pitch contiguous without merging two separate CTA blocks that sit far apart. */
 const CTA_MAX_BRIDGE_GAP = 2;
 
+// The scan line is worded afresh in every script, and a fixed phrase list kept missing it: job 399
+// said "Hold your phone up to the screen with its camera on, and aim it at the little black and
+// white code", job 400 "lift your phone toward the pattern in the corner of the screen and tap what
+// rises" — neither matched, so the card started on a later "tap the link" sentence (399) or fell
+// back to the block's last words (400), 7-8 s late, the scan instruction spoken over the host with
+// only the small corner code. So the parts below say what a scan line DOES: a phone or camera held,
+// lifted or aimed AT the screen or the code, a code shown ON the screen, a link that appears to be
+// tapped, the description opened. Those parts need their target in the same sentence, so a line
+// that only mentions a phone ("keep your phone by the bed", "it lands on your phone or your
+// tablet", "hold your phone up to your ear") is not one.
+/** One word between the parts of a scan phrase. Never a joining word, so the target is in the same
+ *  phrase as the phone ("hold your phone up to the window and you'll see the screen go dark" is
+ *  not a scan line); "black and white" is one word here. */
+const SCAN_WORD = String.raw`(?:black[- ]and[- ]white|(?!(?:and|or|but|so|then|while|when|if|because|until)\b)[\w'’-]+)`;
+/** "your phone", "the camera", "its camera", "your phone's camera", "your phone camera". */
+const SCAN_DEVICE = String.raw`(?:(?:your|the|a|its|that) )?(?:(?:cell ?)?phone['’]?s? )?(?:phone|camera|cell ?phone|smartphone)`;
+/** What it is aimed at. A bare "square" or "pattern" is a woodworker's tool or a knitting chart,
+ *  so those count only when they are said to be the scannable one. */
+const SCAN_TARGET = String.raw`(?:screen|code|qr|(?:patterned|black[- ]and[- ]white|scannable) (?:square|box|pattern))`;
+/** What a phone or camera NAMED in the phrase is aimed at: the targets above, or a square or
+ *  pattern pointed out as the small one on screen ("point the camera at that square" — the job 391
+ *  scan line; "toward the pattern in the corner"). Still never "the square" alone ("aim the camera
+ *  at the square so buyers can see it's true" is the woodworker's tool), and never after "it"
+ *  (any tool). */
+const SCAN_AIM_TARGET = String.raw`(?:${SCAN_TARGET}|(?:that|this|little|small|tiny) (?:square|pattern|box)|(?:square|pattern|box) in the (?:[\w-]+ ){0,2}corner)`;
+const SCAN_PREP = String.raw`(?:at|toward|towards|to|over|on|upon)`;
+/** Words that only say where the code sits: "the code is right there on your screen". Any word
+ *  there read a pitch as a scan line ("the code book opens right on your screen"). */
+const SCAN_LINKING = String.raw`(?:is|are|sits|sitting|showing|shown|up|down|right|there|here|now|just|still|already)`;
+const SCAN_INTENT_PARTS = [
+  String.raw`\bscan\b`,
+  String.raw`\bgrab (?:your|a) phone\b`,
+  String.raw`\bpoint (?:your (?:phone|camera)|it) at\b`,
+  String.raw`\bpoint your (?:phone|camera)\b`,
+  String.raw`\bphone['’]?s camera\b`,
+  String.raw`\byour camera\b`,
+  String.raw`\bqr\b`,
+  // A phone or camera held, lifted or aimed at the screen or the code, a few words apart at most:
+  // "hold your phone up to the screen", "lift your phone toward the pattern in the corner of the
+  // screen", "point its camera at the code".
+  String.raw`\b(?:hold|lift|raise|point|aim|turn|tilt|bring|move|hover)(?: up)? ${SCAN_DEVICE}\b(?:[\s,]+${SCAN_WORD}){0,4}?\s+${SCAN_PREP}\b(?:\s+${SCAN_WORD}){0,7}?\s+${SCAN_AIM_TARGET}\b`,
+  // ...or "it" once the phone is named: "and aim it at the little black and white code".
+  String.raw`\b(?:point|aim)(?: up)? (?:it|that|this)(?: up)? ${SCAN_PREP}\b(?:\s+${SCAN_WORD}){0,7}?\s+${SCAN_TARGET}\b`,
+  // Held or turned, "it" goes UP TO, toward or at the code: "hold it up to the screen". A bare
+  // "to" is a standard there ("hold it to the same code" is a building code, not the QR).
+  String.raw`\b(?:hold|turn|tilt|lift|raise|bring) (?:it|that|this)(?: up)? (?:toward|towards|at|over|up to)\b(?:\s+${SCAN_WORD}){0,7}?\s+${SCAN_TARGET}\b`,
+  // A code shown on the screen: "the code is on the screen", "that code is right there on your
+  // screen", "a small patterned square on your screen", "the code in the corner of your screen".
+  String.raw`\b(?:code(?:['’]s)?|(?:patterned|black[- ]and[- ]white|scannable) (?:square|box|pattern))(?:\s+${SCAN_LINKING}){0,3}\s+(?:on|in the (?:[\w-]+ ){0,2}corner of) (?:your|the|this) (?:tv |television )?screen\b`,
+  // The link the scan brings up: "a link appears, and you tap it", "when a little link pops up".
+  String.raw`\blink\b(?:\s+${SCAN_WORD}){0,3}?\s+(?:appears|pops up|shows up|comes up|shows on)\b`,
+  String.raw`\b(?:use|tap|click|hit|follow|touch|press) (?:on )?(?:the|that|my|this) (?:(?:little|small|first|top|blue) )?link\b`,
+  String.raw`\b(?:the |a )?link (?:is )?(?:in|below|under|down in) (?:the |this )?(?:description|video|comments?)\b`,
+  // The description as the other way in, with or without the word "link": "find the first line of
+  // the description below", "open the description below this video". THE description (or the
+  // video's), never "a description of": a pitch says "you'll find a full description of every
+  // lesson", and that is the book, not the way to it.
+  String.raw`\b(?:open|find|check|scroll(?: down)? to|look (?:at|in|under|below|underneath)|go to|head to)\b(?:\s+${SCAN_WORD}){0,5}?\s+(?:the|video['’]s) description\b(?!\s+of\s+(?!(?:this|the) video\b))`,
+  String.raw`\bpinned comment\b`,
+  // "To get it" is how to get the book — never "how to get it right the first time", a line of
+  // ordinary narration this used to catch.
+  String.raw`\bto get (?:it|a copy|your copy|the book)\b(?!\s+(?:right|wrong|done|back|working|fixed)\b)`,
+  // "To download it," opens the instruction; a pitch calls the book easy "to download it to any
+  // phone", which is the book, not the way to it.
+  String.raw`\bto download (?:it|a copy|your copy|the book),`,
+  String.raw`\b(?:grab|get|order|pick up) (?:your|a) copy\b`,
+];
 /**
  * A line telling the viewer to scan — where the big QR card takes over when a marked CTA block
  * does not carry the verbatim `CTA_QR_TRIGGER`. Matched per sentence, so the card starts on the
  * sentence that says it rather than on a scene that merely ends with it.
  */
-const SCAN_INTENT =
-  /\bscan\b|\bgrab (?:your|a) phone\b|\bpoint (?:your (?:phone|camera)|it) at\b|\bpoint your (?:phone|camera)\b|\bphone['’]?s camera\b|\byour camera\b|\bcode on (?:your|the) screen\b|\bqr\b|\b(?:the |a )?link (?:is )?(?:in|below|under|down in) (?:the |this )?(?:description|video|comments?)\b|\b(?:use|tap|click|hit|follow) (?:the|that|my) link\b|\bpinned comment\b|\bto get (?:it|a copy|your copy|the book)\b|\b(?:grab|get|order|pick up) (?:your|a) copy\b/i;
+export const SCAN_INTENT = new RegExp(SCAN_INTENT_PARTS.join("|"), "i");
 // "To get it, use the link in the description below this video." is the same instruction as
 // "scan the code" (Pearl's job 310 said only that, the window fell back to the block's last ~90
 // words, and the QR swallowed the book's title and the host's part: book → QR, no host between).
@@ -8145,9 +8211,9 @@ function tokenTest(token: string): (hay: string) => boolean {
  * config carries the subtitle too), paraphrases it ("Save Nine Thousand Dollars a Year" / "$9,000"),
  * or swaps/drops one word of it ("the Texas Barbecue Bible", "it's in the Whitetail Bible").
  * So a line matches when it contains all-but-one distinctive token of the main title (the part
- * before the first colon — 2+ must still land, else one common word would fire everywhere), OR a
- * majority of the full title's tokens (the `mentionsTitle` rule, over the same tolerant tests).
- * Strictly more permissive than `mentionsTitle` alone.
+ * before the first colon — 2+ must still land, else one common word would fire everywhere), OR
+ * half or more of the full title's tokens, over the same tolerant tests, and never fewer than two
+ * — so a two-word title needs both words, and only a one-word title is named by one word.
  * Returns a never-matching predicate without a title. Pure — unit-tested.
  */
 export function titleMatcher(
@@ -8162,13 +8228,24 @@ export function titleMatcher(
   const tests = full.map(t => ({ main: mainSet.has(t), fn: tokenTest(t) }));
   const main = tests.filter(t => t.main);
   return text => {
-    const hay = (text ?? "").toLowerCase();
+    // A curly apostrophe is the title's straight one. A two-word title needs both words now, so a
+    // possessive one ("Grandpa's Workshop") typed straight in the book row would never match a
+    // script typed with curly quotes — and scripts are: job 400's reached its scenes with curly
+    // apostrophes intact, and a CTA marker can say "Can't" while its own line says "Can’t".
+    const hay = (text ?? "").toLowerCase().replace(/[\u2018\u2019]/g, "'");
     const mainHits = main.filter(t => t.fn(hay)).length;
     if (main.length >= 2 && mainHits >= Math.max(2, main.length - 1)) {
       return true;
     }
+    // Never ONE word when the title has two or more. Half of a two-word title is one word: "The
+    // Stoic Way" is [stoic, way], and "the Stoics after him" (the clause before "a digital book
+    // called The Stoic Way") took the cover, so it was gone before the title was said (Gideon's
+    // 3-min test, job 400). A short title's distinctive word is usually the channel's own subject,
+    // said all through the pitch ("everyday locksmith work" for "The Locksmith Way"). Exactly half
+    // still counts from two words up: "my Lockdown Playbook" names "Lance Kavanaugh's Lockdown
+    // Playbook" — a host drops their own name from the title.
     const hits = tests.filter(t => t.fn(hay)).length;
-    return hits >= Math.max(1, Math.ceil(full.length / 2));
+    return hits >= Math.min(full.length, Math.max(2, Math.ceil(full.length / 2)));
   };
 }
 
