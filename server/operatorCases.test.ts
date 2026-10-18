@@ -6028,3 +6028,57 @@ describe("a list row and a step are the narrator's words, whole (round 13 verifi
     expect(placed.readSec).toBeGreaterThan(readingSec(labels.props));
   });
 });
+
+describe("a comparison's sub comes with its words, and a number leaves with its own (round 13 verification films, 2026-10-18)", () => {
+  // 408 (0:05-0:13): the Versus card showed "It is empty" 1.6 s before it was said and "A small bin, with
+  // a lid" 2.3 s early, under "In a German bathroom, usually," — the reveal given away — and its VS
+  // badge pointed at an empty half for 2.8 s. 408 (0:22-0:26): the "9 things" overlay stood 2.1 s over
+  // "…, and in plenty of American homes," — the contrast to its line — and QA said nothing. Plans and
+  // words as stored.
+  const words = (s: string) =>
+    s.split(" ").map(t => {
+      const [text, range] = t.split("@");
+      const [start, end] = range.split("-").map(Number);
+      return { text, start, end };
+    });
+  const said = words(
+    "In@5.832-5.912 most@5.972-6.172 American@6.232-6.632 bathrooms,@6.672-7.212 it@7.453-7.513 is@7.573-7.653 empty.@7.813-8.173 In@8.793-8.873 a@8.913-8.953 German@9.053-9.413 bathroom,@9.453-9.953 usually,@10.313-10.653 a@11.113-11.153 small@11.233-11.493 bin@11.573-11.833 stands@11.893-12.173 there,@12.233-12.454 with@12.714-12.834 a@12.894-12.934 lid.@12.974-13.234 It@13.894-13.954 " +
+      "can.@21.495-21.775 Nine@22.456-22.696 things@22.776-23.056 stay@23.116-23.356 out@23.456-23.576 of@23.616-23.656 the@23.696-23.776 toilet@23.836-24.216 there,@24.236-24.476 and@24.916-25.016 in@25.056-25.116 plenty@25.236-25.596 of@25.636-25.696 American@25.756-26.156 homes,@26.196-26.516 most@26.937-27.157 of@27.177-27.237"
+  );
+  const cuts = [2.12, 7.29, 13.75, 22.27, 30.03];
+  const versus = {
+    id: "american-vs-german-floor",
+    template: "Versus",
+    start: "In most American bathrooms, it",
+    startPad: -0.15,
+    end: "stands there, with a lid.",
+    endPad: 0.3,
+    props: {
+      kicker: "Beside the toilet",
+      winner: "none",
+      left: { at: "@In most American bathrooms", say: "In most American bathrooms, it is empty", sub: "It is empty", title: "American bathroom" },
+      right: { at: "@In a German bathroom", say: "a small bin stands there, with a lid", sub: "A small bin, with a lid", title: "German bathroom" },
+    },
+  };
+  const nine = { id: "nine-things-out", template: "BigNumberOverlay", start: "Nine things stay out of", startPad: -0.15, end: "the toilet there,", endPad: 0.3, props: { at: "@Nine", line: { text: "Nine things stay out of the toilet there", words: true }, unit: "things", value: 9, kicker: "Out of the toilet", countSec: 0.6 } };
+
+  it("408: each sub is timed to its own words, and QA reads it there", async () => {
+    const { resolveCues } = await import("../graphics/src/cueResolve");
+    const { resolveSets } = await import("../graphics/src/registry");
+    const [c] = resolveCues([versus], said, { cuts, fps: 30, ...resolveSets() });
+    const [left, right] = [c.props.left, c.props.right] as { at: number; subAt: number }[];
+    // "It is empty" on "it" (7.45), "A small bin, with a lid" on "a small bin" (11.11)
+    expect([c.start + left.subAt, c.start + right.subAt].map(t => Math.round(t * 1000) / 1000)).toEqual([7.453, 11.113]);
+    expect(right.subAt - right.at).toBeGreaterThan(2.2);
+    expect(c.sync.filter(s => s.prop).map(s => s.prop)).toEqual(["left.subAt", "right.subAt"]);
+  });
+
+  it("408: the '9 things' overlay leaves 0.6 s after 'there,', and as shipped QA reports it", async () => {
+    const { resolveCues, stillUpAfterWords } = await import("../graphics/src/cueResolve");
+    const { resolveSets } = await import("../graphics/src/registry");
+    const placed = resolveCues([versus, nine], said, { cuts, fps: 30, ...resolveSets() }).find(c => c.id === "nine-things-out")!;
+    expect([placed.start, placed.end, placed.spokenEnd]).toEqual([22.267, 25.1, 24.476]);
+    expect(stillUpAfterWords(placed, 30)).toBe(false);
+    expect(stillUpAfterWords({ ...placed, end: 26.6, endFrame: 798, leftInPause: true }, 30)).toBe(true);
+  });
+});

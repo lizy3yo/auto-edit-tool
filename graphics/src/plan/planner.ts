@@ -156,6 +156,7 @@ Full-screen cards — replace the picture, so ONLY inside a b-roll stretch, neve
 - Statement — sums up a point in one short line, or lands a punchline: {"kicker": "2-4 word label", "headline": ONE WHOLE SENTENCE as said (4-12 words), "emphasis"}
 - MythTruth — states what people believe, then corrects it: {"myth": ONE WHOLE SENTENCE (≤14 words), "truth": ONE WHOLE SENTENCE (≤14 words), "emphasis"}
 - Versus — compares two kinds or options: {"kicker", "left": {"icon" (optional),"title" (1-3 words),"sub" (≤6 words),"say","at"}, "right": {same}, "winner": "left"|"right"|"none"}
+  (a side's "say" is all its words as said, its sub's words among them: the title appears on "at", the sub as its own words are said)
 - BigNumber — says a number that matters (a time, an amount, a count): {"kicker", "prefix": "$" (a currency sign, if any), "value": number, "unit": "1-2 words", "at": "@the spoken number", "line": phrase, "countSec": 0.6 for small numbers}. Start it on the sentence that holds the number, not sentences before.
 - StepCards — gives 2-4 steps the viewer should do, when the steps have no pictures of their own (over STEP PICTURE scenes, StepLabels): {"kicker", "steps": [{"text" (≤${STEP_MAX_WORDS} words), "icon" (optional), "at": "@words"}]}
   (each step is the narrator's own words, shortened, keeping his "a", "the", "it" — "Leave it on the shelf", never
@@ -1146,15 +1147,21 @@ export function blinkProblem(template: string, c: ResolvedCue, blink: { side: "a
   if (blink.side === "before")
     return `${template} hides the picture, and it opens ${blink.sec.toFixed(2)} s after the shot changes at ${mmss(cut)}: a blink of the new picture before it, ${glitch}. Put it on words said as that shot begins — its first shown words within about a second of the change — or ${over}`;
   const from = c.contentEnd ?? c.end;
-  const { newLineAt } = ownSentenceEnd(words, from, cut);
+  const { newLineAt, newClauseAt } = ownSentenceEnd(words, from, cut);
   const hold = holdToCut(words, from, c.end, cut);
   // A new sentence said in the sliver is the reason to name. One that starts within NEW_LINE_GRACE_SEC
   // of the change does not stop a hold (`holdToCut`), so there the reason is how long after its own
-  // sentence the change comes — to two places, as "2.0 s … (at most 2 s)" names no reason at all.
-  const opener = newLineAt === undefined || newLineAt >= cut - NEW_LINE_GRACE_SEC ? [] : words.filter(w => w.start >= newLineAt - 1e-6 && w.start < cut).slice(0, 4);
-  const why = opener.length
-    ? `It may not stay to the change: "${opener.map(w => w.text.trim()).join(" ")}…" starts a new sentence first.`
-    : `It may not stay to the change: that comes ${(cut - hold.spoken).toFixed(2)} s after its own sentence ends (at most ${hold.max} s).`;
+  // sentence the change comes — to two places, as "2.0 s … (at most 2 s)" names no reason at all. That
+  // is measured from the end of its own CLAUSE when a new one follows ("…there, | and in plenty of…"),
+  // which is named, so the repair round sees why the rest of the sentence did not count.
+  const said = (t: number) => words.filter(w => w.start >= t - 1e-6 && w.start < cut).slice(0, 4).map(w => w.text.trim()).join(" ");
+  const opener = newLineAt === undefined || newLineAt >= cut - NEW_LINE_GRACE_SEC ? "" : said(newLineAt);
+  const clause = newClauseAt !== undefined && newClauseAt !== newLineAt ? said(newClauseAt) : "";
+  const why = opener
+    ? `It may not stay to the change: "${opener}…" starts a new sentence first.`
+    : clause
+      ? `It may not stay to the change: that comes ${(cut - hold.spoken).toFixed(2)} s after its own words end — "${clause}…" opens a new clause it does not show (at most ${hold.max} s).`
+      : `It may not stay to the change: that comes ${(cut - hold.spoken).toFixed(2)} s after its own sentence ends (at most ${hold.max} s).`;
   return (
     `${template} hides the picture, and it leaves ${blink.sec.toFixed(2)} s of the shot alone before the picture changes at ${mmss(cut)}: ` +
     `a blink of footage between it and the next shot, ${glitch}. ${why} Put it on a line whose shot it can fill to the picture ` +

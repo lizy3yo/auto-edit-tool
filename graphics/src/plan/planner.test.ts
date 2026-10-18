@@ -1686,3 +1686,23 @@ describe("an item may stop before 'whose' or 'whom', and never on one (round 13 
     expect(rows("A friend whose dog barks, the mail carrier.", ["A friend whose dog barks", "the mail carrier"])[0]).toBe("A friend whose dog barks");
   });
 });
+
+describe("a card sent back for a blink is told when a new clause, not its sentence, is what it may not stay over (job 408, round 13)", () => {
+  // "Nine things stay out of the toilet there, | and in plenty of American homes, most of them go down
+  // it…": the rest of the sentence is a contrast the card does not show, so the hold is measured from
+  // "there," (24.48) — and the repair round is told so, instead of "after its own sentence ends".
+  const toilet = "there,@24.236-24.476 and@24.916-25.016 in@25.056-25.116 plenty@25.236-25.596 of@25.636-25.696 American@25.756-26.156 homes,@26.196-26.516 most@26.937-27.157 of@27.177-27.237"
+    .split(" ")
+    .map(t => {
+      const [text, range] = t.split("@");
+      const [start, end] = range.split("-").map(Number);
+      return { text, start, end };
+    });
+  it("names the clause and measures from the card's own words", async () => {
+    const { blinkProblem } = await import("./planner");
+    const card = { id: "nine-things", template: "BigNumber", start: 22.3, end: 25.2, startFrame: 669, endFrame: 756, contentEnd: 24.476, props: { durationSec: 2.9 }, sync: [], conformed: { start: true, end: false } } as ResolvedCue;
+    const p = blinkProblem("BigNumber", card, { side: "after", cutFrame: 798, sec: 1.4 }, toilet);
+    expect(p).toContain(`It may not stay to the change: that comes 2.12 s after its own words end — "and in plenty of…" opens a new clause it does not show (at most 2 s).`);
+    expect(p).not.toContain("after its own sentence ends");
+  });
+});

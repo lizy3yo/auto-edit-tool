@@ -19,6 +19,8 @@ import {
   endWithFilm,
   blinkBeside,
   stillUpAfterWords,
+  ownSentenceEnd,
+  readAlongSec,
   type CueSpec,
   type ResolvedCue,
   type Word,
@@ -480,9 +482,17 @@ describe("statement cards show a whole sentence; every graphic is up long enough
       words
     );
     expect(c.readSec).toBeGreaterThanOrEqual(3.5);
-    expect(c.end - c.start).toBeGreaterThanOrEqual(c.readSec! - 0.05);
+    // It does not end as soon as its words do (the complaint: 1.8 s): once "…, and that same necklace
+    // drags" begins — a new clause it does not show — its line counts as read when it was said, and
+    // "Too low / 2 inches lower" is still given its time (round 13, job 408's "9 things").
+    expect(c.newClauseAt).toBeCloseTo(words.find(w => w.text === "and")!.start, 3);
+    expect(c.readAlongSec).toBeCloseTo(2.5, 3);
+    expect(c.end - c.start).toBeGreaterThanOrEqual(c.readAlongSec! - 0.05);
+    expect(c.end - words.find(w => w.text === "lower,")!.end).toBeGreaterThan(1.5);
     // it leaves in the pause before "your", not inside a word
     expect(words.some(w => w.start < c.end - 0.01 && w.end > c.end + 0.01)).toBe(false);
+    expect(c.end).toBeGreaterThan(words.find(w => w.text === "drags")!.end);
+    expect(c.end).toBeLessThan(words.find(w => w.text === "your")!.start);
   });
   it("a Versus side is not judged before it has been said (Scarlett's 'Polished metal', job 392, 0:54)", () => {
     const words = W8("A pearl doesn't bounce light back at you the way a polished metal does. It scatters it.", 51.82);
@@ -668,5 +678,67 @@ describe("a blink of footage is one test, on frames (blinkBeside)", () => {
     expect(blinkBeside(at(2411, 2600), [2411, 2664, 2936], FPS)).toBeUndefined();
     expect(blinkBeside(at(2456, 2619), [2411, 2664], FPS)).toBeUndefined();
     expect(blinkBeside(at(2492, 2640), [], FPS)).toBeUndefined();
+  });
+});
+
+describe("a graphic's own words end where a new clause begins (job 408's '9 things', round 13)", () => {
+  const FPS = 30;
+  // Werner's job 408, 21.5-30.3 s as heard, and its picture cuts (scene 5 starts at 22.27, scene 6 at 30.03).
+  const toilet = heard(
+    "can.@21.495-21.775 Nine@22.456-22.696 things@22.776-23.056 stay@23.116-23.356 out@23.456-23.576 of@23.616-23.656 the@23.696-23.776 toilet@23.836-24.216 there,@24.236-24.476 and@24.916-25.016 in@25.056-25.116 plenty@25.236-25.596 of@25.636-25.696 American@25.756-26.156 homes,@26.196-26.516 most@26.937-27.157 of@27.177-27.237 them@27.277-27.437 go@27.477-27.637 down@27.697-27.937 it@27.997-28.077 in@28.157-28.217 an@28.257-28.317 ordinary@28.457-28.897 week.@28.957-29.217 One@30.199-30.319"
+  );
+  const cuts = [13.75, 22.27, 30.03];
+  // The plan as stored on the job.
+  const nine: CueSpec = { id: "nine-things-out", template: "BigNumberOverlay", start: "Nine things stay out of", startPad: -0.15, end: "the toilet there,", endPad: 0.3, props: { at: "@Nine", line: { text: "Nine things stay out of the toilet there", words: true }, unit: "things", value: 9, kicker: "Out of the toilet", countSec: 0.6 } };
+
+  it("its own words stop at 'there,': '…, and in plenty of American homes,' is a new clause, the contrast it sets up", () => {
+    const there = toilet.find(w => w.text === "there,")!;
+    const own = ownSentenceEnd(toilet, there.end, 31);
+    expect(own.spoken).toBe(there.end);
+    expect(own.newClauseAt).toBe(24.916);
+    // the whole sentence still runs to "week.", and the next one starts at "One"
+    expect([own.sentenceSpoken, own.newLineAt]).toEqual([29.217, 30.199]);
+  });
+
+  it("the rest of a clause is still its own: job 404's '7 things | about the robin that hardly anybody knows,', its title's 'quiet, the grass…', and a relative clause after a comma", () => {
+    const robin = heard("seven@39.49-39.77 things@39.83-40.07 about@40.15-40.35 the@40.39-40.47 robin@40.53-40.87 that@40.89-41.03 hardly@41.09-41.41 anybody@41.65-42.07 knows,@42.11-42.47 and@42.81-42.89 by@42.93-43.05");
+    expect(ownSentenceEnd(robin, 40.07, 44)).toMatchObject({ spoken: 42.47, newClauseAt: 42.81 });
+    const quiet = heard("goes@7.12-7.36 quiet,@7.46-7.88 the@8.34-8.44 grass@8.48-8.84 sits@8.88-9.12 empty@9.28-9.58 in@9.62-9.68 the@9.72-9.78 mornings,@9.84-10.24");
+    expect(ownSentenceEnd(quiet, 7.88, 10.4)).toEqual({ spoken: 10.24, sentenceSpoken: 10.24 });
+    const which = heard("things@39.83-40.07 about@40.15-40.35 the@40.39-40.47 robin,@40.53-40.87 which@40.99-41.13 hardly@41.19-41.51 anybody@41.65-42.07 knows.@42.11-42.47");
+    expect(ownSentenceEnd(which, 40.07, 43).spoken).toBe(42.47);
+  });
+
+  it("leaves 0.6 s after 'there,' instead of 2.1 s into the new clause: its line was read as he said it", () => {
+    const [c] = resolveCues([nine], toilet, { cuts, fps: FPS, ...resolveSets() });
+    // shipped: 22.267-26.600, carried by its 4 s reading time (14 words) and the pause after "homes,"
+    expect([c.start, c.end]).toEqual([22.267, 25.1]);
+    expect(c.readSec).toBe(4);
+    // still to read once "and…" began: "Out of the toilet / 9 things", 6 words
+    expect(c.readAlongSec).toBeCloseTo(readAlongSec(nine.props), 3);
+    expect(readAlongSec(nine.props)).toBeCloseTo(2.8, 6);
+    expect(c.spokenEnd).toBe(24.476);
+    expect(c.newClauseAt).toBe(24.916);
+    // up long enough for what it shows, and gone before "plenty"
+    expect(c.end - c.start).toBeGreaterThanOrEqual(MIN_ON_SCREEN_SEC);
+    expect(c.end).toBeLessThan(toilet.find(w => w.text === "plenty")!.start);
+    expect(stillUpAfterWords(c, FPS)).toBe(false);
+  });
+
+  it("the same card as it shipped is still up after its words", () => {
+    const [c] = resolveCues([nine], toilet, { cuts, fps: FPS, ...resolveSets() });
+    const shipped = { ...c, end: 26.6, endFrame: 798, leftInPause: true };
+    expect(stillUpAfterWords(shipped, FPS)).toBe(true);
+  });
+
+  it("a graphic with no word-by-word line keeps its whole reading time over a new clause: Dale's 'Shop open at / 2 a.m.' (job 397, 1:20)", () => {
+    const shop = heard(
+      "Your@79.338-79.518 shop@79.578-79.818 is@79.899-79.979 open@80.059-80.259 at@80.299-80.379 two@80.499-80.719 in@80.759-80.839 the@80.859-80.959 morning,@81.019-81.38 and@81.58-81.68 a@81.72-81.76 buyer@81.82-82.18 three@82.3-82.58 states@82.641-82.941 away,@83.021-83.401 hunting@83.561-83.901"
+    );
+    const spec: CueSpec = { id: "shop-open-2am", template: "BigNumberOverlay", start: "Your shop is open at two", startPad: -0.15, end: "two in the morning,", endPad: 0.3, props: { at: "@two in the morning,", unit: "a.m.", value: 2, kicker: "Shop open at", countSec: 0.6 } };
+    const [c] = resolveCues([spec], shop, { cuts: [75.26, 79.21, 89.39], fps: FPS, ...resolveSets() });
+    expect([c.start, c.end]).toEqual([80.2, 82.933]); // as the film had it
+    expect(c.readAlongSec).toBe(c.readSec);
+    expect(stillUpAfterWords(c, FPS)).toBe(false);
   });
 });
