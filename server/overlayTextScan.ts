@@ -108,15 +108,21 @@ export const STILL_DEFECT_SYSTEM =
   "body (a hand in a vise's jaws)\n" +
   "- a tool held or angled in a way no real user holds it, or whose path runs into the table, the " +
   "bench or a hand; fingers in front of or right beside a blade, saw, bit or cutting edge\n" +
-  // Job 406 scene 9 passed with a chisel pushed straight at the other hand flat on the board.
-  "- a hand or fingers AHEAD of a chisel, knife, gouge or plane — on the work where its edge points " +
-  "or is being pushed (a chisel driven toward the other hand lying flat on the wood)\n" +
-  // Job 407 scenes 10, 14 and 17: a froe in the side of a piece, on top of it, out in the air.
-  "- a splitting tool (a froe, wedge, maul or axe) that is not driven into the wood's end grain: " +
-  "pushed into the SIDE of an upright piece, its edge resting on the wood but not in it, its blade " +
-  "sticking out into the air with no wood under its edge, or lying ACROSS a split already open (a " +
-  "split runs along the blade); a piece splitting apart with no blade in its split; a hand " +
-  "gripping a piece where it is splitting open\n" +
+  // Job 406 scene 9 passed with a chisel pushed straight at the other hand flat on the board. A
+  // kitchen knife is not named: it cuts down beside the guide hand, and one being sharpened has
+  // fingers on its flat — the line above already covers fingers right beside an edge.
+  "- a hand or fingers AHEAD of a chisel, gouge, plane or a knife carving wood — on the work where " +
+  "its edge points or is being pushed (a chisel driven toward the other hand lying flat on the " +
+  "wood)\n" +
+  // Job 407 scenes 10, 14 and 17: a froe in the side of a piece, on top of it, out in the air. Only
+  // while SPLITTING: the same film's broadaxe hewing the side of a log (scene 25) is right.
+  "- a tool SPLITTING wood (a froe, wedge, maul or axe splitting a piece) whose edge is not in the " +
+  "wood's end grain: pushed into the SIDE of an upright piece, its edge resting on the wood but not " +
+  "in it, its blade sticking out into the air with no wood under its edge, or lying ACROSS a split " +
+  "already open (a split runs along the blade); a piece splitting apart with no blade in its " +
+  "split; a hand gripping a piece where it is splitting open. An axe chopping, felling or hewing " +
+  "into the side of a log or trunk is right, and a tool hanging, lying or resting unused is " +
+  "splitting nothing\n" +
   "- a phone, tablet or laptop built into, framed by or made of another object (a tablet whose " +
   "frame is a cutting board, a screen set inside a quilt or a shelf)\n" +
   "- a body part that looks CUT OFF: hair still shaped like a head or hairstyle with no head " +

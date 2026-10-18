@@ -5966,6 +5966,14 @@ const SHOT_ANGLE_SUFFIX: Record<string, string> = {
  * a chisel pushed straight at the other hand lying flat on the board ("working with a simple hand
  * tool" left the set-up to the model): an edge tool is now pushed AWAY from the other hand, which
  * sits behind the edge or the work is clamped.
+ *
+ * Only a tool that is SPLITTING goes into the end grain: the same film's broadaxe biting into the
+ * side of a green log (job 407 scene 25, "They hewed green") is right, and so is any axe chopping,
+ * felling or hewing — told every axe is a splitting tool, the picture model could turn hewing into
+ * end-grain splitting and the checker could refuse the correct picture. And the edge rule names a
+ * knife only as a carving one: a kitchen knife cuts DOWN into the board beside the guide hand, and
+ * one being sharpened has fingers on its flat (job 406's knife-sharpening lines), poses "pushed away
+ * from the other hand" does not describe.
  */
 export const TOOL_POSITION_CLAUSE =
   "Every tool is held and placed the way a person who really uses it does: by its handle, in its " +
@@ -5973,17 +5981,19 @@ export const TOOL_POSITION_CLAUSE =
   "so the tool's path is clear of the table and of every hand: a piece being sawn overhangs the " +
   "bench edge, sits in a vise or against a bench hook; a piece being drilled is clamped, with a " +
   "scrap block under it; cloth is cut on a cutting mat, food on a cutting board; a piece being " +
-  "split stands on end on a chopping block or stump, or is wedged in a fork or brake, and the " +
-  "splitting tool is driven into its END grain — down into the top as it stands — its edge sunk " +
-  "in the wood and its blade along the grain, so the split opens along the line of the blade; " +
-  "never pushed into the side of the piece, resting on the wood with its edge not in it, sticking " +
-  "out into the air with no wood under its edge, or lying across a split already open. The holding " +
+  "SPLIT (riven with a froe, or split with a wedge, a maul or an axe) stands on end on a chopping " +
+  "block or stump, or is wedged in a fork or brake, and the splitting tool is driven into its END " +
+  "grain — the top, when it stands on end — its edge sunk in the wood and its blade along the " +
+  "grain, so the split opens along the line of the blade; never pushed into the side of the piece, " +
+  "resting on the wood with its edge not in it, sticking out into the air with no wood under its " +
+  "edge, or lying across a split already open. An axe that is chopping, felling or hewing rather " +
+  "than splitting bites into the side of the log or trunk. The holding " +
   "hand stays well back and to the side of the blade, bit or edge — never in front of it, in its " +
   "path, or right beside the cut — and a blade never cuts into the table under the work. A chisel, " +
-  "knife, gouge or plane is pushed AWAY from the other hand: that hand rests on the tool behind its " +
-  "edge or holds the work behind the edge, or the work is clamped, and no hand ever lies on the " +
-  "work ahead of where the edge points. A piece being split is held by its block, fork or wedge, " +
-  "never by a hand where it splits open. The piece " +
+  "gouge, plane or a knife carving wood is pushed AWAY from the other hand: that hand is on the " +
+  "tool itself or holds the work behind the edge, or the work is clamped, and no hand ever lies on " +
+  "the work ahead of where the edge points. A piece being split is held by its block, fork or " +
+  "wedge, never by a hand where it splits open. The piece " +
   "being worked sits ON its surface or in its holder as a separate solid thing — never sunk " +
   "into, passing through or grown out of the table or bench.";
 
@@ -5992,13 +6002,15 @@ export const TOOL_POSITION_CLAUSE =
  * showed a drill whose bit never went into the wood; the still is the video's first frame, so it
  * starts right here. (Such shots are also kept as photos — `contactToolWork` in shotList.ts.) A
  * splitting tool's contact is its edge in the end grain (job 407 scenes 14 and 17, a froe blade on
- * top of the wood and out in the air).
+ * top of the wood and out in the air) — only while it splits: an axe hewing is in the log's side
+ * (scene 25).
  */
 export const TOOL_CONTACT_CLAUSE =
   "Any tool in the shot is really working on its material: a drill bit or screw sunk into the " +
   "wood, a saw blade down in its cut, a chisel edge in the wood, scissor or cutter blades closing " +
-  "on the cloth, a needle through the fabric, a splitting tool (a froe, wedge, maul or axe) driven " +
-  "edge-down into the end grain along the split it opens — never held in the air beside the work. " +
+  "on the cloth, a needle through the fabric, a froe, wedge, maul or axe that is SPLITTING wood " +
+  "driven edge-down into the end grain along the split it opens, an axe chopping or hewing bitten " +
+  "into the side of the log — never held in the air beside the work. " +
   TOOL_POSITION_CLAUSE;
 
 /**

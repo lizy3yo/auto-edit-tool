@@ -3940,7 +3940,7 @@ describe("a splitting tool works in the end grain, and no hand is in an edge's p
       expect(prompt, s.showSubject).toMatch(/sticking out into the air with no wood under its edge/);
       expect(prompt, s.showSubject).toMatch(/lying across a split already open/);
     }
-    expect(TOOL_CONTACT_CLAUSE).toMatch(/a splitting tool \(a froe, wedge, maul or axe\) driven edge-down into the end grain/);
+    expect(TOOL_CONTACT_CLAUSE).toMatch(/a froe, wedge, maul or axe that is SPLITTING wood driven edge-down into the end grain/);
     expect(TOOL_CONTACT_CLAUSE).toContain(TOOL_POSITION_CLAUSE);
   });
 
@@ -3970,7 +3970,7 @@ describe("a splitting tool works in the end grain, and no hand is in an edge's p
     ];
     markHostBroll(scenes, { hostLook: SAWYER, hostName: "Gary" }, "https://x/host.png");
     const prompt = buildStillPrompt(scenes[0]);
-    expect(prompt).toMatch(/A chisel, knife, gouge or plane is pushed AWAY from the other hand/);
+    expect(prompt).toMatch(/A chisel, gouge, plane or a knife carving wood is pushed AWAY from the other hand/);
     expect(prompt).toMatch(/no hand ever lies on the work ahead of where the edge points/);
     // The hands-only lane carries both as well.
     expect(ANON_PERSON_SUFFIX).toMatch(/pushed AWAY from the other hand/);
@@ -3988,21 +3988,68 @@ describe("a splitting tool works in the end grain, and no hand is in an edge's p
   });
 
   it("the still check names a splitting tool out of the end grain and a hand ahead of an edge", () => {
-    expect(STILL_DEFECT_SYSTEM).toMatch(/a splitting tool \(a froe, wedge, maul or axe\) that is not driven into the wood's end grain/);
+    expect(STILL_DEFECT_SYSTEM).toMatch(/a tool SPLITTING wood \(a froe, wedge, maul or axe splitting a piece\) whose edge is not in the wood's end grain/);
     expect(STILL_DEFECT_SYSTEM).toMatch(/pushed into the SIDE of an upright piece/);
     expect(STILL_DEFECT_SYSTEM).toMatch(/its edge resting on the wood but not in it/);
     expect(STILL_DEFECT_SYSTEM).toMatch(/sticking out into the air with no wood under its edge/);
     expect(STILL_DEFECT_SYSTEM).toMatch(/lying ACROSS a split already open/);
     expect(STILL_DEFECT_SYSTEM).toMatch(/a hand gripping a piece where it is splitting open/);
-    expect(STILL_DEFECT_SYSTEM).toMatch(/a hand or fingers AHEAD of a chisel, knife, gouge or plane/);
+    expect(STILL_DEFECT_SYSTEM).toMatch(/a hand or fingers AHEAD of a chisel, gouge, plane or a knife carving wood/);
     // Both sit inside QUESTION 2 (broken), before QUESTION 3, and the question still leans to false.
     const q2 = STILL_DEFECT_SYSTEM.slice(
       STILL_DEFECT_SYSTEM.indexOf("QUESTION 2"),
       STILL_DEFECT_SYSTEM.indexOf("QUESTION 3")
     );
-    expect(q2).toMatch(/splitting tool/);
+    expect(q2).toMatch(/a tool SPLITTING wood/);
     expect(q2).toMatch(/AHEAD of a chisel/);
     expect(q2).toMatch(/When unsure, answer false/);
     expect(STILL_DEFECT_SYSTEM).toMatch(/fingers in front of or right beside a blade/);
+  });
+});
+
+describe("only a tool that is SPLITTING goes into the end grain; a kitchen knife is not an edge tool pushed along (jobs 406, 407)", () => {
+  const SAWYER = "A broad man in his sixties with a short white beard, wearing a sage green work shirt with rolled sleeves";
+
+  it("a broadaxe hewing the side of a log is told it bites into the side, not the end grain (job 407 scene 25)", () => {
+    // The same film's hewing picture was right: the broadaxe in the side of a green poplar log. Told
+    // every axe is a splitting tool, it would be drawn in the log's end and refused by the checker.
+    const scenes = [
+      pic(25, "because a fresh log gives up its chips far easier than a seasoned one, and tall, straight tulip poplar was a favorite.",
+        "hands gripping a broadaxe as its wide flat blade bites into a fresh green poplar log, wood chips flying", {
+          visualPrompt:
+            "Bare weathered hands gripping a broadaxe, its wide flat blade pressing into a fresh green poplar log in a woodlot clearing, wood chips visible at the blade's edge.",
+          humanPresent: true,
+        }),
+    ];
+    markHostBroll(scenes, { hostLook: SAWYER, hostName: "Sam" }, "https://x/host.png");
+    const prompt = buildStillPrompt(scenes[0]);
+    expect(prompt).toMatch(/An axe that is chopping, felling or hewing rather than splitting bites into the side of the log or trunk/);
+    expect(prompt).toMatch(/an axe chopping or hewing bitten into the side of the log/);
+    // Every axe is no longer a splitting tool by name: the end-grain rule asks for a tool that IS splitting.
+    expect(TOOL_CONTACT_CLAUSE).not.toMatch(/a splitting tool \(a froe, wedge, maul or axe\)/);
+    expect(TOOL_POSITION_CLAUSE).toMatch(/a piece being SPLIT \(riven with a froe, or split with a wedge, a maul or an axe\)/);
+  });
+
+  it("the still check refuses only a tool that is splitting, never a hewing axe or a tool at rest", () => {
+    const q2 = STILL_DEFECT_SYSTEM.slice(
+      STILL_DEFECT_SYSTEM.indexOf("QUESTION 2"),
+      STILL_DEFECT_SYSTEM.indexOf("QUESTION 3")
+    );
+    expect(q2).toMatch(/An axe chopping, felling or hewing into the side of a log or trunk is right/);
+    // Job 407 scenes 4-8: the axe, froe and drawknife hanging on the cabin wall.
+    expect(q2).toMatch(/a tool hanging, lying or resting unused is splitting nothing/);
+    expect(q2).not.toMatch(/a splitting tool \(a froe, wedge, maul or axe\) that is not driven/);
+  });
+
+  it("the edge rule names a carving knife, not every knife (job 406's kitchen knives)", () => {
+    // Job 406 sharpens kitchen knives: a knife held up to the light (scene 13), sharpened on a guided
+    // sharpener (scene 16). A kitchen knife cuts down beside the guide hand and is sharpened with
+    // fingers on its flat; "fingers right beside a blade" still covers a hand in its way.
+    expect(TOOL_POSITION_CLAUSE).not.toMatch(/A chisel, knife, gouge or plane/);
+    expect(STILL_DEFECT_SYSTEM).not.toMatch(/AHEAD of a chisel, knife, gouge or plane/);
+    expect(STILL_DEFECT_SYSTEM).toMatch(/fingers in front of or right beside a blade, saw, bit or cutting edge/);
+    expect(TOOL_POSITION_CLAUSE).toMatch(/food on a cutting board/);
+    // A plane's front hand is on the tool, ahead of its iron: the rule asks for the hand ON the tool.
+    expect(TOOL_POSITION_CLAUSE).toMatch(/that hand is on the tool itself or holds the work behind the edge/);
   });
 });
