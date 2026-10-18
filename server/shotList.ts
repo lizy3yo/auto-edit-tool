@@ -2098,6 +2098,28 @@ export function ownTypedPicture(s: StoryboardScene, typed: string, things: KeyTh
   const text = typed.trim();
   if (!text || text === (s.visualPrompt ?? "").trim()) return false;
   const said = withoutNegatedPhrases(text);
+  tieToTypedWords(s, said, things);
+  // NOBODY WHEN THE TYPED WORDS SAY SO: scene 20 was typed "… no hands, no readable writing anywhere"
+  // and still carried the person of the planner's "… box held in one hand", so its prompt asked for
+  // the host at work, with the host's photo attached, beside the operator's "no hands". Taken out
+  // only when the typed words also show no one themselves; a person they add is left as it was
+  // (who draws them — the host or someone else — is decided before the pictures, `markHostBroll`).
+  if (NOBODY_IN_IT.test(text) && !SHOWS_PERSON.test(said)) {
+    s.humanPresent = undefined;
+    s.otherPerson = undefined;
+    s.hostFaceShown = undefined;
+  }
+  s.showSubject = text;
+  return true;
+}
+
+/**
+ * What the planner tied to a picture's OLD words stays only while typed words `said` (negations
+ * already taken out) still name it: its key thing, the other key things in it, the stage, the part
+ * and the named kind it was about, the words it may print, and soft print. Shared by a typed cutaway
+ * (`ownTypedPicture`) and a typed split panel (`ownTypedPanel`). Pure apart from mutating `s`.
+ */
+function tieToTypedWords(s: StoryboardScene, said: string, things: KeyThing[] | undefined): void {
   const names = (name: string | undefined) => !!name?.trim() && keyThingsIn(said, [{ name, look: "" }]).length > 0;
   const named = keyThingsIn(said, things);
   const primary = names(s.keyThing) ? s.keyThing : named[0]?.name;
@@ -2110,17 +2132,24 @@ export function ownTypedPicture(s: StoryboardScene, typed: string, things: KeyTh
   if (s.namedLook && !names(s.namedLook.split(":")[0])) s.namedLook = undefined;
   if (s.pictureText && !saidText(s.pictureText, said)) s.pictureText = undefined;
   s.blurPrint = !s.pictureText && blurredPrint(said) ? true : undefined;
-  // NOBODY WHEN THE TYPED WORDS SAY SO: scene 20 was typed "… no hands, no readable writing anywhere"
-  // and still carried the person of the planner's "… box held in one hand", so its prompt asked for
-  // the host at work, with the host's photo attached, beside the operator's "no hands". Taken out
-  // only when the typed words also show no one themselves; a person they add is left as it was
-  // (who draws them — the host or someone else — is decided before the pictures, `markHostBroll`).
-  if (NOBODY_IN_IT.test(text) && !SHOWS_PERSON.test(said)) {
-    s.humanPresent = undefined;
-    s.otherPerson = undefined;
-    s.hostFaceShown = undefined;
-  }
-  s.showSubject = text;
+}
+
+/**
+ * A TYPED PANEL OWNS THE PANEL (2026-10-18, job 400 scene 27). A split's panel is drawn from its key
+ * thing's pictures and in their named kind's look (`withSplitMemory`), and an operator's panel redraw
+ * now gets both — but the key thing sits on the HOST scene, tagged from the panel's OLD words, and
+ * typed panel words left it there. Typed "a steaming cup of tea on the desk" over job 400's scroll
+ * panel, the redraw would have been handed the scroll's pictures, "the same scroll as in the
+ * reference" and the papyrus scroll's exact look, and held to a scroll by the check. So typed panel
+ * words keep what the old panel was tied to only while they still name it, as a typed cutaway does
+ * (`ownTypedPicture`); the host take beside it is never touched (no person or subject field changes).
+ * Called BEFORE the typed words land on `splitVisual`: a plain regenerate sends the panel's own words
+ * back, and those are not typed. Returns whether it took the panel over. Pure apart from mutating `s`.
+ */
+export function ownTypedPanel(s: StoryboardScene, typed: string, things: KeyThing[] | undefined): boolean {
+  const text = typed.trim();
+  if (!s.hostPresent || !text || text === (s.splitVisual ?? "").trim()) return false;
+  tieToTypedWords(s, withoutNegatedPhrases(text), things);
   return true;
 }
 

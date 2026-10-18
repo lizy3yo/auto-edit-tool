@@ -10,7 +10,8 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import type { KeyThing, StoryboardScene } from "@shared/types";
-import { attachMemory, panelLook, panelNamedLook } from "./pictureMemory";
+import { attachMemory, panelLook, panelNamedLook, requiredThingsFor } from "./pictureMemory";
+import { ownTypedPanel } from "./shotList";
 import { buildSplitRightScene, buildStillPrompt, withSplitMemory } from "./longformVideo";
 
 const pic = (index: number, show: string, over: Partial<StoryboardScene> = {}) =>
@@ -262,5 +263,81 @@ describe("the panel is drawn like the b-roll of its thing (withSplitMemory)", ()
     expect(attach).toBeGreaterThan(0);
     expect(attach).toBeLessThan(body.indexOf("renderSplitRightClip("));
     expect(attach).toBeLessThan(body.indexOf("renderSplitRightMotionClip("));
+  });
+});
+
+describe("typed panel words own the panel (ownTypedPanel)", () => {
+  // The redraw is now handed its key thing's pictures and named look, and the key thing sits on the
+  // host scene, tagged from the panel's OLD words.
+  const typedBoard = () => JSON.parse(JSON.stringify(scrollPictures())) as StoryboardScene[];
+
+  it("job 400 scene 27 typed as something else: no scroll pictures, no papyrus look, no scroll to hold it to", async () => {
+    const board = typedBoard();
+    const host = board[1];
+    expect(ownTypedPanel(host, "A steaming cup of tea on a plain desk, morning light.", GIDEON)).toBe(true);
+    host.splitVisual = "A steaming cup of tea on a plain desk, morning light.";
+    expect(host.keyThing).toBeUndefined();
+    attachMemory(board, [host], GIDEON);
+    const panel = await withSplitMemory(host, buildSplitRightScene(host), 0);
+    expect(panel.memoryRefUrls).toBeUndefined();
+    expect(panel.namedLook).toBeUndefined();
+    expect(panel.keyThingLook).toBeUndefined();
+    expect(requiredThingsFor(panel)).toEqual([]);
+    expect(buildStillPrompt(panel, false, undefined, undefined, true)).not.toMatch(/papyrus|scroll/i);
+  });
+
+  it("typed words that still name the scroll keep it: memory and look as before", async () => {
+    const board = typedBoard();
+    const host = board[1];
+    const typed = "The papyrus scroll rolled and tied with its cord on the desk, seen from above.";
+    expect(ownTypedPanel(host, typed, GIDEON)).toBe(true);
+    host.splitVisual = typed;
+    expect(host.keyThing).toBe("scroll");
+    attachMemory(board, [host], GIDEON);
+    const panel = await withSplitMemory(host, buildSplitRightScene(host), 0);
+    expect(panel.memoryRefUrls).toContain("https://r2.test/longform/400/still-src-20.png");
+    expect(panel.namedLook).toBe(PAPYRUS);
+  });
+
+  it("typed words naming another key thing are drawn from THAT thing (the inkwell), never the scroll", () => {
+    const host = typedBoard()[1];
+    ownTypedPanel(host, "A round glass inkwell and a dark feather quill on the desk, no scroll anywhere.", GIDEON);
+    expect(host.keyThing).toBe("inkwell and quill");
+    expect(host.otherKeyThings).toBeUndefined();
+  });
+
+  it("a plain regenerate sends the panel's own words back: nothing changes", () => {
+    const host = typedBoard()[1];
+    const before = JSON.stringify(host);
+    expect(ownTypedPanel(host, `  ${SCROLL_PANEL}  `, GIDEON)).toBe(false);
+    expect(JSON.stringify(host)).toBe(before);
+  });
+
+  it("the host take beside the panel is never touched, and a cutaway is not a panel", () => {
+    const host = typedBoard()[1];
+    const { visualPrompt, scriptText, hostPresent } = host;
+    ownTypedPanel(host, "A steaming cup of tea on a plain desk, no people.", GIDEON);
+    expect({ visualPrompt: host.visualPrompt, scriptText: host.scriptText, hostPresent: host.hostPresent }).toEqual({
+      visualPrompt,
+      scriptText,
+      hostPresent,
+    });
+    expect(host.showSubject).toBeUndefined();
+    const cutaway = typedBoard()[0];
+    expect(ownTypedPanel(cutaway, "A steaming cup of tea.", GIDEON)).toBe(false);
+    expect(cutaway.keyThing).toBe("scroll");
+  });
+
+  it("both typed-panel paths take the panel over before the typed words land", () => {
+    const src = readFileSync(new URL("./longformVideo.ts", import.meta.url), "utf8");
+    const regen = src.indexOf("ownTypedPanel(scene, typedSplit, ctx.params.keyThings)");
+    expect(regen).toBeGreaterThan(0);
+    expect(regen).toBeLessThan(src.indexOf("if (splitOnly && typedSplit) scene.splitVisual = typedSplit;"));
+    const start = src.indexOf('} else if (edit.mode === "prompt") {');
+    const body = src.slice(start, start + 600);
+    expect(body.indexOf("ownTypedPanel(scene, typed, params.keyThings)")).toBeGreaterThan(0);
+    expect(body.indexOf("ownTypedPanel(scene, typed, params.keyThings)")).toBeLessThan(
+      body.indexOf("scene.splitVisual = typed;")
+    );
   });
 });

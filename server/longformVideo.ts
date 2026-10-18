@@ -53,6 +53,7 @@ import {
   fitPicturesToLines,
   judgeSelfMoving,
   ownTypedPicture,
+  ownTypedPanel,
 } from "./shotList";
 import {
   attachMemory,
@@ -19593,10 +19594,13 @@ function prepareSceneEdit(ctx: SceneEditContext, req: SceneEditRequest): void {
     // A TYPED PICTURE OWNS THE PICTURE (`ownTypedPicture`): new words on a cutaway become what it must
     // show and what the check holds it to, never the planner's old subject (job 383 scenes 20, 33,
     // 40). Before the words land, so the prompt it already has (sent back by a plain regenerate)
-    // is told apart from typed words. A split panel is already drawn from, and checked against, its
-    // own words (`buildSplitRightScene`).
+    // is told apart from typed words. A split panel is drawn from, and checked against, its own words
+    // (`buildSplitRightScene`), but its key thing — and with it the memory pictures and named look a
+    // redraw is now given (`withSplitMemory`) — sits on the host scene: typed panel words keep it only
+    // while they still name it (`ownTypedPanel`).
     if (typedVisual && !scene.hostPresent && !splitOnly)
       ownTypedPicture(scene, typedVisual, ctx.params.keyThings);
+    if (splitOnly && typedSplit) ownTypedPanel(scene, typedSplit, ctx.params.keyThings);
     if (typedVisual) scene.visualPrompt = typedVisual;
     if (splitOnly && typedSplit) scene.splitVisual = typedSplit;
     const edited = splitOnly ? !!typedSplit : !!typedVisual;
@@ -21436,6 +21440,8 @@ async function runSplitEdit(
   } else if (edit.mode === "prompt") {
     const typed = edit.prompt?.trim();
     if (typed) {
+      // What the old panel was tied to goes unless the typed words name it (`ownTypedPanel`).
+      ownTypedPanel(scene, typed, params.keyThings);
       scene.splitVisual = typed;
       if (edit.verbatim) scene.splitVisualSeed = typed;
     } else if (!scene.splitVisual) {
