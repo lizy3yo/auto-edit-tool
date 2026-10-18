@@ -116,7 +116,7 @@ import {
   rememberShippedPicture,
   screenPicture,
   screenSells,
-  varietyLane,
+  varietyLanes,
   withoutFarCamera,
   withScreenTurn,
 } from "./pictureVariety";
@@ -10595,7 +10595,7 @@ export type ValidatedStill = {
  * in flight at the same moment. Screens are where a film repeats itself; everything else stays
  * parallel.
  *
- * A split panel (`square`) is CHECKED against every picture drawn before it, and waits in its lane
+ * A split panel (`square`) is CHECKED against every picture drawn before it, and waits in its lanes
  * only `PANEL_LANE_WAIT_MS`: it is awaited against its host scene's own clock (`server/splitPanel.ts`),
  * and a panel queued behind its key thing's other draws, each up to several minutes, would ship its
  * scene as the host take alone. It used to wait in no lane, so a panel drawn from the same memory as
@@ -10608,9 +10608,9 @@ export async function generateValidatedStill(
 ): Promise<ValidatedStill> {
   const [scene, , , , , , square] = args;
   const job = currentCostJobId();
-  const lane = varietyLane(scene);
-  return lane && job != null && process.env.PICTURE_VARIETY !== "0"
-    ? withScreenTurn(job, () => drawValidatedStill(...args), lane, square ? PANEL_LANE_WAIT_MS : undefined)
+  const lanes = varietyLanes(scene);
+  return lanes.length && job != null && process.env.PICTURE_VARIETY !== "0"
+    ? withScreenTurn(job, () => drawValidatedStill(...args), lanes, square ? PANEL_LANE_WAIT_MS : undefined)
     : drawValidatedStill(...args);
 }
 
@@ -10652,7 +10652,10 @@ async function drawValidatedStill(
   const cutOpenFrames = new WeakSet<Buffer>();
   // Every frame carries what the checks named on it (its own `pictureChecks` entry), so a frame that
   // ships with a fault says which (`ValidatedStill.flaws`) — whichever path ships it.
-  type Drawn = { buffer: Buffer; mimeType?: string; flags: string[] };
+  // `setup`: the screen setting the frame was drawn in — a near-copy redraw moves the scene to another,
+  // and a fallback is remembered in its own (`ship`), so a later screen that copies it moves away from
+  // the setting it really copied.
+  type Drawn = { buffer: Buffer; mimeType?: string; flags: string[]; setup?: string };
   const shipped = (f: Drawn): ValidatedStill => {
     const flaws = shippedFlaws(f.flags);
     return {
@@ -10717,7 +10720,7 @@ async function drawValidatedStill(
   const varietyOn = varietyJob != null && !referenceImageUrl && process.env.PICTURE_VARIETY !== "0";
   const ship = async (f: Drawn): Promise<ValidatedStill> => {
     if (varietyOn)
-      await rememberShippedPicture(varietyJob!, scene.index, f.buffer, square, scene.screenSetup, relatives.drawnFrom);
+      await rememberShippedPicture(varietyJob!, scene.index, f.buffer, square, f.setup, relatives.drawnFrom);
     return shipped(f);
   };
   // The concrete camera a continuation is drawn from (`memoryViewFor`), -1 for any other picture.
@@ -11008,7 +11011,7 @@ async function drawValidatedStill(
         defects
       );
       flags = check?.flags ?? checkFlags(defects);
-      const drawn: Drawn = { buffer, mimeType: r.mimeType, flags };
+      const drawn: Drawn = { buffer, mimeType: r.mimeType, flags, setup: scene.screenSetup };
       if (hostCheckDue(scene, personFree) && process.env.HOST_IDENTITY_CHECK !== "0") hostUnchecked.add(buffer);
       const faults = checkFlags(defects).join("+");
       // A REDRAW THAT CHANGES WHAT CAUSED IT (`faultRedrawFor`): broken geometry or readable writing

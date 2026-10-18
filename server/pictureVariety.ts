@@ -24,7 +24,7 @@
  *      a relative read past the 20-bit line; and two pictures drawn from one memory picture were drawn
  *      at once in two lanes. A picture's relatives — what it was drawn from, and what else was drawn
  *      from that — are now candidates on a wider line, the closest looked at when no other check laid
- *      one beside it (`NearCopyRelated`), and they share its lane (`varietyLane`).
+ *      one beside it (`NearCopyRelated`), and they share a lane (`varietyLanes`).
  *
  * Applies to every channel; nothing here names one.
  */
@@ -415,10 +415,14 @@ const screenTurns = new Map<string, Promise<unknown>>();
 /**
  * Run `fn` after every earlier draw in the same LANE of the same video has finished, so each picture
  * is compared with all the pictures before it in that lane (drawn together, two never see each
- * other). Lanes (`varietyLane`): "screen" for screen pictures, "from:<scene>" for pictures drawn from
- * the same memory picture, "thing:<name>" for the other pictures of one key thing — Frederick's job
- * 375 test drew three near-identical "smoke alarm held, back label facing viewer" pictures at the
- * same moment. Other pictures stay parallel.
+ * other). Lanes (`varietyLanes`): "screen" for screen pictures, "thing:<name>" for the pictures of one
+ * key thing — Frederick's job 375 test drew three near-identical "smoke alarm held, back label facing
+ * viewer" pictures at the same moment — and "from:<scene>" for pictures drawn from the same memory
+ * picture. Other pictures stay parallel.
+ *
+ * A draw may be in SEVERAL lanes (`lane` a list): it waits for the draws before it in every one, and
+ * every later draw in any of them waits for it. Never a deadlock: a draw only ever waits for draws
+ * queued before it.
  *
  * `maxWaitMs`: wait at most this long for the draws before, then draw anyway — a split panel, which is
  * awaited against its host scene's own clock (`PANEL_LANE_WAIT_MS`). Every later draw in the lane
@@ -427,11 +431,12 @@ const screenTurns = new Map<string, Promise<unknown>>();
 export function withScreenTurn<T>(
   jobId: number,
   fn: () => Promise<T>,
-  lane = "screen",
+  lane: string | readonly string[] = "screen",
   maxWaitMs?: number
 ): Promise<T> {
-  const key = `${jobId}|${lane}`;
-  const before = screenTurns.get(key) ?? Promise.resolve();
+  const keys = (typeof lane === "string" ? [lane] : lane).filter((l, i, all) => all.indexOf(l) === i).map(l => `${jobId}|${l}`);
+  const befores = keys.map(key => screenTurns.get(key) ?? Promise.resolve());
+  const before = Promise.all(befores);
   let timer: ReturnType<typeof setTimeout> | undefined;
   const turn =
     maxWaitMs == null
@@ -440,10 +445,13 @@ export function withScreenTurn<T>(
           clearTimeout(timer)
         );
   const mine = turn.then(fn, fn);
-  const settled = Promise.all([before, mine.catch(() => undefined)]).then(() => undefined);
-  screenTurns.set(key, settled);
-  void settled.then(() => {
-    if (screenTurns.get(key) === settled) screenTurns.delete(key);
+  const done = mine.catch(() => undefined);
+  keys.forEach((key, i) => {
+    const settled = Promise.all([befores[i], done]).then(() => undefined);
+    screenTurns.set(key, settled);
+    void settled.then(() => {
+      if (screenTurns.get(key) === settled) screenTurns.delete(key);
+    });
   });
   return mine;
 }
@@ -461,22 +469,29 @@ export function withScreenTurn<T>(
 export const PANEL_LANE_WAIT_MS = 3 * 60_000;
 
 /**
- * The lane a picture is drawn in (`withScreenTurn`), or null for a picture drawn in parallel. A
- * picture drawn from memory goes in the lane of the picture its memory starts from — the earliest of
- * its references of its OWN thing, else the earliest of them — so pictures drawn from the same
- * memory are drawn one after another and each is compared with the others (job 408: the toilet's
- * panel at scene 4 and the bin at scene 5, two key things, were both drawn from scene 2 and drawn at
- * once, in two lanes). The later pictures of one key thing still share a lane: their own references
- * all start from that thing's first picture, which they wait for anyway (`memoryFor`). Pure.
+ * The lanes a picture is drawn in (`withScreenTurn`), none for a picture drawn in parallel. A screen
+ * is drawn in the screen lane. Any other picture of a key thing is drawn in its thing's lane, AND — drawn
+ * from memory — in the lane of the picture its memory starts from (the earliest of its references of
+ * its OWN thing, else the earliest of them), so pictures drawn from the same memory are drawn one after
+ * another and each is compared with the others: job 408's toilet panel at scene 4 and its bin at scene
+ * 5, two key things, were both drawn from scene 2 and drawn at once, in two lanes.
+ * BOTH, NEVER ONE FOR THE OTHER (round 13, the review of that fix): the pictures of one key thing do not
+ * all start from one picture — job 408's toilet pictures were drawn from scenes 2, 8, 14 and 15 — so a
+ * memory lane in place of the thing's lane let two pictures of the toilet be drawn at once again
+ * (scene 21, drawn from scene 8's toilet paper, beside scenes 10, 14 and 15, drawn from scene 2). On
+ * jobs 401-414 the extra lane lengthens a film's longest chain of draws by three at most (job 412: 12 to
+ * 15), since each picture of a thing already waits for the one before it (`memoryFor`). Pure.
  */
-export function varietyLane(scene: Pick<StoryboardScene, "screenSetup" | "keyThing" | "memoryRefScenes">): string | null {
-  if (scene.screenSetup) return "screen";
+export function varietyLanes(scene: Pick<StoryboardScene, "screenSetup" | "keyThing" | "memoryRefScenes">): string[] {
+  if (scene.screenSetup) return ["screen"];
+  const lanes: string[] = [];
+  const thing = scene.keyThing?.trim().toLowerCase();
+  if (thing) lanes.push(`thing:${thing}`);
   const refs = scene.memoryRefScenes ?? [];
   const own = refs.filter(r => r.own);
   const root = (own.length ? own : refs).map(r => r.index).sort((a, b) => a - b)[0];
-  if (root != null) return `from:${root}`;
-  const thing = scene.keyThing?.trim().toLowerCase();
-  return thing ? `thing:${thing}` : null;
+  if (root != null) lanes.push(`from:${root}`);
+  return lanes;
 }
 
 /** Added to a picture redrawn because it nearly copied another picture of the video. */

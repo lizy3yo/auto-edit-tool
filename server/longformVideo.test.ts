@@ -11912,6 +11912,27 @@ describe("a picture meets the pictures it was drawn from (round 13, jobs 408-410
     expect(out.buffer.equals(fresh)).toBe(true);
   });
 
+  it("a screen that copies another and ships as its fallback is remembered in the setting it was drawn in", async () => {
+    const { withCostMeter } = await import("./costMeter");
+    const { pictureFingerprint, pictureThumb, rememberPicture, nearCopyCandidates, SCREEN_SETUPS } = await import("./pictureVariety");
+    const job = 9705;
+    const [two, other] = await Promise.all([photo(2, 1536, 864), photo(59, 1536, 864)]);
+    rememberPicture(job, 2, await pictureFingerprint(two), await pictureThumb(two), SCREEN_SETUPS[0]);
+    const words = "a phone showing a plain buy-and-sell app with small item photos";
+    const scene = { index: 8, showSubject: words, visualPrompt: words, screenSetup: SCREEN_SETUPS[2] } as StoryboardScene;
+    // Draw 1 copies scene 2 and is redrawn in another setting; draw 2 comes back broken; out of draws,
+    // draw 1 ships — drawn in the first setting, not the one the redraw moved the scene to.
+    mockScanNearCopy.mockResolvedValueOnce({ copy: true, what: "the same phone on the same bench" });
+    mockScanStillDefects
+      .mockResolvedValueOnce({ overlay: false, broken: false, what: "" } as any)
+      .mockResolvedValueOnce({ overlay: false, broken: true, what: "a phone sunk into the table" } as any);
+    const out = await withCostMeter(job, () => generateValidatedStill(scene, 2, undefined, drawsOf(two, other)));
+    expect(out.buffer.equals(two)).toBe(true);
+    expect(scene.screenSetup).not.toBe(SCREEN_SETUPS[2]);
+    const remembered = nearCopyCandidates(job, 9, await pictureFingerprint(two)).find(c => c.index === 8);
+    expect(remembered?.setup).toBe(SCREEN_SETUPS[2]);
+  });
+
   it("a memory picture the same-thing check saw meets no extra look at a far reference; nor does a list item drawn from its group picture", async () => {
     const { withCostMeter } = await import("./costMeter");
     const { pictureFingerprint, pictureThumb, rememberPicture } = await import("./pictureVariety");

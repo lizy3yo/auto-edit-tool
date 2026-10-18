@@ -24,7 +24,7 @@ import {
   PANEL_LANE_WAIT_MS,
   RELATED_NEAR_COPY_BITS,
   rememberShippedPicture,
-  varietyLane,
+  varietyLanes,
 } from "./pictureVariety";
 import {
   JUST_SHOWN_COPY_NOTE,
@@ -406,27 +406,62 @@ describe("a picture is compared with the pictures it was drawn from (round 13, j
 
 describe("pictures drawn from the same memory share a lane (round 13, job 408 scenes 4 and 5)", () => {
   const ref = (index: number, own = true) => ({ index, ...(own ? { own: true as const } : {}) });
+  const shareLane = (a: StoryboardScene, b: StoryboardScene) => varietyLanes(a).some(l => varietyLanes(b).includes(l));
 
   it("408: the toilet's panel and the bin, both drawn from scene 2, are drawn one after the other", () => {
     const panel = { keyThing: "toilet", memoryRefScenes: [ref(2)] } as StoryboardScene;
     const bin = { keyThing: "bin", memoryRefScenes: [ref(2), ref(3)] } as StoryboardScene;
-    expect(varietyLane(panel)).toBe("from:2");
-    expect(varietyLane(bin)).toBe(varietyLane(panel));
+    expect(varietyLanes(panel)).toEqual(["thing:toilet", "from:2"]);
+    expect(varietyLanes(bin)).toEqual(["thing:bin", "from:2"]);
+    expect(shareLane(panel, bin)).toBe(true);
+  });
+
+  it("408-15/21: two pictures of one thing drawn from different pictures still share the thing's lane", () => {
+    // The stored rows: scene 15 drawn from scene 2 (the bin's picture), scene 21 from scene 8 (the
+    // toilet paper's) — a memory lane in place of the thing's let the two be drawn at once.
+    const fifteen = { keyThing: "toilet", memoryRefScenes: [ref(2, false)] } as StoryboardScene;
+    const twentyOne = { keyThing: "toilet", memoryRefScenes: [ref(8, false)] } as StoryboardScene;
+    expect(varietyLanes(fifteen)).toEqual(["thing:toilet", "from:2"]);
+    expect(varietyLanes(twentyOne)).toEqual(["thing:toilet", "from:8"]);
+    expect(shareLane(fifteen, twentyOne)).toBe(true);
   });
 
   it("a thing's first picture keeps its thing's lane; a screen its own; references of other things only take the earliest", () => {
-    expect(varietyLane({ keyThing: "Bin " } as StoryboardScene)).toBe("thing:bin");
-    expect(varietyLane({ keyThing: "bin", screenSetup: SCREEN_SETUPS[1], memoryRefScenes: [ref(2)] } as StoryboardScene)).toBe("screen");
-    expect(varietyLane({ keyThing: "cart", memoryRefScenes: [ref(16, false), ref(3, false)] } as StoryboardScene)).toBe("from:3");
+    expect(varietyLanes({ keyThing: "Bin " } as StoryboardScene)).toEqual(["thing:bin"]);
+    expect(varietyLanes({ keyThing: "bin", screenSetup: SCREEN_SETUPS[1], memoryRefScenes: [ref(2)] } as StoryboardScene)).toEqual(["screen"]);
+    expect(varietyLanes({ keyThing: "cart", memoryRefScenes: [ref(16, false), ref(3, false)] } as StoryboardScene)).toEqual(["thing:cart", "from:3"]);
     // Its own thing's first picture decides over an earlier picture lent for another thing beside it.
-    expect(varietyLane({ keyThing: "cart", memoryRefScenes: [ref(9), ref(3, false)] } as StoryboardScene)).toBe("from:9");
-    expect(varietyLane({} as StoryboardScene)).toBeNull();
+    expect(varietyLanes({ keyThing: "cart", memoryRefScenes: [ref(9), ref(3, false)] } as StoryboardScene)).toEqual(["thing:cart", "from:9"]);
+    // No key thing, drawn from a picture: only the memory lane.
+    expect(varietyLanes({ memoryRefScenes: [ref(4, false)] } as StoryboardScene)).toEqual(["from:4"]);
+    expect(varietyLanes({} as StoryboardScene)).toEqual([]);
   });
 
-  it("drawn from different pictures: different lanes, drawn in parallel as before", () => {
+  it("drawn from different pictures, of different things: no lane in common, drawn in parallel as before", () => {
     const a = { keyThing: "bin", memoryRefScenes: [ref(2)] } as StoryboardScene;
     const b = { keyThing: "card", memoryRefScenes: [ref(7)] } as StoryboardScene;
-    expect(varietyLane(a)).not.toBe(varietyLane(b));
+    expect(shareLane(a, b)).toBe(false);
+  });
+
+  it("a draw in two lanes waits for the draws before it in both, and the next draw in either waits for it", async () => {
+    const order: string[] = [];
+    const draw = (name: string, ms: number) => () =>
+      new Promise<void>(res => {
+        order.push(`start ${name}`);
+        setTimeout(() => (order.push(`end ${name}`), res()), ms);
+      });
+    await Promise.all([
+      withScreenTurn(83, draw("toilet", 30), ["thing:toilet"]),
+      withScreenTurn(83, draw("bin", 20), ["from:2"]),
+      withScreenTurn(83, draw("both", 1), ["thing:toilet", "from:2"]),
+      withScreenTurn(83, draw("next bin", 1), ["thing:bin", "from:2"]),
+      withScreenTurn(83, draw("other", 1), ["thing:card"]),
+    ]);
+    expect(order.indexOf("end toilet")).toBeLessThan(order.indexOf("start both"));
+    expect(order.indexOf("end bin")).toBeLessThan(order.indexOf("start both"));
+    expect(order.indexOf("end both")).toBeLessThan(order.indexOf("start next bin"));
+    // A lane nobody else is in is not held up.
+    expect(order.indexOf("start other")).toBeLessThan(order.indexOf("end bin"));
   });
 
   it("a panel waits for the draw in front of it only so long, and the draw after it waits for both", async () => {

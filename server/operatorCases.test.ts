@@ -6194,12 +6194,18 @@ describe("no near copy of the picture a picture was drawn from (round 13, jobs 4
   });
 
   it("408-4/5: the toilet's panel and the bin, both drawn from scene 2, share one lane; pictures of other memories do not", async () => {
-    const { varietyLane } = await import("./pictureVariety");
+    const { varietyLanes } = await import("./pictureVariety");
+    const shareLane = (a: StoryboardScene, b: StoryboardScene) => varietyLanes(a).some(l => varietyLanes(b).includes(l));
     const panel = { index: 4, hostPresent: true, keyThing: "toilet", memoryRefScenes: [ref(2)] } as StoryboardScene;
     const bin = { index: 5, keyThing: "bin", memoryRefScenes: [ref(2), ref(3)] } as StoryboardScene;
-    expect(varietyLane(panel)).toBe(varietyLane(bin));
+    expect(shareLane(panel, bin)).toBe(true);
     // 409: the sympathy card's first picture and the aisle drawn from scene 3 are not one memory.
-    expect(varietyLane({ index: 2, keyThing: "sympathy card" } as StoryboardScene)).not.toBe(varietyLane(bin));
+    expect(shareLane({ index: 2, keyThing: "sympathy card" } as StoryboardScene, bin)).toBe(false);
+    // 408-21: drawn from scene 8's toilet paper, it still waits for the toilet's other pictures (scene
+    // 15, drawn from scene 2) — the thing's lane is kept beside the memory lane, never swapped for it.
+    const fifteen = { index: 15, keyThing: "toilet", memoryRefScenes: [ref(2, false)] } as StoryboardScene;
+    const twentyOne = { index: 21, keyThing: "toilet", memoryRefScenes: [ref(8, false)] } as StoryboardScene;
+    expect(shareLane(fifteen, twentyOne)).toBe(true);
   });
 
   it("409-3: a fallback that shipped is remembered, so the next picture drawn from it meets it", async () => {
