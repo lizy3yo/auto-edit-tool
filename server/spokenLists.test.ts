@@ -753,6 +753,18 @@ describe("a parallel series keeps its last member (job 400 at 2:36, 'everyone co
       expect(withLastSeriesMember(s, items)).toBe(items);
   });
 
+  it("a summing-up that says the word again inside a clause of its own is not a member; 'is' alone does not stop one", () => {
+    // Review of the fix: "the truth is everyone complains" echoes "complain" after its own two words,
+    // so it had become item three of a list that was never there.
+    expect(listsByShape("The farmer complains, the senator complains, and the truth is everyone complains.")).toEqual([]);
+    expect(listsByShape("The farmer complains, the senator complains, the old complain, and the point was that everyone complains.")).toEqual([THREE]);
+    expect(withLastSeriesMember("The farmer complains, the senator complains, the old complain, and the truth is we all complain.", THREE)).toBe(THREE);
+    // A member whose own verb is "is" stays a member.
+    expect(listsByShape("The farmer complains, the senator complains, and the child is already learning to complain.")).toEqual([
+      ["The farmer complains", "the senator complains", "the child is already learning to complain"],
+    ]);
+  });
+
   it("the film is cut on all four: 'and the young…' is an item's picture", () => {
     const CUT = [
       scene(29, "Everyone complains that life is too short, Seneca says."),

@@ -355,6 +355,11 @@ const SERIES_OPENER = new Set(["a", "an", "the", "my", "your", "our", "his", "he
 const SERIES_CLAUSE_MAX_WORDS = 6;
 /** Where the series' last member stops: the next comma, semicolon, colon or dash, or the sentence's end. */
 const MEMBER_END = /[,;:—–]|\s-\s|[.!?](?=["')\]]?(?:\s|$))/;
+/** Words that open a clause of its own right after "the truth is" / "the point was" ("…is EVERYONE complains"). */
+const OWN_CLAUSE_OPENER = new Set([
+  "that", "everyone", "everybody", "nobody", "no", "none", "someone", "somebody", "people", "there",
+  "i", "we", "you", "they", "he", "she", "it",
+]);
 
 /**
  * A PARALLEL SERIES KEEPS ITS LAST MEMBER (2026-10-18, job 400 at 2:36): "The farmer complains, the
@@ -367,8 +372,9 @@ const MEMBER_END = /[,;:—–]|\s-\s|[.!?](?=["')\]]?(?:\s|$))/;
  * again in any form ("… rehearsing the complaint"), that clause is the series' last item, whole, up
  * to the next comma or the sentence's end — so its picture is the whole clause, like the items before
  * it. Nothing is added without that echo: "the farmer complains, the senator complains, and the truth
- * is nobody listens" ends on a clause about something else, and a list of things that do not end on
- * one word ("a saw, a drill, and the whole thing cost me forty dollars") is never touched. The longer
+ * is nobody listens" ends on a clause about something else (so does "…, and the truth is everyone
+ * complains", which says the word again only inside a clause of its own), and a list of things that do
+ * not end on one word ("a saw, a drill, and the whole thing cost me forty dollars") is never touched. The longer
  * list is kept only when it still passes `validateSpokenList` and `itemsAreThings`, so a member that
  * fails them never costs the list the items it had. Returns the same array when nothing is added. Pure.
  */
@@ -405,6 +411,10 @@ export function withLastSeriesMember(sentence: string, items: string[]): string[
   // Said again AFTER its own who or what, like the clauses before it: "and the complaints never end"
   // only sums the series up — its subject is the shared word itself, not one more member.
   if (!words.slice(2).some(echoes)) return items;
+  // "and the truth is everyone complains" says the word again inside a clause of its own — a summing-up
+  // ("the truth is …", "the point was that …"), not one more member; "and the child is already learning
+  // to complain" is still one.
+  if ((words[2] === "is" || words[2] === "was") && OWN_CLAUSE_OPENER.has(words[3] ?? "")) return items;
   const longer = [...items, member];
   return validateSpokenList(sentence, longer) && itemsAreThings(sentence, longer) ? longer : items;
 }
