@@ -14,7 +14,9 @@
  *                                       before a joining word or a named thing, `naturalBreak`; a
  *                                       take that stops anywhere else finishes its sentence or hands
  *                                       over at its own last break, `finishSentenceAfterHost`); no
- *                                       flash shots, and no beat the voice gives no time at all.
+ *                                       flash shots, no beat the voice gives no time at all, and the
+ *                                       film never ends on a host shot under a second
+ *                                       (`closingFoldTarget`).
  *  8. Host often                      — ≤40 s without the host in the first 3 min, ≤75 s after.
  *  9. Pictures don't linger           — a picture outside the CTA runs ≤6.5 s.
  * 11. Real video                      — 10-25% of cutaway time moves.
@@ -90,6 +92,15 @@ export const PICTURE_MAX_SEC = pictureMaxSecAt(0, 0) + PICTURE_MAX_SLACK_SEC;
  * 'HOST_SENTENCE_MAX_SEC' before initialization"; vitest read it as undefined).
  */
 export const COVER_SENTENCE_MAX_SEC = 15;
+/**
+ * Rule 7 at the very end: the shortest host shot a film may END on. The audit of 139 production
+ * films found 21 ending on a host shot under a second — the goodbye blinking past as the film
+ * stops (Hannah's job 45: "…one decision you make at the end of every square, | not at the
+ * beginning." 0.80 s on the host after a 4.7 s picture; Pearl's job 297: "This is Pearl Parker."
+ * 0.90 s after a 12.8 s picture). Such a beat's words go to the beat before it
+ * (`closingFoldTarget`), so whatever was on screen runs to the end.
+ */
+export const CLOSING_HOST_MIN_SEC = 1;
 /**
  * Rule 11: the share of cutaway time that moves — between these (2026-09-28, the operator: "less
  * video b-roll than the image"; it used to demand at least 30%). Below the floor the gate adds
@@ -181,6 +192,21 @@ export function checkPlan(
       });
       return;
     }
+    // The film's last beat a host shot under a second: named FIRST for this beat, so the gate gives
+    // its words to the beat before it before the protected-host rule below can hand the host that
+    // beat's picture instead. The other findings stay, as the fallback when nothing may take it.
+    if (
+      i === scenes.length - 1 &&
+      s.hostPresent &&
+      !fixed(s) &&
+      len(s) > 0 &&
+      len(s) < CLOSING_HOST_MIN_SEC
+    )
+      findings.push({
+        rule: 7,
+        scene: s.index,
+        detail: `closing host shot under ${CLOSING_HOST_MIN_SEC} s (${len(s).toFixed(2)}s): "${textOf(s).slice(0, 70)}"`,
+      });
     const flash = s.listCut ? LIST_SHOT_MIN_SEC : s.wordCut ? SHOT_MIN_SEC : FLASH_SHOT_SEC;
     // The final snap onto real pauses moves a cut by up to ~0.2 s after the shot list measured it.
     if (len(s) > 0 && len(s) < flash - 0.2)
@@ -490,6 +516,33 @@ function mergeInto(
     keep.shotGroup ??= drop.shotGroup;
   }
   return scenes.filter((_, k) => k !== dropAt);
+}
+
+/**
+ * THE FILM ENDS ON A BEAT THAT CAN BE SEEN (the audit's last open item, 2026-10-18: 21 of 139
+ * production films ended on a host shot under `CLOSING_HOST_MIN_SEC`). Where the words of that
+ * closing beat go: the beat right before it, which keeps its own picture and runs to the end. A
+ * full-frame host take there is joined into one continuous take — the take's photo is the photo the
+ * words are said from, and `assignHostShots` gives a joined take one photo after the gate, so the
+ * angle numbers the rotation left on two neighbours are not compared (it alternates them on
+ * purpose). Any other beat — a picture, a list item (its mark stays), a split screen — takes the
+ * words and plays on under them. Never across a CTA edge, never a QR, cover or asset beat, never the
+ * QR block's release beat (its last words pin the block's end on the voice), never the two cold-open
+ * angles, never a render already paid for, and a host take (full frame or split) only while the
+ * joined lip-sync fits `HOST_JOIN_MAX_SEC`. The rule replaces the protected-host one for this beat:
+ * that one handed the host the picture before it (job 45's 0.80 s goodbye became an 8.9 s take
+ * that took the blanket picture's sentence away). `i` is the closing beat; -1 when nothing may take
+ * it (the gate then names it on the job). Pure.
+ */
+export function closingFoldTarget(scenes: StoryboardScene[], i: number): number {
+  const s = scenes[i];
+  const before = scenes[i - 1];
+  if (!s || !before || i !== scenes.length - 1 || !s.hostPresent || fixed(s)) return -1;
+  if (!sameRegister(s, before) || before.qrTail) return -1;
+  if (s.hostOpener && before.hostOpener) return -1;
+  if (s.submits?.length || before.submits?.length) return -1;
+  if (before.hostPresent && len(before) + len(s) > HOST_JOIN_MAX_SEC) return -1;
+  return i - 1;
 }
 
 /** The pause nearest `t` (its middle), when one is within `within` seconds. */
@@ -1605,6 +1658,29 @@ export function enforcePlanRules(
         if (keep.narrationStartSec === was.start && keep.narrationEndSec === was.end)
           keep.audioUrl = was.audioUrl;
         did = `unseen beat at scene ${s.index} joined scene ${keep.index}`;
+      }
+    } else if (f.rule === 7 && s && i >= 0 && /^closing host shot/.test(f.detail)) {
+      // The goodbye's words go to the beat before it, which keeps its picture (and list mark) and
+      // runs to the end; a host take there becomes one take with them.
+      const into = closingFoldTarget(scenes, i);
+      if (into >= 0) {
+        const keep = scenes[into];
+        const listCut = keep.listCut;
+        const take = !!keep.hostPresent;
+        const what = take ? "split screen" : keep.listCut ? "list item" : "picture";
+        const sec = len(s).toFixed(2);
+        scenes = mergeInto(scenes, into, i);
+        keep.listCut = listCut;
+        if (take) {
+          // The words are said in this take now, so their roles come along (the intro on a "This
+          // is <host>" goodbye, the end's protection).
+          if (s.hostIntro) keep.hostIntro = true;
+          if (s.hostProtected) keep.hostProtected = true;
+        }
+        did =
+          take && !keep.splitVisual
+            ? `closing host shot at scene ${s.index} (${sec}s) joined the host take before it`
+            : `closing host shot at scene ${s.index} (${sec}s) folded into the ${what} before it, which runs to the end`;
       }
     } else if (f.rule === 7 && s && i >= 0) {
       const protectedHost = isProtectedHost(scenes, i, opts.sectionSec ?? 0);

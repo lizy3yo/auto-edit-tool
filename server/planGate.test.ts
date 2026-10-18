@@ -1,6 +1,15 @@
 import { describe, expect, it } from "vitest";
 import type { LongformInputParams, StoryboardScene } from "@shared/types";
-import { breakBetween, capMovingLength, checkPlan, enforcePlanRules, len, topicOf } from "./planGate";
+import {
+  breakBetween,
+  capMovingLength,
+  checkPlan,
+  CLOSING_HOST_MIN_SEC,
+  closingFoldTarget,
+  enforcePlanRules,
+  len,
+  topicOf,
+} from "./planGate";
 
 const params = {
   faceImageUrl: "https://example.com/host.jpg",
@@ -1285,5 +1294,175 @@ describe("the host comes back after the book cover on the whole number, never in
     expect(cover.narrationEndSec!).toBeGreaterThanOrEqual(192.911);
     expect(cover.narrationEndSec!).toBeLessThanOrEqual(193.116);
     expect(host.narrationStartSec).toBeCloseTo(cover.narrationEndSec!, 5);
+  });
+});
+
+describe("the film never ends on a host shot under a second (the audit's last open item)", () => {
+  // 21 of 139 production films ended on the goodbye as a host shot under a second. Its words go to
+  // the beat before it: a host take becomes one take with them, anything else plays on to the end.
+  const closing = (r: { unresolved: { detail: string }[] }) =>
+    r.unresolved.filter(f => /^closing host shot/.test(f.detail));
+
+  it("names only the LAST beat, and only a measured one under a second", () => {
+    const scenes = film([
+      ["H", 5, sentence(1)],
+      ["H", 0.7, "Right."],
+      ["P", 6, sentence(2)],
+      ["H", 0.8, "See you next week."],
+    ]);
+    const found = checkPlan(scenes, params).findings.filter(f => /^closing host shot/.test(f.detail));
+    expect(found).toEqual([
+      expect.objectContaining({ rule: 7, scene: 4, detail: expect.stringContaining("(0.80s)") }),
+    ]);
+    // A beat with no length yet is not measured: nothing to say about it.
+    const unmeasured = scenes.map((s, k) =>
+      k === 3 ? { ...s, narrationStartSec: undefined, narrationEndSec: undefined, audioDuration: undefined } : s
+    );
+    expect(checkPlan(unmeasured, params).findings.some(f => /^closing host shot/.test(f.detail))).toBe(false);
+    expect(CLOSING_HOST_MIN_SEC).toBe(1);
+  });
+
+  it("job 45's shape: the goodbye after a picture goes to that picture, which runs to the end", () => {
+    const scenes = film([
+      ["H", 6, "There is a bag somewhere in your house that holds the end of every project you have ever finished."],
+      ["P", 5, "and every so often you look at it and close it again. But there is a blanket"],
+      ["P", 2, "that was built for exactly that bag,"],
+      ["P", 4.67, "and the whole thing turns on one decision you make at the end of every square,"],
+      ["H", 0.8, "not at the beginning."],
+    ]);
+    const end = scenes[4].narrationEndSec;
+    const r = enforcePlanRules(scenes, params);
+    expect(closing(r)).toEqual([]);
+    expect(r.scenes).toHaveLength(4);
+    const last = r.scenes[3];
+    expect(last.hostPresent).toBeFalsy();
+    expect(last).toMatchObject({
+      scriptText: "and the whole thing turns on one decision you make at the end of every square, not at the beginning.",
+      showSubject: "thing 4",
+      narrationStartSec: 13,
+      narrationEndSec: end,
+    });
+    expect(last.audioUrl).toBeUndefined();
+    // The picture before it is not touched: the host is not handed its sentence back.
+    expect(r.scenes[2]).toMatchObject({ scriptText: "that was built for exactly that bag,", audioUrl: "https://example.com/2.mp3" });
+    expect(r.fixes).toContainEqual(expect.stringMatching(/^closing host shot at scene 5 \(0\.80s\) folded into the picture before it/));
+  });
+
+  it("a full-frame host take before it becomes one take with the goodbye", () => {
+    const scenes = film([
+      ["H", 5, sentence(1)],
+      ["P", 6, sentence(2)],
+      ["H", 8, "That's the whole trick, and it costs you nothing."],
+      ["H", 0.6, "See you next week."],
+    ]);
+    scenes[3].hostProtected = true;
+    const r = enforcePlanRules(scenes, params);
+    expect(closing(r)).toEqual([]);
+    expect(r.scenes).toHaveLength(3);
+    expect(r.scenes[2]).toMatchObject({
+      hostPresent: true,
+      hostProtected: true,
+      scriptText: "That's the whole trick, and it costs you nothing. See you next week.",
+      narrationStartSec: 11,
+      narrationEndSec: 19.6,
+    });
+    expect(r.fixes).toContainEqual(expect.stringMatching(/joined the host take before it$/));
+  });
+
+  it("a split screen or a list item before it keeps its picture (and the list its mark)", () => {
+    const split = film([
+      ["H", 5, sentence(1)],
+      ["P", 6, sentence(2)],
+      ["H", 7, "And that is all the glue it ever needs."],
+      ["H", 0.7, "Go build it."],
+    ]);
+    split[2].splitVisual = "the glued joint drying in the clamp";
+    const r = enforcePlanRules(split, params);
+    expect(r.scenes.at(-1)).toMatchObject({
+      hostPresent: true,
+      splitVisual: "the glued joint drying in the clamp",
+      scriptText: "And that is all the glue it ever needs. Go build it.",
+    });
+    expect(r.fixes).toContainEqual(expect.stringMatching(/folded into the split screen before it, which runs to the end$/));
+
+    const list = film([
+      ["H", 5, sentence(1)],
+      ["P", 3, "You need three things:"],
+      ["P", 0.9, "a saw,"],
+      ["P", 0.9, "a drill,"],
+      ["P", 1.2, "and some glue."],
+      ["H", 0.7, "Go build it."],
+    ]);
+    for (const k of [2, 3, 4]) Object.assign(list[k], { listCut: true, wordCut: true });
+    const l = enforcePlanRules(list, params);
+    expect(l.scenes.at(-1)).toMatchObject({
+      listCut: true,
+      showSubject: "thing 5",
+      scriptText: "and some glue. Go build it.",
+    });
+    expect(l.scenes.at(-1)?.hostPresent).toBeFalsy();
+  });
+
+  it("a long closing host take stays as it is", () => {
+    const scenes = film([
+      ["H", 5, sentence(1)],
+      ["P", 6, sentence(2)],
+      ["H", 3.6, "Keep all ten fingers. See you at the bench."],
+    ]);
+    expect(checkPlan(scenes, params).findings.some(f => /^closing host shot/.test(f.detail))).toBe(false);
+    const r = enforcePlanRules(scenes, params);
+    expect(r.scenes).toHaveLength(3);
+    expect(r.scenes[2]).toMatchObject({
+      hostPresent: true,
+      scriptText: "Keep all ten fingers. See you at the bench.",
+      narrationStartSec: 11,
+      narrationEndSec: 14.6,
+      audioUrl: "https://example.com/2.mp3",
+    });
+    expect(r.scenes[1].scriptText).toBe(sentence(2));
+  });
+
+  it("never into the big QR, across a CTA edge, past the one-take limit, or over a paid render — the job is told", () => {
+    const qr = film([
+      ["H", 5, sentence(1)],
+      ["H", 6, "The whole guide is in the link below."],
+      ["P", 6, "Scan the code now."],
+      ["H", 0.8, "See you next time."],
+    ]);
+    Object.assign(qr[1], { cta: true, ctaIndex: 0, qrCorner: true });
+    Object.assign(qr[2], { cta: true, ctaIndex: 0, qrHero: true, qrTail: true });
+    const r = enforcePlanRules(qr, params);
+    expect(closing(r)).toHaveLength(1);
+    expect(r.scenes.find(s => s.qrHero)?.scriptText).toBe("Scan the code now.");
+    expect(r.scenes.at(-1)).toMatchObject({ hostPresent: true, scriptText: "See you next time." });
+
+    // A pitch picture of an unmarked CTA (cta, no QR) is still the other side of the edge.
+    const edge = film([
+      ["H", 5, sentence(1)],
+      ["P", 6, "It costs twelve dollars and ships in a day."],
+      ["H", 0.8, "See you next time."],
+    ]);
+    Object.assign(edge[1], { cta: true, ctaIndex: 0 });
+    expect(closingFoldTarget(edge, 2)).toBe(-1);
+
+    const long = film([
+      ["H", 5, sentence(1)],
+      ["P", 6, sentence(2)],
+      ["H", 59.5, sentence(3)],
+      ["H", 0.7, "See you next week."],
+    ]);
+    expect(closingFoldTarget(long, 3)).toBe(-1);
+    expect(closing(enforcePlanRules(long, params))).toHaveLength(1);
+
+    const paid = film([
+      ["H", 5, sentence(1)],
+      ["P", 6, sentence(2)],
+      ["H", 0.7, "See you next week."],
+    ]);
+    expect(closingFoldTarget(paid, 2)).toBe(1);
+    paid[2].submits = [{ provider: "heygen", at: "x", reason: "first", sec: 0.7 }] as any;
+    expect(closingFoldTarget(paid, 2)).toBe(-1);
+    // Only the last beat is a closing beat.
+    expect(closingFoldTarget(film([["H", 5, sentence(1)], ["H", 0.7, "Right."], ["P", 6, sentence(2)]]), 1)).toBe(-1);
   });
 });

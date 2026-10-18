@@ -5360,3 +5360,83 @@ describe("each paid video is rendered once (the operator, 2026-10-18)", () => {
     }
   });
 });
+
+describe("the film never ends on a host shot under a second (the audit, 2026-10-18)", () => {
+  // 21 of 139 production films ended on the goodbye as a host shot under a second. Its words go to
+  // the beat before it, so what was on screen runs to the end. Scenes and ranges are the jobs' own.
+  const at = (index: number, kind: "H" | "P", from: number, to: number, scriptText: string, over: Partial<StoryboardScene> = {}) =>
+    ({
+      index,
+      scriptText,
+      narration: scriptText,
+      visualPrompt: `picture ${index}`,
+      showSubject: kind === "P" ? `picture ${index}` : undefined,
+      hostPresent: kind === "H" ? true : undefined,
+      stillImage: kind === "P" ? true : undefined,
+      narrationStartSec: from,
+      narrationEndSec: to,
+      audioDuration: to - from,
+      audioUrl: `https://example.com/${index}.mp3`,
+      ...over,
+    }) as StoryboardScene;
+
+  it("job 45: Hannah's 'not at the beginning.' (0.80 s on the host) ends on the picture of its sentence", async () => {
+    const { enforcePlanRules } = await import("./planGate");
+    const scenes = [
+      at(1, "H", 0, 6.00025, "There is a bag somewhere in your house that holds the end of every project you have ever finished.", { hostOpener: true }),
+      at(2, "P", 6.00025, 9.94406, "A yard of green in one corner, half a ball of rust in another,"),
+      at(3, "P", 9.94406, 13.0785, "and not one of them long enough to make anything on its own."),
+      at(4, "P", 13.0785, 15.8982, "So the bag sits, and it grows,"),
+      at(5, "P", 15.8982, 20.9164, "and every so often you look at it and close it again. But there is a blanket"),
+      at(6, "P", 20.9164, 22.8738, "that was built for exactly that bag,"),
+      at(7, "P", 22.8738, 27.5443, "and the whole thing turns on one decision you make at the end of every square,"),
+      at(8, "H", 27.5443, 28.342, "not at the beginning."),
+    ];
+    const r = enforcePlanRules(scenes, { faceImageUrl: "https://example.com/hannah.jpg", hostName: "Hannah Yoder" } as any);
+    const last = r.scenes.at(-1)!;
+    expect(last.hostPresent).toBeFalsy();
+    expect(last).toMatchObject({
+      showSubject: "picture 7",
+      scriptText: "and the whole thing turns on one decision you make at the end of every square, not at the beginning.",
+      narrationStartSec: 22.8738,
+      narrationEndSec: 28.342,
+    });
+    // It used to become an 8.9 s host take that took "But there is a blanket that was built for
+    // exactly that bag," away from the pictures.
+    expect(r.scenes.at(-2)?.scriptText).toBe("that was built for exactly that bag,");
+    expect(r.unresolved.filter(f => /closing host shot/.test(f.detail))).toEqual([]);
+  });
+
+  it("job 297: Pearl's 'This is Pearl Parker.' (0.90 s) joins the line before it, and the name stays on camera", async () => {
+    const { checkPlan, closingFoldTarget, enforcePlanRules } = await import("./planGate");
+    const params = { faceImageUrl: "https://example.com/pearl.jpg", hostName: "Pearl Parker" } as any;
+    const scenes = [
+      at(1, "P", 177.495, 182.009, "Knot it on the inside, weave the ends away, and turn it right side out.", { wordCut: true }),
+      at(2, "P", 182.009, 185.352, "Every stitch in that hat is a knit or a purl,", { wordCut: true, shotGroup: 37 }),
+      at(
+        3,
+        "P",
+        185.352,
+        198.135,
+        "and on a cold morning, your ears won't have the faintest idea it came off a loom. For a new slow, beginner friendly lesson every week, subscribe to Pearl Parker, then tell me in the comments whose head your first hat is going on.",
+        { wordCut: true, shotGroup: 37 }
+      ),
+      at(4, "H", 198.135, 199.035, "This is Pearl Parker.", { hostIntro: true }),
+    ];
+    expect(checkPlan(scenes, params).findings).toContainEqual(
+      expect.objectContaining({ rule: 7, scene: 4, detail: expect.stringMatching(/^closing host shot under 1 s \(0\.90s\)/) })
+    );
+    expect(closingFoldTarget(scenes, 3)).toBe(2);
+    const r = enforcePlanRules(scenes, params);
+    const last = r.scenes.at(-1)!;
+    expect(r.scenes).toHaveLength(3);
+    // The words go to the picture first; the line then names the host, so it is the host's take
+    // (the self-introduction rule), never a 0.9 s blink.
+    expect(r.fixes.slice(0, 2)).toEqual([
+      "closing host shot at scene 4 (0.90s) folded into the picture before it, which runs to the end",
+      "introduction put on camera at scene 3",
+    ]);
+    expect(last).toMatchObject({ hostPresent: true, hostIntro: true, narrationStartSec: 185.352, narrationEndSec: 199.035 });
+    expect(last.scriptText).toMatch(/whose head your first hat is going on\. This is Pearl Parker\.$/);
+  });
+});
