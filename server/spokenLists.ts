@@ -398,10 +398,12 @@ const waysOf = (step: string) => step.split(/\s*[,;]\s*(?=(?:or|alternatively)\b
  * sentence shape proposed it, and became three pictures and a list graphic. For a list of `steps` the
  * word limit holds for each WAY of a step (`waysOf`): job 399's "catch a flight attendant as they pass,
  * or step back to the galley" is one step of 13 words, two ways of 7 and 6. `maxWords` is that limit:
- * a list graphic's rows are held to everything else but not to it (`notAListAsSaid`). Pure.
+ * a list graphic's rows are held to everything else but not to it (`notAListAsSaid`). Two steps are a
+ * list only when each does something to a thing it names (`stepsAreASequence`, job 408). Pure.
  */
 export function validateSpokenList(sentence: string, items: string[], steps = false, maxWords = LIST_ITEM_MAX_WORDS): boolean {
   if (!Array.isArray(items) || items.length < 2) return false;
+  if (steps && !stepsAreASequence(items)) return false;
   if (ledByGeneralHead(items)) return false;
   const spans = tokenSpans(sentence);
   const toks = spans.map(t => t.tok);
@@ -464,10 +466,11 @@ function describingWords(sentence: string, items: string[]): boolean {
  * sentence is not a list of things, so the WHOLE list goes — never trimmed to the items that pass:
  * trimmed, "the fence for thrifty, old-fashioned chicken keeping, tell me" (job 355) and "Two
  * thousand years ago, a man named … wrote a short, furious" (job 400) each still left two false
- * items. Never asked of a sequence of steps (steps are things someone does). Pure.
+ * items. Two bare words alone are no list of things either (`twoBareWords`: "Flush, and follow.", job
+ * 408). Never asked of a sequence of steps (steps are things someone does). Pure.
  */
 export function itemsAreThings(sentence: string, items: string[]): boolean {
-  return items.every(i => !notAThing(String(i ?? ""))) && !describingWords(sentence, items);
+  return items.every(i => !notAThing(String(i ?? ""))) && !describingWords(sentence, items) && !twoBareWords(sentence, items);
 }
 
 /** A point a host lists rather than a thing: a topic opening on a question word ("where they go",
@@ -538,6 +541,9 @@ export function notAListAsSaid(script: string, rows: string[], opts: { points?: 
     if (!validateSpokenList(sentences[s], group, false, Infinity))
       return `${named} are not said as a list — one after another, joined by commas — in ${quoted(sentences[s])}`;
     if (describingWords(sentences[s], group)) return `${named} are describing words in ${quoted(sentences[s])}, not things`;
+    // A job keeps the lists found when it was made: job 408 kept "Flush, follow" and its planner
+    // numbered it "1 Flush → 2 Follow".
+    if (twoBareWords(sentences[s], group)) return `${named} are two bare words in ${quoted(sentences[s])} — as likely two actions as two things`;
   }
   return undefined;
 }
@@ -638,6 +644,8 @@ NOT a list:
 - the describing words in front of ONE thing ("she wrote a long, slow, careful letter" is one letter),
   and the time a sentence opens on ("years ago, …")
 - a story of what happened ("I went home, made dinner, and slept") — steps are things to DO
+- words about how the video itself will go, or two bare words ("watch, and learn") — steps are three
+  or more, or two that each do something to a thing they name ("fill the jar, and close the lid")
 
 Answer with JSON only: {"lists":[{"sentence":<number>,"kind":"things"|"steps","items":["…","…"]}]} —
 {"lists":[]} when there are none.`;
@@ -770,32 +778,107 @@ export function stepsByShape(sentence: string): string[] | null {
   const last = pieces[pieces.length - 1];
   if (!/^(?:and|then|and then)\s/i.test(last)) return null;
   const items = pieces.map(p => unmaskSeriesCommas(p.replace(/^(?:and then|and|then)\s+/i, "").replace(/[.!?]+$/, "").trim()));
-  const isStep = (t: string) => {
-    // The step itself is its first way; a choice joined to it is held only to the length limit.
-    const ways = waysOf(t);
-    const words = ways[0].split(/\s+/);
-    const first = (words[0] ?? "").replace(/[^a-z]/gi, "").toLowerCase();
-    return (
-      words.length >= 2 &&
-      ways.every(w => w.split(/\s+/).length <= STEP_MAX_WORDS) &&
-      !!first &&
-      !SUBJECT_START.test(first) &&
-      // …and a subject in a contraction ("and you'll know", "and I'll answer" read "youll", "ill"
-      // above): a sentence an "or" piece used to sink can now reach this line, so its last piece is
-      // held to the same rule.
-      !SUBJECT_START.test((words[0] ?? "").toLowerCase().replace(/’/g, "'")) &&
-      !DETERMINER.test(t) &&
-      !NOT_A_LIST_ITEM.has(first) &&
-      !/ly$/.test(first) &&
-      !JOINERS.has(first) &&
-      // An instruction opens on its plain verb ("drill", "oil", "give"): never a past or -ing form,
-      // never "money was tight" (a subject then its verb), never a date or a number.
-      !/(?:ed|ing)$/.test(first) &&
-      !STATE_VERB.test(words[1] ?? "") &&
-      !/\d/.test(t)
-    );
-  };
-  return items.every(isStep) ? items : null;
+  return items.every(isInstruction) ? items : null;
+}
+
+/**
+ * Whether one step is a short instruction that starts on its own verb-like word — no subject ("I
+ * went…"), no determiner ("a saw" is a thing), no aside ("Honestly"), at most `STEP_MAX_WORDS` words
+ * in each of its ways (`waysOf`). Pure.
+ */
+function isInstruction(t: string): boolean {
+  // The step itself is its first way; a choice joined to it is held only to the length limit.
+  const ways = waysOf(t);
+  const words = ways[0].split(/\s+/);
+  const first = (words[0] ?? "").replace(/[^a-z]/gi, "").toLowerCase();
+  return (
+    words.length >= 2 &&
+    ways.every(w => w.split(/\s+/).length <= STEP_MAX_WORDS) &&
+    !!first &&
+    !SUBJECT_START.test(first) &&
+    // …and a subject in a contraction ("and you'll know", "and I'll answer" read "youll", "ill"
+    // above): a sentence an "or" piece used to sink can now reach this line, so its last piece is
+    // held to the same rule.
+    !SUBJECT_START.test((words[0] ?? "").toLowerCase().replace(/’/g, "'")) &&
+    !DETERMINER.test(t) &&
+    !NOT_A_LIST_ITEM.has(first) &&
+    !/ly$/.test(first) &&
+    !JOINERS.has(first) &&
+    // An instruction opens on its plain verb ("drill", "oil", "give"): never a past or -ing form,
+    // never "money was tight" (a subject then its verb), never a date or a number.
+    !/(?:ed|ing)$/.test(first) &&
+    !STATE_VERB.test(words[1] ?? "") &&
+    !/\d/.test(t)
+  );
+}
+
+/** Words right after a step's verb that point at a thing named before ("drain IT outside"). */
+const OBJECT_WORD = new Set(["it", "them", "this", "that", "these", "those", "both", "everything"]);
+/** A word that may stand between a verb and the thing it acts on ("look AT it", "turn OVER the board"). */
+const VERB_PARTICLE = new Set(["at", "to", "on", "onto", "into", "in", "over", "with", "under", "through", "around", "up", "down", "out", "off"]);
+
+/**
+ * Whether one step does something TO A THING it names: past its verb, a noun phrase led by "a/the/
+ * your/…" or a count ("hold your phone up to the screen", "tap the link"), or "it/them/…" right after
+ * the verb, or after the verb and one particle, for a thing named before ("drain it outside", "store it
+ * sealed", "look at it"). A bare verb names nothing ("flush", "follow"), and neither does a step that
+ * only says how, when or where ("go slow", "wait until everyone's been served", "look at what it gives
+ * back"). Pure.
+ */
+function actsOnAThing(step: string): boolean {
+  const words = waysOf(step)[0]
+    .trim()
+    .split(/\s+/)
+    .map(w => w.toLowerCase().replace(/’/g, "'").replace(/^[^a-z0-9$]+|[^a-z0-9%']+$/g, ""))
+    .filter(Boolean);
+  if (words.length < 2) return false;
+  if (OBJECT_WORD.has(words[1]) || (VERB_PARTICLE.has(words[1]) && OBJECT_WORD.has(words[2] ?? ""))) return true;
+  return words.slice(1).some((_, k) => DETERMINER.test(words.slice(k + 1).join(" ")));
+}
+
+/** A clause of when or if in front of a step, up to its comma ("when a link shows on the phone, | tap it"). */
+const LEADING_WHEN = /^(?:when|whenever|once|after|before|if|as soon as|until|while)\b[^,]*,\s*/i;
+
+/**
+ * TWO STEPS ARE A LIST ONLY WHEN EACH ONE DOES SOMETHING TO A THING (2026-10-18, job 408 at 1:08): "So.
+ * We will go the way the water goes. Flush, and follow." says how the video will run — follow the
+ * water's route — and it was cut as a list: two flash pictures (0.75 s and 1.28 s) and a numbered "1
+ * Flush → 2 Follow", where "follow" names nothing a picture could show but the same water again.
+ * Three or more steps are a sequence by their number; two are a list of steps only when each is an
+ * instruction (`isInstruction`) on a thing it names (`actsOnAThing`): "Hold your phone up to the
+ * screen with its camera on, and aim it at the little black and white code" (job 410), "drain it
+ * outside, store it sealed" (job 413). A clause of when in front of a step is read past ("…, and when
+ * a link shows on the phone, tap it", job 404). The shape rules never found two (`stepsByShape` needs
+ * three pieces); the model's answer was held to nothing of the kind, and is now (`validateSpokenList`).
+ * Pure.
+ */
+export function stepsAreASequence(items: string[]): boolean {
+  if (!Array.isArray(items) || items.length < 2) return false;
+  if (items.length > 2) return true;
+  return items.every(i => {
+    const step = stripJoiners(String(i ?? "").trim()).replace(LEADING_WHEN, "").replace(/[.!?]+$/, "").trim();
+    return isInstruction(step) && actsOnAThing(step);
+  });
+}
+
+/**
+ * TWO BARE WORDS ARE NO LIST OF THINGS (same film): with no "a/the/some…" and nothing else said with
+ * them, two single words joined by a comma read as two actions as easily as two things — "Flush, and
+ * follow." passed every rule a list of things is held to, by sentence shape and by the model alike,
+ * and became the false list above. One of them a NAME is a thing all the same ("on Etsy, or eBay"): a
+ * capital that is not the sentence's first letter. Three or more bare words stay a list ("Wash,
+ * towel, dryer, brush", job 319), and so do two with words of their own ("brown sugar, and butter").
+ * Pure.
+ */
+export function twoBareWords(sentence: string, items: string[]): boolean {
+  if (!Array.isArray(items) || items.length !== 2) return false;
+  const opening = sentence.trim().replace(/^["'“‘(]+/, "");
+  return items.every(i => {
+    const word = stripJoiners(String(i ?? "").trim()).replace(/[.!?;:,]+$/, "").trim();
+    if (!word || /\s/.test(word) || DETERMINER.test(word)) return false;
+    const name = opening.startsWith(word) ? /[A-Z]/.test(word.slice(1)) : /[A-Z]/.test(word);
+    return !name;
+  });
 }
 
 /** A second word that makes a piece a statement about something ("money WAS tight"), not a step. */

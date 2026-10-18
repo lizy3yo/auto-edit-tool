@@ -2923,10 +2923,8 @@ describe("a host take stops mid-sentence only at a natural break (job 400)", () 
         at(1, 39.9348, 47.253, "Maybe you have done that arithmetic. Most people past sixty have — usually in silence, usually in", { hostPresent: true }),
         at(2, 47.253, 49.2444, "some ordinary place,", { listCut: true }),
       ],
-      [
-        at(1, 67.7626, 70.934, "My name is Gideon Grant, and this channel is for", { hostPresent: true, hostIntro: true }),
-        at(2, 70.934, 76.935, "men and women in their fifties, sixties, and beyond — people carrying real questions about"),
-      ],
+      // The introduction's "…this channel is for | men and women in their fifties" was here too: a
+      // preposition's bare object is no break since job 408 (the case at the end of this file).
     ];
     for (const pair of pairs) {
       expect(checkPlan(pair, params).findings.filter(f => f.rule === 7)).toEqual([]);
@@ -5855,5 +5853,91 @@ describe("Werner's job 408 scene 23: a props look by its parts reaches the first
     );
     const drive = pic(5, "It waits by the road.", "a paved driveway", { keyThing: "driveway" });
     expect(keyThingLookFor(drive, things)).toBe("paved slope in front of the garage, dusted with light frost");
+  });
+});
+
+describe("Werner's job 408 at 0:54 and 1:08: no host take ends on a preposition, and 'Flush, and follow.' is no list (round 13)", () => {
+  // At 0:54 the introduction ended "…This channel is for people in" and the picture began "older houses
+  // and apartments…" — the host's last word on camera was "in". At 1:08 "So. We will go the way the
+  // water goes. Flush, and follow." — how the video will run — played as two flash pictures under a
+  // numbered "1 Flush → 2 Follow". Sentences and scene ranges are the job's own.
+  const at = (index: number, from: number, to: number, scriptText: string, over: Partial<StoryboardScene> = {}) =>
+    ({
+      index,
+      scriptText,
+      showSubject: "x",
+      narrationStartSec: from,
+      narrationEndSec: to,
+      audioDuration: to - from,
+      audioUrl: `https://example.com/${index}.mp3`,
+      wordCut: true,
+      minHoldSec: over.hostPresent ? 2 : 1.2,
+      stillImage: over.hostPresent ? undefined : true,
+      ...over,
+    }) as StoryboardScene;
+
+  it("the introduction hands over before 'in', so the picture opens on 'in older houses and apartments'", async () => {
+    const { enforcePlanRules } = await import("./planGate");
+    const params = { faceImageUrl: "https://example.com/host.jpg", hostName: "Werner Finkbeiner" } as any;
+    const scenes = [
+      at(7, 34.38, 41.85, "One is a thread so thin you would never think it could stop anything, and it can stop a pump a long way from your house."),
+      at(8, 41.8467, 50.9829, "And besides what your own body sends there, exactly one thing is allowed in the bowl. It was built on purpose to do something the nine cannot."),
+      at(9, 50.9829, 54.39365, "I am Werner Finkbeiner. This channel is for people in", { hostPresent: true, hostIntro: true, hostProtected: true }),
+      at(10, 54.39365, 59.4103, "older houses and apartments who would rather understand the cause than pay for the visit."),
+      at(11, 59.4103, 65.482, "Today we go through all nine, one at a time, and look at what the German habit does instead."),
+      at(12, 65.482, 68.6937, "So. We will go the way the water goes.", { hostPresent: true }),
+    ];
+    const r = enforcePlanRules(scenes, params, { budgetSec: 72.16 });
+    const k = r.scenes.findIndex(s => s.hostIntro);
+    expect(r.scenes[k].scriptText).toBe("I am Werner Finkbeiner. This channel is for people");
+    expect(r.scenes[k + 1].scriptText).toMatch(/^in older houses and apartments who would rather/);
+    expect(r.scenes[k + 1].narrationStartSec).toBe(r.scenes[k].narrationEndSec);
+  });
+
+  it("job 400's introduction, which stopped on 'for', now hands over before it", async () => {
+    const { enforcePlanRules } = await import("./planGate");
+    const params = { faceImageUrl: "https://example.com/host.jpg", hostName: "Gideon Grant" } as any;
+    const r = enforcePlanRules(
+      [
+        at(1, 67.7626, 70.934, "My name is Gideon Grant, and this channel is for", { hostPresent: true, hostIntro: true }),
+        at(2, 70.934, 76.935, "men and women in their fifties, sixties, and beyond — people carrying real questions about"),
+      ],
+      params
+    );
+    expect(r.scenes[0].scriptText).toBe("My name is Gideon Grant, and this channel is");
+    expect(r.scenes[1].scriptText).toMatch(/^for men and women in their fifties/);
+  });
+
+  const sentences = [
+    "Today we go through all nine, one at a time, and look at what the German habit does instead.",
+    "So.",
+    "We will go the way the water goes.",
+    "Flush, and follow.",
+    "And treat gasoline like it’s actively looking for a reason — drain it outside, store it sealed, nowhere near a spark.",
+    "Hold your phone up to the screen with its camera on, and aim it at the little black and white code.",
+  ];
+  const answer = (kind: string) =>
+    JSON.stringify({
+      lists: [
+        { sentence: 3, kind, items: ["Flush", "follow"] },
+        { sentence: 4, kind: "steps", items: ["drain it outside", "store it sealed"] },
+        { sentence: 5, kind: "steps", items: ["Hold your phone up to the screen with its camera on", "aim it at the little black and white code"] },
+      ],
+    });
+
+  it("'Flush, and follow.' is found by neither the model (as steps or as things) nor the sentence shape", async () => {
+    for (const kind of ["steps", "things"]) {
+      const { lists } = await findSpokenLists(sentences.join(" "), { ask: async () => answer(kind) });
+      expect(lists.map(l => l.sentence)).toEqual([4, 5]);
+    }
+    expect(spokenListsByShape(sentences).filter(l => l.sentence === 3)).toEqual([]);
+  });
+
+  it("two steps that each do something to a thing they name stay a list (jobs 410, 413)", async () => {
+    const { lists } = await findSpokenLists(sentences.join(" "), { ask: async () => answer("steps") });
+    expect(lists).toEqual([
+      { sentence: 4, items: ["drain it outside", "store it sealed"], kind: "steps" },
+      { sentence: 5, items: ["Hold your phone up to the screen with its camera on", "aim it at the little black and white code"], kind: "steps" },
+    ]);
   });
 });

@@ -13,7 +13,9 @@ import {
   parseSpokenLists,
   splitSentences,
   spokenListsByShape,
+  stepsAreASequence,
   stepsByShape,
+  twoBareWords,
   validateSpokenList,
   withLastItemCut,
   withLastSeriesMember,
@@ -1269,5 +1271,76 @@ describe("a last item that runs on into a clause is kept (Gideon's job 401 at 0:
       ["and Facebook Marketplace", false, true],
       ["by what each one actually does well.", false, false],
     ]);
+  });
+});
+
+describe("two steps or two bare words are a list only when they name things (job 408)", () => {
+  // Job 408 at 1:08: "So. We will go the way the water goes. Flush, and follow." says how the video
+  // will run, and was cut as a list — two flash pictures and a numbered "1 Flush → 2 Follow". The
+  // stored list had no kind: the sentence shape found two bare words as two things; a model answer of
+  // two steps passed `validateSpokenList`, which held it to nothing more than two items.
+  const flush = "Flush, and follow.";
+
+  it("two steps must each do something to a thing they name; three or more are held to nothing new", () => {
+    expect(stepsAreASequence(["Flush", "follow"])).toBe(false);
+    expect(stepsAreASequence(["go slow", "wait until everyone's been served"])).toBe(false); // how and when, no thing
+    expect(stepsAreASequence(["drain it outside", "store it sealed"])).toBe(true); // job 413, "it" = the gasoline
+    expect(stepsAreASequence(["Hold your phone up to the screen with its camera on", "aim it at the little black and white code"])).toBe(true); // job 410
+    expect(stepsAreASequence(["fill the jar", "then close the lid."])).toBe(true);
+    expect(stepsAreASequence(["pick the jar up", "look at it"])).toBe(true); // a particle before "it"
+    // Jobs 354, 362, 392, 395: the second step looks at what happens, it does nothing to a thing.
+    expect(stepsAreASequence(["hold the piece up near your face by a window", "look at what it gives back"])).toBe(false);
+    // Job 404: a clause of when in front of the step is read past.
+    expect(stepsAreASequence(["point its camera at the code in this video", "when a link shows on the phone, tap it"])).toBe(true);
+    // Three or more: the number makes the sequence, as `stepsByShape` has always held (job 412's own
+    // "We'll run it back, slow it down, and decode it one layer at a time" is left as it was found).
+    expect(stepsAreASequence(["run it back", "slow it down", "decode it one layer at a time"])).toBe(true);
+    expect(stepsAreASequence(["Flush"])).toBe(false);
+    expect(validateSpokenList(flush, ["Flush", "follow"], true)).toBe(false);
+    expect(validateSpokenList(flush, ["Flush", "follow"])).toBe(true); // the steps rule is for steps only
+  });
+
+  it("two bare single words are no list of things — a name, a word of its own or a third item keeps one", () => {
+    expect(twoBareWords(flush, ["Flush", "follow"])).toBe(true);
+    expect(twoBareWords("Stop, and listen.", ["Stop", "listen"])).toBe(true);
+    expect(twoBareWords("You can sell on Etsy, or eBay.", ["Etsy", "eBay"])).toBe(false); // names
+    expect(twoBareWords("Etsy, or eBay?", ["Etsy", "eBay"])).toBe(false); // "eBay" is a name wherever it sits
+    expect(twoBareWords("You need brown sugar, and butter.", ["brown sugar", "butter"])).toBe(false);
+    expect(twoBareWords("Get a saw, and a drill.", ["a saw", "a drill"])).toBe(false);
+    expect(twoBareWords("Wash, towel, dryer, brush.", ["Wash", "towel", "dryer", "brush"])).toBe(false); // job 319
+  });
+
+  it("neither the model's answer (as steps or things) nor the sentence shape finds 'Flush, and follow.'", () => {
+    const sentences = ["So.", "We will go the way the water goes.", flush];
+    expect(spokenListsByShape(sentences)).toEqual([]);
+    for (const kind of ["steps", "things"])
+      expect(parseSpokenLists(JSON.stringify({ lists: [{ sentence: 2, kind, items: ["Flush", "follow"] }] }), sentences)).toEqual([]);
+    // Real lists of the same verification films are found as before.
+    const kept = [
+      "And treat gasoline like it’s actively looking for a reason — drain it outside, store it sealed, nowhere near a spark.",
+      "So wait until everyone's been served, then catch a flight attendant as they pass, or step back to the galley, and phrase it as an offer.",
+      "Wash, towel, dryer, brush.",
+    ];
+    expect(
+      parseSpokenLists(
+        JSON.stringify({
+          lists: [
+            { sentence: 0, kind: "steps", items: ["drain it outside", "store it sealed"] },
+            { sentence: 1, kind: "steps", items: ["wait until everyone's been served", "then catch a flight attendant as they pass", "step back to the galley", "phrase it as an offer"] },
+          ],
+        }),
+        kept
+      )
+    ).toEqual([
+      { sentence: 0, items: ["drain it outside", "store it sealed"], kind: "steps" },
+      { sentence: 1, items: ["wait until everyone's been served", "then catch a flight attendant as they pass, or step back to the galley", "phrase it as an offer"], kind: "steps" },
+    ]);
+    expect(spokenListsByShape(kept).map(l => l.items)).toEqual([["Wash", "towel", "dryer", "brush"]]);
+  });
+
+  it("a job that kept 'Flush, follow' gets no list graphic for it (`notAListAsSaid`)", () => {
+    const around = "So. We will go the way the water goes. Flush, and follow. Each of the nine stops somewhere.";
+    expect(notAListAsSaid(around, ["Flush", "follow"])).toMatch(/two bare words/);
+    expect(notAListAsSaid("Today I'm ranking Etsy, and eBay.", ["Etsy", "eBay"])).toBeUndefined();
   });
 });

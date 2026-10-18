@@ -48,7 +48,6 @@ import {
   HOST_HANDOFF_MIN_WORDS,
   HOST_PART_MAX_SEC,
   LIST_ITEM_CLAUSE,
-  NOT_A_LIST_ITEM,
   LIST_SHOT_MIN_SEC,
   MAX_PICTURE_SEC,
   pictureMaxSecAt,
@@ -777,9 +776,11 @@ const OPEN_ENDING = new Set([
   "when", "where", "while", "until", "how", "why", "what", "so",
 ]);
 /**
- * A host part that stops on one of these hands over right before what it is about: the words after
- * a preposition are its object, the thing the picture shows ("…this channel is for | men and women
- * in their fifties", job 400's introduction; "…build from | cheap box-store lumber,").
+ * Prepositions. A picture may open on one with its object (`PREP_START`: the break goes BEFORE a
+ * preposition). A host part that stops on one has not stopped at a break of its own: only an article,
+ * a count or a name after it makes one (`breakBetween`) — never a bare object ("…this channel is for
+ * people in | older houses and apartments", job 408's introduction, whose last word on camera was
+ * "in").
  */
 const PREPOSITION = new Set([
   "with", "from", "of", "for", "about", "in", "into", "on", "onto", "at", "by", "over", "under",
@@ -824,9 +825,13 @@ const CLAUSE_START = new Set([
 ]);
 /** A verb or a subject pronoun — what never follows a preposition as its object. */
 const verbOrSubject = (w: string) => LIST_ITEM_CLAUSE.test(w) || /n't$/.test(w);
-/** A count or an amount opens a noun phrase too ("…name all | seven of the thieves", "…for | $40"). */
+/**
+ * A count or an amount opens a noun phrase too ("…name all | seven of the thieves", "…for | $40") —
+ * any number word: with a preposition's bare object no break since job 408, "…fetching around |
+ * fourteen dollars" (job 172) and "…for | seventeen dollars" are breaks only as a count.
+ */
 const COUNT_WORD =
-  /^(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|fifteen|twenty|thirty|forty|fifty|hundred|thousand|dozen|half|\$?\d[\d,.]*%?)$/;
+  /^(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|(?:twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety)(?:-(?:one|two|three|four|five|six|seven|eight|nine))?|hundred|thousand|million|billion|dozen|half|\$?\d[\d,.]*%?)$/;
 /**
  * …but not a count that names its noun: "…the jump from number two to number | one is the biggest
  * jump" (jobs 153-178) cut inside "number one".
@@ -841,8 +846,8 @@ const NUMBERED = new Set([
  * Yes when `before` ends on clause punctuation, or `after` is a list item (`list` — the list
  * hand-off) or opens on a dash. Otherwise only when `before` leaves no phrase open (`OPEN_ENDING`)
  * and `after` opens on a joining word, an article, possessive or count, a preposition with its
- * object, a clause word, or a name — or `before` ends on a preposition and `after` on its object.
- * Job 400 (1:31) stopped "…that the arithmetic | was never your problem." — subject | verb, no
+ * object, a clause word, or a name — never on a preposition's bare object (job 408: "…for people in
+ * | older houses"). Job 400 (1:31) stopped "…that the arithmetic | was never your problem." — subject | verb, no
  * break. Words alone decide, never the picture's
  * description: job 400's opening "…in the greeting card | aisle of a pharmacy" split a compound
  * noun, and its picture said "aisle". Pure.
@@ -866,10 +871,12 @@ export function breakBetween(before: string, after: string, opts: { list?: boole
   // A name — a capital inside a sentence ("…a man named | Lucius Annaeus Seneca") — never "I".
   if (/^[A-ZÀ-ÖØ-Þ]/.test(first.replace(/^["'“‘(]+/, "")) && !/^i(?:'[a-z]+)?$/.test(w))
     return true;
-  // A preposition's object — never a verb or pronoun ("…what it is made of | was a mystery"), a
-  // negated verb (`LIST_ITEM_CLAUSE` reads "was", not "wasn't": "…the homemade quilt folks paid me
-  // best for | wasn't the precision piecing.", jobs 159 and 166), an "-ly" word or an aside.
-  return PREPOSITION.has(l) && !verbOrSubject(w) && !/ly$/.test(w) && !NOT_A_LIST_ITEM.has(w);
+  // Nothing else is a break — in particular not a preposition's bare object. That used to be one
+  // ("…for | men and women", "…from | cheap lumber"), and job 408's introduction stopped on "…This
+  // channel is for people in" with "older houses and apartments…" under the next picture: the host's
+  // last word on camera was "in". The break goes before the preposition (`PREP_START` above), not
+  // after it; after one, only the article, count or name above still opens a picture.
+  return false;
 }
 
 /** Host take `s` stops where scene `next` starts at a natural break (`breakBetween`). Pure. */
@@ -983,7 +990,8 @@ function finishSentenceBeforeHost(
  *     ending up against it.
  *  2. Only when the cut is at no break: the host hands over at ITS OWN LAST clause punctuation (the
  *     voice already pauses there), keeping `HOST_HANDOFF_MIN_WORDS`, its own floor, and its name on
- *     the introduction.
+ *     the introduction. Or, when it stopped on a preposition, it hands over right BEFORE that
+ *     preposition (2b, job 408: "…for people | in older houses and apartments…"), on the same terms.
  *  3. Or it says the picture's words up to THE NEXT natural break and hands over there — job 400's
  *     opening, 2.5 s of "There is a man standing in the greeting card | aisle of a pharmacy…",
  *     too short to give anything back and too long a sentence to finish as a hook.
@@ -1085,6 +1093,15 @@ function finishSentenceAfterHost(
     );
   for (let b = hw.length - 1; b >= 1; b--) if (endMark(hw[b - 1]) && keeps(b)) return back(b);
 
+  // 2b. BEFORE THE PREPOSITION — a host that stops on one hands it, with its object, to the picture:
+  // job 408's "…This channel is for people in | older houses and apartments…" goes "…for people | in
+  // older houses and apartments…". Going on instead (3) found its first break inside the object,
+  // "…in older houses | and apartments", splitting what the preposition was about.
+  if (hw.length > 1 && endsOnPreposition(hw)) {
+    const b = hw.length - 1;
+    if (breakBetween(hw.slice(0, b).join(" "), `${hw[b]} ${textOf(next)}`) && keeps(b)) return back(b);
+  }
+
   // 3. ON — the host says the picture's words up to the next break, and hands over there. What is
   // left of the picture must read, and must not blink between two takes (`PICTURE_RUN_MIN_SEC`).
   const pw = wordsOf(textOf(next));
@@ -1114,6 +1131,17 @@ function finishSentenceAfterHost(
     if (breakBetween(hw.slice(0, b).join(" "), hw.slice(b).join(" ")) && keeps(b)) return back(b);
   }
   return null;
+}
+
+/**
+ * Whether a host's words stop right after a preposition, with no punctuation ("…for people in"): a
+ * take that stops there at no break is handed over right before it (step 2b above, job 408). Pure.
+ */
+function endsOnPreposition(words: string[]): boolean {
+  const last = words[words.length - 1];
+  if (!last || endMark(last)) return false;
+  const l = plainWord(last);
+  return PREPOSITION.has(l) || l === "to";
 }
 
 /** Words that, walking back from a subject | verb cut, open a part of the subject (step 4 above). */
