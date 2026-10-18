@@ -1581,6 +1581,15 @@ export interface LongformInputParams {
    */
   recurringPeople?: RecurringPerson[];
   /**
+   * WHO "YOU" IS when the script speaks to the viewer as someone the host's own job SERVES (a
+   * patient, a client, a guest) rather than someone doing the host's own kind of work: the role the
+   * script gives them and one fixed look, written by the props-list call (its `VIEWER name: look`
+   * line, `parseViewerPerson`). Every picture of "you" is then that ordinary person, drawn with that
+   * look, never the host. Unset — "you" stays the host, as before — when the viewer does the host's
+   * own work (a how-to), and on every job made before it. Snapshotted with the props list.
+   */
+  viewerPerson?: RecurringPerson;
+  /**
    * The spoken lists found in the whole script (`server/spokenLists.ts`), kept for the voicing
    * stage's last pass, which applies them again on the final lengths.
    */

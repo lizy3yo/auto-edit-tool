@@ -835,15 +835,20 @@ export function personKey(name: string | undefined): string {
  * a label that says it is someone ELSE ("another passenger", "a new customer", "the next buyer"),
  * unless the name says the same. "Two passengers" takes the two passengers, never three; a crowd,
  * "several passengers" or a bare "passengers" takes nobody — who is in a crowd is a guess. Empty
- * when nothing fits. Pure.
+ * when nothing fits.
+ * THE VIEWER (`inputParams.viewerPerson`, `viewer`) is one more person the pictures come back to —
+ * "you", when the host's job serves them — matched only where no recurring person is taken: by the
+ * same name, or by role when no recurring person even fits ("an older passenger" on a line to
+ * "you"), never ahead of the story's own people and never in a crowd. Pure.
  */
 export function matchRecurringPeople(
   who: string | undefined,
   count: number | undefined,
-  people: RecurringPerson[] | undefined
+  people: RecurringPerson[] | undefined,
+  viewer?: RecurringPerson
 ): RecurringPerson[] {
-  if (!who?.trim() || !people?.length) return [];
-  const facts = people.map(person => {
+  if (!who?.trim() || (!people?.length && !viewer)) return [];
+  const factOf = (person: RecurringPerson) => {
     const named = namedPeople(person.name);
     const first = named?.people[0];
     const head = first ? personKey(first.phrase) : undefined;
@@ -858,13 +863,16 @@ export function matchRecurringPeople(
       // is in "the other customer" of any later story.
       proper: !named && /\b[A-Z]/.test(person.name.replace(/^\W*(?:the|a|an|my|our|your|her|his|their)\b/i, "")),
     };
-  });
-  type Fact = (typeof facts)[number];
+  };
+  const facts = (people ?? []).map(factOf);
+  const you = viewer ? factOf(viewer) : undefined;
+  type Fact = ReturnType<typeof factOf>;
   const whoKey = personKey(who);
   const whoWords = new Set(whoKey.split(" "));
   const picked: Fact[] = [];
-  const take = (f: Fact) => {
+  const take = (f: Fact): true => {
     if (!picked.includes(f)) picked.push(f);
+    return true;
   };
   for (const part of namedPeople(who)?.people ?? []) {
     const key = personKey(part.phrase);
@@ -873,14 +881,16 @@ export function matchRecurringPeople(
     // story follows — with one recurring passenger, a role match alone would hand her look to the
     // person the line sets apart from her.
     const elseWords = elseWordsFor(who, part.noun);
-    const fits = facts.filter(
-      f =>
-        exact(f) ||
-        (part.kind === "role" &&
-          f.roles.includes(part.noun) &&
-          !(part.sex && f.sex && part.sex !== f.sex) &&
-          elseWords.every(w => f.key.split(" ").includes(w)))
-    );
+    const fitsOf = (fs: Fact[]) =>
+      fs.filter(
+        f =>
+          exact(f) ||
+          (part.kind === "role" &&
+            f.roles.includes(part.noun) &&
+            !(part.sex && f.sex && part.sex !== f.sex) &&
+            elseWords.every(w => f.key.split(" ").includes(w)))
+      );
+    const fits = fitsOf(facts);
     if (part.count > 1) {
       // Only a stated two ("two passengers", "both passengers") is the story's two; "several
       // passengers", "three passengers" or a bare plural is a crowd, and who is in it is a guess.
@@ -888,18 +898,22 @@ export function matchRecurringPeople(
       if (two && fits.length <= part.count) fits.forEach(take);
       continue;
     }
-    if (fits.length === 1) {
-      take(fits[0]);
-      continue;
-    }
     const exacts = fits.filter(exact);
     const sexed = fits.filter(f => !!part.sex && f.sex === part.sex);
-    if (exacts.length === 1) take(exacts[0]);
-    else if (sexed.length === 1) take(sexed[0]);
+    const took =
+      fits.length === 1
+        ? take(fits[0])
+        : exacts.length === 1
+          ? take(exacts[0])
+          : sexed.length === 1
+            ? take(sexed[0])
+            : false;
+    if (!took && you && (exact(you) || (!fits.length && fitsOf([you]).length > 0))) take(you);
   }
   // The label IS the name (the planner was given the names and copied one), or holds a proper one.
   for (const f of facts)
     if (f.key && (f.key === whoKey || (f.proper && f.key.split(" ").every(w => whoWords.has(w))))) take(f);
+  if (you?.key && you.key === whoKey) take(you);
   return picked.slice(0, Math.max(1, count ?? 1)).map(f => f.person);
 }
 
@@ -1224,6 +1238,104 @@ export function facingTheCamera(text: string): string {
     .trim();
 }
 
+// ─── The viewer, when the host's job serves them ─────────────────────────────────────────
+
+/** A line spoken to the viewer: "you" in any form. */
+const SPOKEN_TO_YOU = /\b(?:you|your|yours|yourself|yourselves)\b/i;
+/** The host speaking of themself — "I" (capital only: never a letter in a list) and "me", "my". */
+const SPEAKS_OF_SELF = /\bI(?:['’](?:m|ve|ll|d))?\b/;
+const SPEAKS_OF_SELF_LOWER = /\b(?:me|my|mine|myself)\b/i;
+
+/**
+ * The sentence a picture's line is part of: its own words with the beats before and after it, out
+ * to where the sentence starts and ends (at most 8 beats each way). A spoken list cuts one sentence
+ * into many pictures — job 405's "She walks the full length of you, | ankle, | knee, | hip, | ribs,"
+ * — and only the whole sentence says who the items are on. Pure.
+ */
+function sentenceAround(scenes: StoryboardScene[], i: number): string {
+  const ends = (t: string | undefined) => /[.!?]["”’')\]]*\s*$/.test((t ?? "").trim());
+  let a = i;
+  while (a > 0 && i - a < 8 && !ends(scenes[a - 1].scriptText)) a--;
+  let b = i;
+  while (b < scenes.length - 1 && b - i < 8 && !ends(scenes[b].scriptText)) b++;
+  return scenes
+    .slice(a, b + 1)
+    .map(s => (s.scriptText ?? "").trim())
+    .join(" ");
+}
+
+/** Whether a sentence speaks to "you" and never of the host themself ("I", "me", "my"). Pure. */
+function spokenToViewer(sentence: string): boolean {
+  return SPOKEN_TO_YOU.test(sentence) && !SPEAKS_OF_SELF.test(sentence) && !SPEAKS_OF_SELF_LOWER.test(sentence);
+}
+
+/**
+ * Whether a picture's person is THE VIEWER (`inputParams.viewerPerson`: "you", when the host's job
+ * serves them) though neither the shot list nor the line check named them (2026-10-18, the review
+ * of jobs 402 and 405). Three general cases, each with the evidence in the picture's own words:
+ *   - the planner named only a PLAIN person ("a sleeping person") on a sentence spoken to "you", that
+ *     never names such a person itself, never says "I" or "my", and names nobody else in the frame:
+ *     job 405's "you" the cat walks across was "a sleeping person" in scenes 3-8, a different
+ *     stranger each time, while its "your chest", "your bed" belong to one person;
+ *   - the only person the description names IS the viewer by their own words ("a sleeping cat
+ *     owner", "the homeowner") — an owner otherwise reads as the host;
+ *   - nobody is named but a thing is the viewer's ("near a passenger's tray") beside hands, on a line
+ *     spoken to "you" with no "I": job 402 scene 17, "On many of those carriers, you can have the
+ *     whole thing just by asking", drew the host in her crew uniform in the passenger's seat.
+ * A picture whose words name the host, a role or two people is never taken: they decide. Pure.
+ */
+export function picturesTheViewer(
+  scenes: StoryboardScene[],
+  i: number,
+  viewer: RecurringPerson,
+  opts: { hostName?: string } = {}
+): boolean {
+  const s = scenes[i];
+  if (!s) return false;
+  // A stop between the two descriptions: "…a passenger's tray" + "Hands…" is no passenger's hands.
+  const words = withHostNamed(`${s.showSubject ?? ""}. ${s.visualPrompt ?? ""}`, opts.hostName);
+  const vKey = personKey(viewer.name);
+  const vNamed = namedPeople(viewer.name);
+  // A role the person words do not know ("the patient", "the diner") is its last word.
+  const vNoun = vNamed?.people[0]?.noun ?? vKey.split(" ").pop();
+  const vSex = vNamed?.sex ?? sexOfLook(viewer.look);
+  // "the passenger" is "a passenger"; "the cat owner" is "a sleeping cat owner", never "a shop owner".
+  const isViewer = (p: NamedPerson) => {
+    const k = personKey(p.phrase);
+    return p.count === 1 && (k === vKey || (vKey.includes(" ") && k.endsWith(` ${vKey}`)) || (!!vNoun && p.noun === vNoun && k === vNoun));
+  };
+  const desc = namedPeople(words);
+  if (s.otherPerson) {
+    const label = namedPeople(s.otherPerson);
+    const only = label?.people.length === 1 ? label.people[0] : undefined;
+    if (!only || only.kind !== "generic" || only.count !== 1) return false;
+    if (only.sex && vSex && only.sex !== vSex) return false;
+    if (desc && (desc.count > 1 || desc.people.some(p => p.kind !== "generic"))) return false;
+    const sentence = sentenceAround(scenes, i);
+    // The line names that person itself ("ask the woman at the counter"): she is someone else.
+    if (new RegExp(String.raw`\b${only.noun}s?\b`, "i").test(sentence)) return false;
+    return spokenToViewer(sentence);
+  }
+  if (desc) return desc.people.length === 1 && isViewer(desc.people[0]);
+  if (!vNoun) return false;
+  const owns = new RegExp(String.raw`\b(?:a|an|the|this|that|your)\s+(?:[a-z-]+\s+){0,2}${vNoun}['’]s\b`, "i");
+  return owns.test(words) && spokenToViewer(sentenceAround(scenes, i));
+}
+
+/**
+ * A picture of THE VIEWER alone keeps no words naming the host — they are left from the rule that
+ * drew "you" as the host (job 405 scene 29, "the tabby cat stirring awake on the bed beside the
+ * sleeping host" under "right when yours is at its deepest"): "the sleeping host" becomes "the
+ * sleeping cat owner". Pure.
+ */
+export function hostWordsAsViewer(text: string, viewer: RecurringPerson): string {
+  const role = viewer.name.trim().replace(/^(?:the|a|an)\s+/i, "");
+  return text.replace(
+    /\b(?:the|a|an)\s+((?:[a-z-]+\s+){0,2}?)(?:host|narrator|presenter)\b(?!\s+of\b)/gi,
+    (_m, mods: string) => `the ${mods}${role}`
+  );
+}
+
 /**
  * Mark the pictures that show someone doing the work as the HOST (see the file comment), and the
  * ones that show SOMEONE ELSE as that person (`otherPerson`, `otherPeople`) — never the host photo.
@@ -1233,11 +1345,15 @@ export function facingTheCamera(text: string): string {
  */
 export function markHostBroll(
   scenes: StoryboardScene[],
-  params: Pick<LongformInputParams, "hostLook" | "brollOnly" | "hostName" | "hostTitle" | "recurringPeople">,
+  params: Pick<
+    LongformInputParams,
+    "hostLook" | "brollOnly" | "hostName" | "hostTitle" | "recurringPeople" | "viewerPerson"
+  >,
   hostPhotoUrl: string | undefined
 ): number {
   const look = params.hostLook?.trim();
   const on = !!look && !!hostPhotoUrl && !params.brollOnly;
+  const viewer = params.viewerPerson;
   // A role the host gives themself ("I'm <Name>, a plumber") is the host in their own pictures.
   const intro = scenes
     .filter((s, i) => s.hostIntro || i < 3)
@@ -1245,7 +1361,8 @@ export function markHostBroll(
     .join(" ");
   const selfRoles = selfRolesOf(intro, params.hostTitle, params.hostName);
   let n = 0;
-  for (const s of scenes) {
+  for (let i = 0; i < scenes.length; i++) {
+    const s = scenes[i];
     const eligible =
       !s.hostPresent &&
       !s.splitVisual &&
@@ -1275,6 +1392,14 @@ export function markHostBroll(
     // jawline down with it". A picture of anything else keeps no one in it.
     const toWear = on && eligible && !s.otherPerson && NECK_PIECE.test(words) && chinFramed(s);
     const person = !!s.humanPresent || showsPerson(text) || toWear;
+    // THE VIEWER, when the host's job serves "you" (`viewerPerson`, 2026-10-18, jobs 402 and 405):
+    // a picture of "you" the planner and the line check left unnamed, or named only as a plain
+    // person, is that one viewer — never the host in her work clothes, never a new stranger
+    // (`picturesTheViewer`).
+    if (viewer && eligible && person && !toWear && picturesTheViewer(scenes, i, viewer, { hostName: params.hostName })) {
+      s.otherPerson = viewer.name;
+      s.otherPeople = undefined;
+    }
     // SOMEONE ELSE in the picture: named by the planner, or by the picture's own words — a role, a
     // sex the host does not have, two or more people (`someoneElse`) — with EVERYONE the words name
     // in it, and the host among them when one is (`castOfPicture`, job 399 scenes 8 and 14).
@@ -1293,13 +1418,20 @@ export function markHostBroll(
       // still never from the photo: one photo beside two people made both of them the host.
       s.hostAmongOthers = other.host && look ? { who: other.host, look } : undefined;
       // Someone the story comes back to keeps one look in every picture of them (job 399: the same
-      // passenger was three different women in scenes 2, 4 and 5) — `matchRecurringPeople`.
-      const looks = matchRecurringPeople(other.who, other.count, params.recurringPeople);
+      // passenger was three different women in scenes 2, 4 and 5) — `matchRecurringPeople` — and
+      // so does the viewer ("you") when the host's job serves them.
+      const looks = matchRecurringPeople(other.who, other.count, params.recurringPeople, viewer);
       s.otherPersonLooks = looks.length ? looks : undefined;
       s.humanPresent = true;
       s.brollHostLook = undefined;
       s.brollHostRef = undefined;
       s.hostFaceShown = undefined;
+      // The viewer alone in the picture: words naming the host are left from the old "you is the
+      // host" rule (job 405 scene 29, "beside the sleeping host") and now name the viewer.
+      if (viewer && !other.host && other.count === 1 && personKey(other.who) === personKey(viewer.name)) {
+        if (s.showSubject) s.showSubject = hostWordsAsViewer(s.showSubject, viewer);
+        if (s.visualPrompt) s.visualPrompt = hostWordsAsViewer(s.visualPrompt, viewer);
+      }
       // No face for anyone in it, so nothing in the words asks for one (`withoutFaceAsks`).
       if (s.showSubject) s.showSubject = withoutFaceAsks(withoutMirrors(s.showSubject));
       if (s.visualPrompt) s.visualPrompt = withoutFaceAsks(withoutMirrors(s.visualPrompt));

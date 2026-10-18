@@ -47,6 +47,7 @@ import {
   spokenListItems,
   parseKeyThings,
   parseRecurringPeople,
+  parseViewerPerson,
   withoutPersonLines,
   settleVideoKind,
   videoKind,
@@ -468,6 +469,7 @@ import {
   looksCutOff,
   markHostBroll,
   mayTurnHostAway,
+  personKey,
   REAL_HOLDER,
   onTheBody,
   showsSomeoneElse,
@@ -11441,19 +11443,32 @@ async function cutShotsOnWords(
         await deriveContinuitySheet(ctx.spokenScript, {
           subject: params.videoSubject,
           styleBible: params.visualStyleBible,
+          // How the host looks and what they call themself: what tells the call whether "you" is
+          // the host or someone the host's job serves (job 402: a host in a crew uniform).
+          host: params.brollOnly
+            ? undefined
+            : [params.hostLook, params.hostTitle ? `title: ${params.hostTitle}` : ""].filter(Boolean).join("; "),
         })
       ).replace(/\b(?:cluttered|messy|jumbled|crowded)\b/gi, "tidy");
       // The same call names the PEOPLE WHO COME BACK, each with one look (job 399: the passenger
       // the story follows was three different women in 13 s). They are kept apart from the props
       // list, which every shot and picture writer reads as things only, exactly as before.
-      params.recurringPeople = parseRecurringPeople(sheet, { hostName: params.hostName });
+      // And WHO "YOU" IS when the host's job serves the viewer (job 402: a passenger's "you" drawn
+      // as the host in her crew uniform; job 405: a sleeping "you" drawn as a new stranger each
+      // time) — one ordinary person with one look, never the host.
+      params.viewerPerson = parseViewerPerson(sheet, { hostName: params.hostName });
+      const viewerKey = params.viewerPerson ? personKey(params.viewerPerson.name) : undefined;
+      params.recurringPeople = parseRecurringPeople(sheet, { hostName: params.hostName }).filter(
+        p => personKey(p.name) !== viewerKey
+      );
       params.continuitySheet = withoutPersonLines(sheet);
       log(
         params.continuitySheet
           ? `props list: ${params.continuitySheet.split("\n").length} recurring thing(s)` +
               (params.recurringPeople.length
                 ? `, ${params.recurringPeople.length} recurring person(s): ${params.recurringPeople.map(p => p.name).join(", ")}`
-                : "")
+                : "") +
+              (params.viewerPerson ? `, "you" is ${params.viewerPerson.name} (never the host)` : "")
           : `props list: none (call failed) — shots are written without it`
       );
     }
@@ -11514,6 +11529,7 @@ async function cutShotsOnWords(
       hostName: params.hostName,
       hostLook: params.hostLook,
       people: params.recurringPeople,
+      viewer: params.viewerPerson,
       subject: params.videoSubject,
       log,
     });
@@ -11585,6 +11601,7 @@ async function cutShotsOnWords(
         hostName: params.hostName,
         hostLook: params.hostLook,
         people: params.recurringPeople,
+        viewer: params.viewerPerson,
         subject: params.videoSubject,
         log,
         only: ids,
@@ -16482,6 +16499,7 @@ async function runUnifiedPipeline(
       keyThings: params.keyThings,
       subject: params.videoSubject,
       maxAt: pictureLimitFor(scenes, masterDurationSec),
+      viewer: params.viewerPerson,
     });
     if (fit.joined > 0) console.log(`[Longform ${jobId}] ${fit.joined} picture(s) joined with the one before: one idea, one picture`);
     if (fit.fixed > 0)

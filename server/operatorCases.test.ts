@@ -3755,3 +3755,65 @@ describe("a pose turns the host away only when it is one: a screen, a ladder and
     expect(buildStillPrompt(typing)).toContain(HOST_FRAMING_CLAUSE);
   });
 });
+
+describe("'you' is the host's customer, not the host: one ordinary viewer with one look (round 11's review, jobs 402 and 405)", () => {
+  // Job 402's host wears a crew blazer, scarf and wings pin; her viewer is a passenger. Every
+  // picture of "you" was the host, so the crew sat in a passenger's seat taking the can for herself
+  // (scenes 17 and 20). Job 405's "you" the cat walks across was "a sleeping person" — a different
+  // stranger in every picture (scenes 3-8). The props call now names the viewer when the host's job
+  // serves them (`viewerPerson`); a how-to's "you" stays the host.
+  const CREW = "A slender woman in her forties with fair skin and brown hair pinned back, wearing a white blouse, navy blazer with gold pin, and striped scarf";
+  const FLYER = "a woman in her seventies, short silver hair, a cream knit cardigan over a pale blue blouse, grey slacks";
+  const passenger = { name: "the passenger", look: FLYER };
+
+  it("job 402 scenes 17 and 20: the passenger in her own clothes, never the host's uniform", () => {
+    const scenes = [
+      pic(17, "On many of those carriers, you can have the whole thing just by asking.", "a full soda can held upright near a passenger's tray", {
+        visualPrompt: "Bare hands holding a slim aluminum soda can upright, positioned near a passenger's lap tray in an aircraft seat. Aircraft cabin interior visible in background.",
+        humanPresent: true,
+      }),
+      pic(20, "Juice works the same way. If they're running short, they'll tell you, and you're no worse off for trying. One more thing about drinks, because it catches good people off guard.", "plastic cup filled with juice-colored drink on a lap tray", {
+        visualPrompt: "Clear plastic cup filled with juice-colored drink sitting on a passenger's lap tray in an aircraft seat. Aircraft cabin interior visible in background.",
+        humanPresent: true,
+      }),
+    ];
+    markHostBroll(scenes, { hostLook: CREW, hostName: "Helena Hart", viewerPerson: passenger }, "https://x/host.png");
+    for (const s of scenes) {
+      expect(s.brollHostRef, `scene ${s.index}`).toBeUndefined();
+      const prompt = buildStillPrompt(s);
+      expect(prompt, `scene ${s.index}`).toContain(FLYER);
+      expect(prompt, `scene ${s.index}`).not.toMatch(/navy blazer|gold pin|striped scarf/);
+    }
+  });
+
+  it("job 405 scenes 3-8: the sleeper the cat walks across is one person in every picture", () => {
+    const owner = { name: "the cat owner", look: "a woman in her thirties, shoulder-length brown hair, a plain grey sleep shirt" };
+    const sleeper = (index: number, scriptText: string, showSubject: string, over: Partial<StoryboardScene> = {}) =>
+      pic(index, scriptText, showSubject, { humanPresent: true, otherPerson: "a sleeping person", ...over });
+    const scenes = [
+      host(1, "Three in the morning. The house is dark, the street outside has gone quiet, and somewhere in that quiet,"),
+      pic(2, "a small set of paws has just landed on the foot of your bed. She doesn’t hurry. She walks the full length of you,", "a tabby cat with white-socked paws walking slowly across the bed sheets at night"),
+      sleeper(3, "ankle,", "a small short-haired tabby cat stepping onto the ankle of a sleeping person under pale grey sheets at night", { listCut: true }),
+      sleeper(5, "hip,", "a small tabby cat balancing on the hip of a person sleeping on their side under pale grey sheets at night", { listCut: true }),
+      sleeper(6, "ribs,", "a tabby cat's white-socked paws stepping across the blanketed ribs of a sleeping person at night", { listCut: true }),
+      sleeper(7, "steady as a tightrope walker, because she has made this crossing a hundred times before.", "a small tabby cat standing on a sleeping person's chest in the dark bedroom, head lowered close to their face, waiting"),
+      sleeper(8, "Then she stops on your chest, lowers her face to yours, and waits.", "a small tabby cat standing on a sleeping person's chest in the dark bedroom, head lowered close to their face, waiting"),
+    ];
+    markHostBroll(scenes, { hostLook: "A man in his forties with olive skin, dark wavy hair and a full beard", hostName: "Luca Marino", viewerPerson: owner }, "https://x/host.png");
+    const sleepers = scenes.filter(s => s.index >= 3);
+    expect(sleepers.every(s => s.otherPerson === "the cat owner")).toBe(true);
+    expect(new Set(sleepers.map(s => buildStillPrompt(s).includes(owner.look))).size).toBe(1);
+    expect(buildStillPrompt(sleepers[0])).toContain(owner.look);
+  });
+
+  it("a how-to's 'you' is still the host (job 406 scene 20)", () => {
+    const GARAGE = "A lean man in his late fifties with fair, weathered skin, graying hair under a woven straw cowboy hat, wearing a light blue denim button-up shirt";
+    const s = pic(20, "You charge five to ten dollars a knife and ten to twenty a mower blade, and the work takes minutes once your hands learn it.", "the host sharpening a mower blade on a benchtop belt sharpening setup", {
+      visualPrompt: "Bare weathered hands guiding a dull mower blade against a spinning abrasive belt on a benchtop belt sharpening setup bolted to a garage workbench.",
+      humanPresent: true,
+    });
+    markHostBroll([s], { hostLook: GARAGE, hostName: "Gary" }, "https://x/host.png");
+    expect(s.brollHostLook).toBe(GARAGE);
+    expect(s.otherPerson).toBeUndefined();
+  });
+});
