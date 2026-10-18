@@ -1097,6 +1097,15 @@ describe("a last item that runs on into a clause is kept (Gideon's job 401 at 0:
     expect(itemBeforeClause("the porch swing for a while when the sun goes down")).toBeNull();
     // Longer than an item may be.
     expect(itemBeforeClause("the big old rocking chair my grandfather built out of oak and pine when he retired")).toBeNull();
+    // A clause with a verb between its subject and what follows: what happens, not a thing.
+    expect(itemBeforeClause("the house gets quiet when the kids go to bed")).toBeNull();
+    expect(itemBeforeClause("the job gets done when you stop rushing it")).toBeNull();
+  });
+
+  it("a plural that names the thing is no verb", () => {
+    expect(itemBeforeClause("the eggs getting cold while he read the paper")).toBe("the eggs getting cold");
+    expect(itemBeforeClause("the sales rack by the door when the store opens")).toBe("the sales rack by the door");
+    expect(itemBeforeClause("the old work boots by the door where they always sit")).toBe("the old work boots by the door");
   });
 
   it("the shape rules keep the third place, with or without 'and', and in any wording", () => {
@@ -1118,6 +1127,13 @@ describe("a last item that runs on into a clause is kept (Gideon's job 401 at 0:
     expect(listsByShape("I grabbed a saw, a drill, the whole kit cost forty dollars when I bought it.")).toEqual([]);
     expect(listsByShape("We sold a quilt, a table runner, the kind of thing people buy when they visit.")).toEqual([]);
     expect(listsByShape("I packed a saw, a drill, sandpaper when the store had it.")).toEqual([]);
+    // Two things, then what happens: no third item, and no list (two with no "and" are none).
+    expect(listsByShape("A warm coat, a hot meal, the house gets quiet when the kids go to bed.")).toEqual([]);
+    expect(listsByShape("A little patience, a steady hand, the job gets done when you stop rushing it.")).toEqual([]);
+    // ...while the same shape ending on one more thing is still a list of three.
+    expect(listsByShape("The coffee, the toast, the eggs getting cold while he read the paper.")).toEqual([
+      ["The coffee", "the toast", "the eggs getting cold"],
+    ]);
     // A clause that is not when, where or why still stops the run (Dale's job 292 needs its "and").
     expect(listsByShape("Today I'm ranking Etsy, craft fairs, Facebook Marketplace by what each one does well.")).toEqual([]);
   });

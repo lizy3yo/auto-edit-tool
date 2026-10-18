@@ -204,7 +204,26 @@ export function itemBeforeClause(piece: string, maxWords = SHAPE_ITEM_MAX_WORDS)
   // list up or tell of a time; neither is one more thing in it.
   const opening = words.slice(lead, Math.min(stop, lead + 3)).map(plain);
   if (!item || [headWord(item), ...opening].some(w => singulars(w).some(s => SUMS_UP.has(s)))) return null;
+  // The words before the clause may be a clause themselves, with a verb `namesAThing` does not know:
+  // "a warm coat, a hot meal, the house GETS quiet when the kids go to bed" ends on what happens, not
+  // on a third thing, and with no "and" in front nothing else says so. Such a piece used to stop the
+  // run (too long for an item), so refusing it only keeps what the shape rules found before.
+  if (verbInHead(words.slice(lead, stop).map(plain))) return null;
   return namesAThing(item, maxWords) ? item : null;
+}
+
+/**
+ * Whether an item's leading words — after its first word, up to its first preposition or clause word
+ * (`HEAD_ENDS`) — hold a word ending in "-s" with a word on each side of it: a present-tense verb
+ * between its subject and what follows ("the house GETS quiet", "the job GETS done"). Never the last
+ * of those words, which is what the item names ("the old work boots | by the door"), and never the
+ * word right after the first, where a plural names the thing ("the eggs getting cold", "the sales
+ * rack"). Pure.
+ */
+function verbInHead(words: string[]): boolean {
+  const end = words.findIndex((w, k) => k > 0 && HEAD_ENDS.has(w));
+  const head = words.slice(1, end < 0 ? words.length : end);
+  return head.some((w, k) => k > 0 && k < head.length - 1 && w.length >= 4 && /s$/.test(w) && !/(?:ss|us|is|'s)$/.test(w));
 }
 
 /** Head words of words that sum a list up rather than add to it ("the KIND of thing", "the WAY it…"). */
