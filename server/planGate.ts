@@ -669,6 +669,8 @@ const OPEN_ENDING = new Set([
   "i", "we", "they", "he", "she",
   "and", "or", "but", "nor", "that", "which", "who", "whom", "whose", "because", "if", "unless",
   "although", "though", "whether",
+  // A clause word waits for its clause as "that" does: "…the stall where | the buyers stop".
+  "when", "where", "while", "until", "how", "why", "what", "so",
 ]);
 /**
  * A host part that stops on one of these hands over right before what it is about: the words after
@@ -690,17 +692,54 @@ const BREAK_START = new Set([
   "a", "an", "the", "this", "that", "these", "those", "my", "your", "his", "her", "its", "our",
   "their", "some", "any", "every", "each", "another", "no",
 ]);
+/**
+ * More words a picture may open on — without them ~40 hand-offs the shot list made at exactly such
+ * a break in jobs 146-361 read as no break and would have been re-cut. A preposition with its object
+ * (`PREP_START`: "…pay real money for one good piece | on a bare wall", job 153; "…nothing that
+ * sits on a bed | in a farmhouse guest room", job 167) — never one left stranded before a verb
+ * ("…the sacks that flour and feed came | in were printed", job 163), never "of" (inside a noun
+ * phrase: "nine little squares | of cloth", job 163), "like" (a verb as often: "folks | like the
+ * colour") or "to" (a verb's own: "every notch has | to be dead on").
+ */
+const PREP_START = new Set([
+  ...Array.from(PREPOSITION).filter(w => w !== "of" && w !== "like"),
+  "during", "against", "along", "within", "beyond", "upon", "despite", "throughout", "beneath",
+  "underneath", "above", "below",
+]);
+/**
+ * …or a clause word ("…the number that tells you | whether your evening earned its keep", job 172;
+ * "…a little single-crochet edge | so they lie flat", job 151; "…will read younger | than a woman",
+ * job 320; "…bought it off me | before I'd even woven in the ends", job 170), or a clause's own
+ * subject ("…for every hour | I sat at that machine", job 159; "…a crowd | I didn't know lived in
+ * my town", job 153). Never "you" or "it", objects as often ("…and bought | it off me", job 173).
+ */
+const CLAUSE_START = new Set([
+  "whether", "so", "as", "than", "since", "once", "how", "why", "before", "after", "till",
+  "i", "i'm", "i'll", "i'd", "i've", "we", "we're", "we'll", "we'd", "we've", "they", "they're",
+  "they'll", "they'd", "they've", "he", "he's", "he'll", "he'd", "she", "she's", "she'll", "she'd",
+]);
+/** A verb or a subject pronoun — what never follows a preposition as its object. */
+const verbOrSubject = (w: string) => LIST_ITEM_CLAUSE.test(w) || /n't$/.test(w);
 /** A count or an amount opens a noun phrase too ("…name all | seven of the thieves", "…for | $40"). */
 const COUNT_WORD =
   /^(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|fifteen|twenty|thirty|forty|fifty|hundred|thousand|dozen|half|\$?\d[\d,.]*%?)$/;
+/**
+ * …but not a count that names its noun: "…the jump from number two to number | one is the biggest
+ * jump" (jobs 153-178) cut inside "number one".
+ */
+const NUMBERED = new Set([
+  "number", "no", "chapter", "page", "step", "part", "size", "row", "round", "level", "item",
+  "episode", "volume", "section", "lesson", "rule", "room", "aisle", "gate", "exit", "route",
+]);
 /**
  * Is the cut between `before` and `after` a natural break — a place a host may stop mid-sentence
  * and hand over (the shot list's own shape: right before a named thing, at a comma, before "and")?
  * Yes when `before` ends on clause punctuation, or `after` is a list item (`list` — the list
  * hand-off) or opens on a dash. Otherwise only when `before` leaves no phrase open (`OPEN_ENDING`)
- * and `after` opens on a joining word, an article, possessive or count, or a name — or `before`
- * ends on a preposition and `after` on its object. Job 400 (1:31) stopped "…that the arithmetic |
- * was never your problem." — subject | verb, no break. Words alone decide, never the picture's
+ * and `after` opens on a joining word, an article, possessive or count, a preposition with its
+ * object, a clause word, or a name — or `before` ends on a preposition and `after` on its object.
+ * Job 400 (1:31) stopped "…that the arithmetic | was never your problem." — subject | verb, no
+ * break. Words alone decide, never the picture's
  * description: job 400's opening "…in the greeting card | aisle of a pharmacy" split a compound
  * noun, and its picture said "aisle". Pure.
  */
@@ -717,13 +756,16 @@ export function breakBetween(before: string, after: string, opts: { list?: boole
   if (OPEN_ENDING.has(l)) return false;
   const w = plainWord(first);
   if (!w) return false;
-  if (BREAK_START.has(w) || COUNT_WORD.test(w)) return true;
+  if (BREAK_START.has(w) || CLAUSE_START.has(w)) return true;
+  if (COUNT_WORD.test(w) && !NUMBERED.has(l)) return true;
+  if (PREP_START.has(w) && a.length > 1 && !verbOrSubject(plainWord(a[1]))) return true;
   // A name — a capital inside a sentence ("…a man named | Lucius Annaeus Seneca") — never "I".
   if (/^[A-ZÀ-ÖØ-Þ]/.test(first.replace(/^["'“‘(]+/, "")) && !/^i(?:'[a-z]+)?$/.test(w))
     return true;
-  // A preposition's object — never a verb or pronoun ("…what it is made of | was a mystery"), an
-  // "-ly" word or an aside.
-  return PREPOSITION.has(l) && !LIST_ITEM_CLAUSE.test(w) && !/ly$/.test(w) && !NOT_A_LIST_ITEM.has(w);
+  // A preposition's object — never a verb or pronoun ("…what it is made of | was a mystery"), a
+  // negated verb (`LIST_ITEM_CLAUSE` reads "was", not "wasn't": "…the homemade quilt folks paid me
+  // best for | wasn't the precision piecing.", jobs 159 and 166), an "-ly" word or an aside.
+  return PREPOSITION.has(l) && !verbOrSubject(w) && !/ly$/.test(w) && !NOT_A_LIST_ITEM.has(w);
 }
 
 /** Host take `s` stops where scene `next` starts at a natural break (`breakBetween`). Pure. */
@@ -828,20 +870,22 @@ function finishSentenceBeforeHost(
 /**
  * A host take that stops mid-sentence where it may not (`naturalBreak`) — job 400 (1:31): "…I want
  * to show you that the arithmetic | was never your problem.", the first half of a picture split for
- * length, made a check-in. Three ways out, in order:
+ * length, made a check-in. Four ways out, in order:
  *  1. The host FINISHES THE SENTENCE, taking its words off the plain pictures after it (never a list
  *     item's), while the take stays under its ceiling — `HOST_SENTENCE_MAX_SEC`, or
  *     `HOOK_MAX_WHOLE_SEC` on the opening and the introduction, which the shot list makes hand over
  *     — and inside the host minutes, and what is left of the picture still reads (else that picture
- *     goes too, when it ends a sentence itself).
- *  2. Only when the cut is at no break: the host hands over at ITS OWN LAST natural break (clause
- *     punctuation first: the voice already pauses there), keeping `HOST_HANDOFF_MIN_WORDS`, its own
- *     floor, and its name on the introduction.
+ *     goes too, when it ends a sentence itself) without blinking before the next take, and never
+ *     ending up against it.
+ *  2. Only when the cut is at no break: the host hands over at ITS OWN LAST clause punctuation (the
+ *     voice already pauses there), keeping `HOST_HANDOFF_MIN_WORDS`, its own floor, and its name on
+ *     the introduction.
  *  3. Or it says the picture's words up to THE NEXT natural break and hands over there — job 400's
  *     opening, 2.5 s of "There is a man standing in the greeting card | aisle of a pharmacy…",
  *     too short to give anything back and too long a sentence to finish as a hook.
- * 2 and 3 mark both pieces as the hand-off they now are. Null when nothing fits (the caller demotes
- * the take, or leaves a protected one and reports it). Pure — unit-tested through `enforcePlanRules`.
+ *  4. Or, with no room to go on, it hands over at its own last word break (the same floor).
+ * 2-4 mark both pieces as the hand-off they now are. Null when nothing fits (the caller demotes the
+ * take, or leaves a protected one and reports it). Pure — unit-tested through `enforcePlanRules`.
  */
 function finishSentenceAfterHost(
   scenes: StoryboardScene[],
@@ -871,12 +915,21 @@ function finishSentenceAfterHost(
     }
     let whole = end >= w.length;
     let cutAt = whole ? pTo : timeAtWord(p, end, opts.silences, opts.words);
-    if (!whole && pTo - cutAt < Math.max(SHOT_MIN_SEC, p.minHoldSec ?? 0)) {
+    // With another take right after this picture, what is left of it is the whole run of pictures
+    // between two takes, and under `PICTURE_RUN_MIN_SEC` rule 7b hands it to the host too — past the
+    // room counted here. Job 352's opening took "digging through the rack." and left "Half the
+    // boards are bowed." for 1.8 s before the next take: it went to the host, two takes stood back
+    // to back, and a check-in at 9:30 was demoted to pay for it.
+    const hostAfter = !!scenes[k + 1]?.hostPresent;
+    const minLeft = Math.max(SHOT_MIN_SEC, p.minHoldSec ?? 0, hostAfter ? PICTURE_RUN_MIN_SEC : 0);
+    if (!whole && pTo - cutAt < minLeft) {
       // What is left would blink past (or freeze to its floor): all of it, when it ends a sentence.
       if (!endsSentence(textOf(p))) break;
       whole = true;
       cutAt = pTo;
     }
+    // Never up against the next take: two takes back to back jump at the join.
+    if (whole && hostAfter) break;
     const moved = add + (cutAt - pFrom);
     if (len(host) + moved > ceiling || moved > room) break;
     const between = scenes.slice(i + 1, k).map(textOf);
@@ -904,43 +957,57 @@ function finishSentenceAfterHost(
     return { scenes, how: `now hands over at a natural break, after "${after}"` };
   };
 
-  // 2. BACK — the host hands over at its own last break.
+  // 2. BACK — the host hands over at its own last clause punctuation (the voice pauses there).
   const floor = Math.max(HOST_HANDOFF_MIN_SEC, host.minHoldSec ?? 0);
   const at = (b: number) => timeAtWord(host, b, opts.silences, opts.words);
   const keeps = (b: number) =>
     b >= HOST_HANDOFF_MIN_WORDS &&
     at(b) - from >= floor &&
     (!host.hostIntro || introducesHost(hw.slice(0, b).join(" "), params.hostName));
-  let cut = -1;
-  for (let b = hw.length - 1; b >= 1 && cut < 0; b--) if (endMark(hw[b - 1]) && keeps(b)) cut = b;
-  for (let b = hw.length - 1; b >= 1 && cut < 0; b--)
-    if (breakBetween(hw.slice(0, b).join(" "), hw.slice(b).join(" ")) && keeps(b)) cut = b;
-  if (cut >= 0) {
-    return handOff(
-      at(cut),
-      hw.slice(0, cut).join(" "),
-      `${hw.slice(cut).join(" ")} ${textOf(next)}`.trim(),
-      hw.slice(Math.max(0, cut - 3), cut).join(" ")
+  const back = (b: number) =>
+    handOff(
+      at(b),
+      hw.slice(0, b).join(" "),
+      `${hw.slice(b).join(" ")} ${textOf(next)}`.trim(),
+      hw.slice(Math.max(0, b - 3), b).join(" ")
     );
-  }
+  for (let b = hw.length - 1; b >= 1; b--) if (endMark(hw[b - 1]) && keeps(b)) return back(b);
 
-  // 3. ON — the host says the picture's words up to the next break, and hands over there.
+  // 3. ON — the host says the picture's words up to the next break, and hands over there. What is
+  // left of the picture must read, and must not blink between two takes (`PICTURE_RUN_MIN_SEC`).
   const pw = wordsOf(textOf(next));
+  const minLeft = Math.max(
+    SHOT_MIN_SEC,
+    next.minHoldSec ?? 0,
+    scenes[i + 2]?.hostPresent ? PICTURE_RUN_MIN_SEC : 0
+  );
   for (let m = 1; m < pw.length; m++) {
     const said = [...hw, ...pw.slice(0, m)];
     if (!breakBetween(said.join(" "), pw.slice(m).join(" "))) continue;
     const t = timeAtWord(next, m, opts.silences, opts.words);
-    const fits =
-      len(host) + (t - nFrom) <= ceiling &&
-      t - nFrom <= room &&
-      nTo - t >= Math.max(SHOT_MIN_SEC, next.minHoldSec ?? 0);
-    // The first break is the nearest; a later one only takes more of the picture.
-    return fits
-      ? handOff(t, said.join(" "), pw.slice(m).join(" "), said.slice(-3).join(" "))
-      : null;
+    const fits = len(host) + (t - nFrom) <= ceiling && t - nFrom <= room && nTo - t >= minLeft;
+    if (fits) return handOff(t, said.join(" "), pw.slice(m).join(" "), said.slice(-3).join(" "));
+    break; // the first break is the nearest; a later one only takes more of the picture
+  }
+
+  // 4. BACK at a word break — last, for a host with no room to go on: walking back from a subject |
+  // verb cut stays inside the subject, where going on reaches the predicate's own breaks. Never
+  // where a joining or relative word, a count or a clause's own subject opens a part of the subject:
+  // "…the sacks that flour | and feed came in were printed" (job 163), "…the two biggest, coziest
+  // things | I made are sitting right at the bottom" (job 168), "…from number two to number | one
+  // is the biggest jump" (jobs 153-178).
+  for (let b = hw.length - 1; b >= 1; b--) {
+    const opens = plainWord(hw[b]);
+    if (INSIDE_A_SUBJECT.has(opens) || CLAUSE_START.has(opens) || COUNT_WORD.test(opens)) continue;
+    if (breakBetween(hw.slice(0, b).join(" "), hw.slice(b).join(" ")) && keeps(b)) return back(b);
   }
   return null;
 }
+
+/** Words that, walking back from a subject | verb cut, open a part of the subject (step 4 above). */
+const INSIDE_A_SUBJECT = new Set([
+  "and", "or", "nor", "but", "yet", "plus", "then", "that", "which", "who", "whom", "whose",
+]);
 
 /** Split a lingering picture into shots at clause breaks, cutting on pauses in the voice. */
 function splitLingering(

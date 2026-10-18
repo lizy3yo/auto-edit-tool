@@ -2605,3 +2605,73 @@ describe("a host take stops mid-sentence only at a natural break (job 400)", () 
     }
   });
 });
+
+describe("a host take that finishes its sentence never leaves a blink before the next take (job 352)", () => {
+  // Dale's opening: "You drive to the big box store for four boards of oak, and you spend twenty
+  // minutes | digging through the rack. Half the boards are bowed. | A couple have a split…" (host |
+  // picture | host). Finishing the sentence took "digging through the rack." and left "Half the
+  // boards are bowed." for 1.8 s between the two takes: rule 7b gave it to the host, the takes stood
+  // back to back, and a check-in at 9:30 went to a picture to pay for it. Ranges and pauses are the
+  // job's own.
+  const at = (index: number, from: number, to: number, scriptText: string, over: Partial<StoryboardScene> = {}) =>
+    ({
+      index,
+      scriptText,
+      showSubject: "x",
+      narrationStartSec: from,
+      narrationEndSec: to,
+      audioDuration: to - from,
+      audioUrl: `https://example.com/${index}.mp3`,
+      wordCut: true,
+      stillImage: over.hostPresent ? undefined : true,
+      ...over,
+    }) as StoryboardScene;
+  const opening = () => [
+    at(1, 0, 4.791905, "You drive to the big box store for four boards of oak, and you spend twenty minutes", {
+      hostPresent: true,
+      hostOpener: true,
+      hostProtected: true,
+      minHoldSec: 2,
+    }),
+    at(2, 4.791905, 7.95719, "digging through the rack. Half the boards are bowed.", { minHoldSec: 1.2 }),
+    at(3, 7.95719, 10.7867, "A couple have a split running off the end.", { hostPresent: true, hostProtected: true, minHoldSec: 2 }),
+    at(4, 10.7867, 15.3756, "The one straight board in the pile is too narrow for your tabletop.", { minHoldSec: 1.2 }),
+  ];
+  const silences = [
+    { start: 5.86919, end: 6.36844 },
+    { start: 7.80037, end: 7.99719 },
+    { start: 10.2676, end: 10.8267 },
+    { start: 14.8376, end: 15.4156 },
+  ];
+  const params = { faceImageUrl: "https://example.com/host.jpg", hostName: "Dale Oakfield" } as any;
+
+  it("hands over at the take's own comma instead: the picture keeps both of its sentences", async () => {
+    const { enforcePlanRules } = await import("./planGate");
+    const r = enforcePlanRules(opening(), params, { silences });
+    const [host, pic, next] = r.scenes;
+    expect(host.hostPresent).toBe(true);
+    expect(host.scriptText).toBe("You drive to the big box store for four boards of oak,");
+    expect(pic.hostPresent).toBeFalsy();
+    expect(pic.scriptText).toBe(
+      "and you spend twenty minutes digging through the rack. Half the boards are bowed."
+    );
+    expect(pic.narrationStartSec).toBe(host.narrationEndSec);
+    expect(next.hostPresent).toBe(true);
+    expect([next.narrationStartSec, next.narrationEndSec]).toEqual([7.95719, 10.7867]);
+    expect(r.fixes.some(f => /picture blink/.test(f))).toBe(false);
+    expect(r.unresolved.filter(f => f.rule === 7)).toEqual([]);
+  });
+
+  it("a picture after the take that runs on past the next take's floor is still taken, as before", async () => {
+    const { enforcePlanRules } = await import("./planGate");
+    // The same opening with a longer second sentence: what is left reads for 2 s and more.
+    const scenes = opening();
+    scenes[1] = at(2, 4.791905, 9.5, "digging through the rack. Half the boards are bowed and the rest are cupped.");
+    scenes[2] = at(3, 9.5, 12.3, "A couple have a split running off the end.", { hostPresent: true, hostProtected: true });
+    scenes[3] = at(4, 12.3, 16, "The one straight board in the pile is too narrow for your tabletop.");
+    const r = enforcePlanRules(scenes, params, { silences: [{ start: 5.86919, end: 6.36844 }] });
+    expect(r.scenes[0].scriptText).toMatch(/twenty minutes digging through the rack\.$/);
+    expect(r.scenes[1].scriptText).toBe("Half the boards are bowed and the rest are cupped.");
+    expect(r.scenes[1].hostPresent).toBeFalsy();
+  });
+});

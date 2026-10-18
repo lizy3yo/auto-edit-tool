@@ -1003,3 +1003,67 @@ describe("a host take stops mid-sentence only at a natural break (job 400)", () 
     expect(hosts).toContain("Today, with the help of a Roman who wrote the sharpest essay,");
   });
 });
+
+describe("a natural break, read on the films' own hand-offs (review of the job 400 fix)", () => {
+  it("a picture may open on a preposition with its object, a clause word or a clause's own subject", () => {
+    // Hand-offs the shot list made at exactly these breaks; the first cut of the rule re-cut them.
+    const breaks: [string, string][] = [
+      ["Those buyers will pay real money for one good piece", "on a bare wall,"], // job 153
+      ["Now I love a quilt, and there is nothing that sits on a bed", "in a farmhouse guest room like a hand-pieced one,"], // job 167
+      ["because that's the number that tells you", "whether your evening earned its keep."], // job 172
+      ["I round off with a little single-crochet edge", "so they lie flat on the edge of the sink"], // job 151
+      ["a woman with gray hair that catches the light will read younger", "than a woman with flawlessly dyed brown hair"], // job 320
+      ["My neighbor across the fence saw the first one and bought it off me", "before I'd even woven in the ends."], // job 170
+      ["that's about $4 for every hour", "I sat at that machine,"], // job 159
+      ["A fellow from a bonsai club bought", "three at once, one for each of his best trees,"], // job 153
+    ];
+    for (const [before, after] of breaks) expect(breakBetween(before, after), before).toBe(true);
+  });
+
+  it("…but never a preposition left before a verb, a count inside its name, 'of', or an object pronoun", () => {
+    const notBreaks: [string, string][] = [
+      ["For as long as anyone can remember, the sacks that flour and feed came", "in were printed with little flowers and checks,"], // job 163
+      ["The homemade quilt folks paid me best for", "wasn't the precision piecing."], // jobs 159 and 166
+      ["But the jump from number two to number", "one is the biggest jump on this whole list."], // jobs 153-178
+      ["A nine-patch is nine little squares", "of cloth sewn into a block,"], // job 163
+      ["My neighbor across the fence saw the first one and bought", "it off me before I'd even woven in the ends."], // job 173
+      ["Then I'll show you how", "the joint locks without a single nail."], // a clause word waits for its clause
+      ["We set up at the stall where", "the buyers stop first."],
+    ];
+    for (const [before, after] of notBreaks) expect(breakBetween(before, after), before).toBe(false);
+  });
+
+  // Jobs 153-178: "But the jump from number two to number one | is the biggest jump on this whole
+  // list." — the host take stopped between subject and verb.
+  const numberOne = () => {
+    const scenes = film([
+      ["H", 5, sentence(1)],
+      ["P", 6, sentence(2)],
+      ["H", 2.6, "But the jump from number two to number one"],
+      ["P", 6, "is the biggest jump on this whole list. Number one is the holder made from scraps."],
+      ["H", 5, sentence(3)],
+    ]);
+    scenes[2].wordCut = true;
+    scenes[3].wordCut = true;
+    return scenes;
+  };
+
+  it("with room the host finishes the sentence", () => {
+    const r = enforcePlanRules(numberOne(), params);
+    const host = r.scenes.find(s => /^But the jump/.test(s.scriptText ?? ""))!;
+    expect(host.hostPresent).toBe(true);
+    expect(host.scriptText).toBe("But the jump from number two to number one is the biggest jump on this whole list.");
+    expect(r.unresolved.filter(f => f.rule === 7)).toEqual([]);
+  });
+
+  it("with no room it is never cut inside 'number one': the take goes to a picture instead", () => {
+    // 12.6 s of host against a 12.1 s budget: no room to say even "is".
+    const r = enforcePlanRules(numberOne(), params, { budgetSec: 12.1 });
+    const takes = r.scenes.filter(s => s.hostPresent).map(s => s.scriptText ?? "");
+    expect(takes.some(t => /to number$/.test(t))).toBe(false);
+    expect(takes.some(t => /^But the jump/.test(t))).toBe(false);
+    expect(r.scenes.map(s => s.scriptText).join(" ")).toContain(
+      "But the jump from number two to number one is the biggest jump on this whole list."
+    );
+  });
+});
