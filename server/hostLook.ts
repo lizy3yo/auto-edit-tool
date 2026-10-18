@@ -138,9 +138,46 @@ const HAIR_STRAND =
   String.raw`(?:stray|flyaway|fly-away|fallen|shed)\s+(?:[a-z-]+\s+)?${NOT_A_NAMED_STRAND}strands?${NOT_A_STRAND_OF_SOMETHING_ELSE}|` +
   String.raw`${NOT_A_NAMED_STRAND}strands?${NOT_A_STRAND_OF_SOMETHING_ELSE}(?=[^.;]{0,40}?\b(?:in|on|caught in|stuck in|around)\s+(?:(?:a|an|the|her|his|their|my|your)\s+)?(?:[a-z-]+\s+){0,2}(?:brush|hairbrush|comb|drain)\b)`;
 
+/**
+ * Kinds of thing "hand" names when it stands before them: a hand saw, a hand plane, hand cream. Only
+ * nouns a hand cannot DO — "a hand rests", "a hand grips", "a hand brushes the dust off" are a
+ * person, so rest, grip and brush are not here, and a word that is also a verb is listed in its
+ * singular only ("hand pump", never "a hand pumps").
+ */
+const HAND_THING_NOUNS = [
+  "tools?", "saws?", "planes?", "drills?", "file", "rasps?", "augers?", "routers?", "sanders?", "grinders?",
+  "ax(?:e|es)?", "mills?", "winch(?:es)?", "crank", "pump", "trucks?", "carts?", "brakes?", "rails?", "railings?",
+  "mixers?", "blenders?", "whisk", "creams?", "lotions?", "soap", "sanitizers?", "sanitisers?", "towels?", "wash",
+  "dryers?", "warmers?", "weights?", "mirrors?", "fan", "bells?", "puppets?", "luggage", "prints?", "lettering",
+  "embroidery", "looms?", "spindles?", "trowels?", "pruners?", "rake", "forks?", "hoes?", "cultivators?", "brooms?",
+  "vacs?", "vacuum", "lens(?:es)?",
+].join("|");
+/** What follows "hand-" in a made-by-hand word: hand-stitched, hand-sewn, hand-me-down, hands-free. */
+const HAND_MADE_WORDS = String.raw`me-downs?|[a-z]+ed|sewn|made|built|spun|woven|thrown|drawn|written|knit|held|hewn|blown|wrought|strung|wound|ground|cut|split|set|free|on`;
+/**
+ * "hand" or "hands" that is part of a BODY, never "hand" naming a thing (2026-10-18, round 11's
+ * review): "hand tools hanging silent on a pegboard wall in the garage" (job 406 scene 7, under
+ * "That one belief keeps more good tools hanging silent on more garage walls") read as a person
+ * through "hand", so the host was drawn reaching up and gripping the hammer — tools in use, for 9 s,
+ * under a line about tools nobody uses. Names no person: "hand" before a noun it is a kind of (a
+ * hand saw, hand cream — "handsaw" and "handmade" never matched), a made-by-hand word
+ * (hand-stitched, hand-me-down, hands-free), a way of doing ("made by hand", "kept on hand", "close
+ * at hand"), used goods ("second-hand", "first-hand"), and a clock's hands ("the minute hand", "its
+ * second hand", "the hands of the wall clock", "black hands pointing near three o'clock" — job 405
+ * scene 28; no person's hand is "its"). A hand doing something stays a person: "a hand reaching for
+ * the hammer", "hand-sewing the binding", "walking hand in hand", "on hands and knees", and a farm
+ * hand is a worker.
+ */
+export const BODY_HAND =
+  String.raw`(?<!\b(?:clock|watch|wristwatch|stopwatch|minute|hour)(?:['’]s)?[\s-])(?<!\b(?:second|first)-)(?<!\bits\s+(?:(?:second|minute|hour)\s+)?)` +
+  String.raw`(?:(?<!\b(?:by|at|on)\s)hand(?![\s-]+(?:${HAND_THING_NOUNS})\b)|hands)` +
+  String.raw`(?!-(?:${HAND_MADE_WORDS})\b)` +
+  String.raw`(?!\s+of\s+(?:(?:a|an|the|its|this|that)\s+)?(?:[a-z'’-]+\s+){0,2}(?:clocks?|watch(?:es)?|wristwatch(?:es)?|stopwatch(?:es)?|timers?)\b)` +
+  String.raw`(?!\s+(?:pointing|point|set|showing|reading|stopped|frozen)\b[^.;,]{0,30}?(?:\bo['’]clock\b|\b\d{1,2}:\d\d\b|\bnoon\b|\bmidnight\b))`;
+
 /** The person words themselves (the notes are under `SHOWS_PERSON`). */
 const PERSON_WORDS = new RegExp(
-  String.raw`\b(hands?|fingers?|fingertips?|host|she|he|her|his|herself|himself|someone|a person|a woman|a man|wearing|worn by|collarbone|neck|wrists?|earlobes?|held (?:up|out|near|against|over|to|above|beside|in front)|hold(?:s|ing) (?:up|out)|in use|scalp|skin|nails|fingernails|forehead|cheeks?|eyelashes|eyebrows?|hairline|${HAIR_STRAND}|hair(?!\s*(?:dryer|brush|clip|tie|spray|band|pin|comb|product|net|cut(?:ting)? scissors)))\b`,
+  String.raw`\b(${BODY_HAND}|fingers?|fingertips?|host|she|he|her|his|herself|himself|someone|a person|a woman|a man|wearing|worn by|collarbone|neck|wrists?|earlobes?|held (?:up|out|near|against|over|to|above|beside|in front)|hold(?:s|ing) (?:up|out)|in use|scalp|skin|nails|fingernails|forehead|cheeks?|eyelashes|eyebrows?|hairline|${HAIR_STRAND}|hair(?!\s*(?:dryer|brush|clip|tie|spray|band|pin|comb|product|net|cut(?:ting)? scissors)))\b`,
   "i"
 );
 
@@ -520,6 +557,8 @@ const ANIMAL =
   /\b(?:dogs?|pupp(?:y|ies)|cats?|kittens?|hens?|chickens?|chicks?|roosters?|ducks?|ducklings?|geese|goose|horses?|pon(?:y|ies)|foals?|cows?|calf|calves|bulls?|goats?|sheep|lambs?|pigs?|piglets?|birds?|parrots?|rabbits?|bunn(?:y|ies)|deer|fox(?:es)?|squirrels?|mice|mouse|rats?|hamsters?|bees?|owls?|hawks?|turtles?|snakes?|lizards?|raccoons?|bears?|wol(?:f|ves)|cattle|donkeys?|mules?|llamas?|alpacas?|turkeys?|pigeons?|doves?|crows?)\b/gi;
 /** A part only a person has: "her lap", "his hands" stay a person's even right after a dog. */
 const HUMAN_ONLY_PART = /^\s+(?:own\s+)?(?:hands?|fingers?|fingertips?|thumbs?|palms?|wrists?|lap|knees?|arms?)\b/i;
+/** A person named between the animal and the pronoun ("a dog at the host's feet, her hand on it"). */
+const PERSON_SINCE = new RegExp(String.raw`\b(?:${BODY_HAND}|fingers?|host|someone|a person)\b`, "i");
 
 /**
  * The description with every he/she/her/his that refers to an ANIMAL turned into "its" (2026-10-18,
@@ -535,7 +574,7 @@ export function withoutAnimalPronouns(text: string): string {
     const animals = Array.from(before.matchAll(ANIMAL));
     if (!animals.length) return pronoun;
     const since = before.slice(animals[animals.length - 1].index ?? 0);
-    if (namedPeople(since) || /\b(?:hands?|fingers?|host|someone|a person)\b/i.test(since)) return pronoun;
+    if (namedPeople(since) || PERSON_SINCE.test(since)) return pronoun;
     if (HUMAN_ONLY_PART.test(text.slice(at + pronoun.length))) return pronoun;
     return /self$/i.test(pronoun) ? "itself" : "its";
   });
@@ -1169,7 +1208,7 @@ const NECK_PIECE =
 /** A neck piece on a display stand: the one place a piece that is already worn is taken off. */
 const ON_A_STAND = String.raw`,?\s*\b(?:on|over)\s+(?:(?:a|an|the)\s+)?(?:dress form|mannequin|necklace stand|jewel(?:le)?ry stand|display stand|display bust)\b[^,.;]*`;
 /** A neck piece set down — on a table, in a box, over a mirror, on a stand — rather than worn. */
-const SET_DOWN_SOURCE = String.raw`,?\s*\b(?:draped|laid|lying|lies|resting|rests|displayed|arranged|spread|coiled|placed|sitting|sits|hanging|hangs|propped|tucked)\s+(?:out\s+|flat\s+)?(?:over|across|on|onto|in|inside|along|atop)\s+(?![^,.;]*\b(?:chest|neck|collarbones?|skin|throat|shoulders?|body|hands?|palms?|fingers?|sweater|crewneck|turtleneck|blouse|shirt|neckline|dress(?!\s+form))\b)[^,.;]+|${ON_A_STAND}|,?\s*\b(?:on|onto|in|inside|atop)\s+(?:a|an|the|its)\s+${MODIFIER_WORD}{0,3}(?:tables?|tabletops?|dressers?|vanit(?:y|ies)|nightstands?|desks?|counters?|countertops?|shelf|shelves|trays?|dish(?:es)?|box(?:es)?|drawers?|rugs?|cloths?|towels?|velvet|linings?|cushions?|pillows?|beds?|bedspreads?|surfaces?|mats?)\b[^,.;]*`;
+const SET_DOWN_SOURCE = String.raw`,?\s*\b(?:draped|laid|lying|lies|resting|rests|displayed|arranged|spread|coiled|placed|sitting|sits|hanging|hangs|propped|tucked)\s+(?:out\s+|flat\s+)?(?:over|across|on|onto|in|inside|along|atop)\s+(?![^,.;]*\b(?:chest|neck|collarbones?|skin|throat|shoulders?|body|${BODY_HAND}|palms?|fingers?|sweater|crewneck|turtleneck|blouse|shirt|neckline|dress(?!\s+form))\b)[^,.;]+|${ON_A_STAND}|,?\s*\b(?:on|onto|in|inside|atop)\s+(?:a|an|the|its)\s+${MODIFIER_WORD}{0,3}(?:tables?|tabletops?|dressers?|vanit(?:y|ies)|nightstands?|desks?|counters?|countertops?|shelf|shelves|trays?|dish(?:es)?|box(?:es)?|drawers?|rugs?|cloths?|towels?|velvet|linings?|cushions?|pillows?|beds?|bedspreads?|surfaces?|mats?)\b[^,.;]*`;
 /**
  * Words saying the piece is already on someone ("worn at the collarbone", "on the chest"). "Host" or
  * "woman" alone is not one: "the host's pearl necklace laid on the dresser" is set down.
@@ -1181,8 +1220,10 @@ const ON_A_PERSON = new RegExp(
 /** What `wornAtTheNeck` adds (and how it knows it already has). */
 const WORN_TAIL = "worn at the host's own neck, the chin and jaw in view above it";
 /** A hand on the piece: the picture is of someone doing something with it, and stays as it is. */
-const HAND_ON_IT =
-  /\b(?:hands?|fingers?|fingertips?|palms?|hold(?:s|ing)?|held|lift(?:s|ing)?|pick(?:s|ing)|tak(?:es|ing)|adjust(?:s|ing)?|fasten(?:s|ing)?)\b/i;
+const HAND_ON_IT = new RegExp(
+  String.raw`\b(?:${BODY_HAND}|fingers?|fingertips?|palms?|hold(?:s|ing)?|held|lift(?:s|ing)?|pick(?:s|ing)|tak(?:es|ing)|adjust(?:s|ing)?|fasten(?:s|ing)?)\b`,
+  "i"
+);
 
 /**
  * A chin line's picture of the piece alone, put on the host (2026-10-18, the audit): job 223 scene 5,

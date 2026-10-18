@@ -22,7 +22,7 @@
 import type { BuildStage, KeyThing, RecurringPerson, StoryboardScene } from "@shared/types";
 import { invokeClaude } from "./claude";
 import { safeParseJSON } from "./jsonRepair";
-import { SHOWS_PERSON, showsPerson, namedPeople, namesOnlyAnimal, personKey } from "./hostLook";
+import { BODY_HAND, SHOWS_PERSON, showsPerson, namedPeople, namesOnlyAnimal, personKey } from "./hostLook";
 
 /** A picture shorter than this is a flash and folds into a neighbour. */
 export const SHOT_MIN_SEC = 1.2;
@@ -341,8 +341,12 @@ const ANGLES: NonNullable<StoryboardScene["shotAngle"]>[] = [
   "low",
 ];
 
-/** The shot shows hands (or fingers) — never allowed to move in a video. */
-export const SHOWS_HANDS = /\b(hands?|fingers?|thumbs?|palms?|wrists?)\b/i;
+/**
+ * The shot shows hands (or fingers) — never allowed to move in a video. A hand on a body only
+ * (`BODY_HAND`): "hand tools on a pegboard" (job 406 scene 7) or "the hands of the wall clock" show
+ * no one.
+ */
+export const SHOWS_HANDS = new RegExp(String.raw`\b(${BODY_HAND}|fingers?|thumbs?|palms?|wrists?)\b`, "i");
 /**
  * Work where a tool must BITE into the material — drilling, sawing, driving a screw, hammering,
  * chiselling, cutting, carving. The video model cannot fake that contact: Norbert's 3-min test

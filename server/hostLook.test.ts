@@ -347,3 +347,90 @@ describe("a strand is part of a person only when it is hair (round 9's review, 2
     expect(hair.brollHostLook).toBe(look.hostLook);
   });
 });
+
+describe("'hand' naming a thing is not a person (round 11's review, job 406 scene 7)", () => {
+  it("never reads a hand tool, a made-by-hand word, a way of doing or a clock's hands as a person", async () => {
+    const { SHOWS_PERSON, showsPerson } = await import("./hostLook");
+    for (const thing of [
+      "hand tools hanging silent on a pegboard wall in the garage", // job 406 scene 7's showSubject
+      "Hand tools hanging on a pegboard wall in the garage workshop, spanners, hammers, and wrenches arranged on the board, spring daylight through the side window.", // its visualPrompt
+      "an old hand saw hanging on a nail above the bench",
+      "a handsaw resting across two sawhorses",
+      "a hand drill and a brace on the shelf",
+      "two hand planes lined up on the bench",
+      "a hand-plane resting on its side",
+      "a tube of hand cream on the nightstand",
+      "a folded hand towel beside the sink",
+      "a hand-crank pencil sharpener clamped to the desk",
+      "a second-hand drill press in the corner of the garage",
+      "a handmade cutting board on the counter",
+      "a hand-stitched quilt folded over the chair",
+      "a hand-me-down rocking chair on the porch",
+      "a hands-free phone mount on the dashboard",
+      "a basket woven by hand on the porch step",
+      "spare batteries kept on hand in the kitchen drawer",
+      "a flashlight close at hand on the nightstand",
+      "the hands of the old wall clock near midnight",
+      "the minute hand of the kitchen clock",
+      "a kitchen wall clock, its second hand sweeping past the twelve",
+      // job 405 scene 28's visualPrompt
+      "Round analog clock on a wooden nightstand, white face and black hands pointing near three o'clock, cream lamp beside it glowing softly.",
+    ]) {
+      expect(SHOWS_PERSON.test(thing), thing).toBe(false);
+      expect(showsPerson(thing), thing).toBe(false);
+    }
+  });
+
+  it("still reads a hand on a body as a person, whatever it does", async () => {
+    const { SHOWS_PERSON, showsPerson } = await import("./hostLook");
+    for (const hand of [
+      "a hand reaching for the hammer on the pegboard",
+      "hands sanding the edge of a board",
+      "Bare weathered hands guiding a dull mower blade against a spinning belt", // job 406 scene 20
+      "a hand rests on the workbench beside the plane",
+      "a hand grips the chisel above the board",
+      "a hand brushes sawdust off the bench",
+      "a hand pumps the handle of the old well",
+      "hand-sewing the binding onto a quilt",
+      "two figures walking hand in hand along a sunny park path", // job 401 scene 19
+      "a woman on hands and knees scrubbing the floor",
+      "a hammer in hand at the bench",
+      "a hired hand stacking hay bales in the loft",
+      "the hand of a sleeping person resting on the blanket",
+    ]) {
+      expect(SHOWS_PERSON.test(hand), hand).toBe(true);
+      expect(showsPerson(hand), hand).toBe(true);
+    }
+  });
+
+  it("an animal's pronoun after hand tools is the animal's; one after a hand stays the person's", async () => {
+    const { withoutAnimalPronouns } = await import("./hostLook");
+    expect(withoutAnimalPronouns("a dog asleep under the hand tools, his tail over his nose")).toBe(
+      "a dog asleep under the hand tools, its tail over its nose"
+    );
+    expect(withoutAnimalPronouns("a dog sniffing a hand, her fingers spread")).toBe("a dog sniffing a hand, her fingers spread");
+  });
+
+  it("a hand-knotted necklace set down is worn under a chin line; one draped over a hand stays as it is", async () => {
+    const { wornAtTheNeck } = await import("./hostLook");
+    expect(wornAtTheNeck("hand-knotted pearl necklace laid on the dresser")).toMatch(
+      /^hand-knotted pearl necklace, worn at the host's own neck/
+    );
+    const held = "fine gold chain necklace with pendant draped over a hand near the collarbone"; // job 223 scene 15
+    expect(wornAtTheNeck(held)).toBe(held);
+  });
+
+  it("job 406 scene 7: hand tools on a wall are drawn with nobody in them; a hand at work is the host", () => {
+    const look = { hostLook: "a lean man in his late fifties in a light blue denim shirt" };
+    const wall = pic(7, "hand tools hanging silent on a pegboard wall in the garage", {
+      scriptText: "That one belief keeps more good tools hanging silent on more garage walls than rust ever has.",
+    });
+    const work = pic(8, "a hand reaching for the hammer on the pegboard");
+    expect(markHostBroll([wall, work], look, "https://x/host.jpg")).toBe(1);
+    expect(wall.humanPresent).toBeFalsy();
+    expect(wall.brollHostLook).toBeUndefined();
+    expect(wall.brollHostRef).toBeUndefined();
+    expect(buildStillPrompt(wall)).toContain(NO_FIGURES_SUFFIX);
+    expect(work.brollHostLook).toBe(look.hostLook);
+  });
+});

@@ -3836,3 +3836,58 @@ describe("'you' is the host's customer, not the host: one ordinary viewer with o
     expect(buildStillPrompt(story)).not.toContain(FLYER);
   });
 });
+
+describe("'hand tools' are tools, not hands (round 11's review, job 406 scene 7)", () => {
+  // "That one belief keeps more good tools hanging silent on more garage walls than rust ever has."
+  // The shot list asked for "hand tools hanging silent on a pegboard wall in the garage"; "hand" read
+  // as a person, so the host was drawn reaching up and gripping the hammer for 9.4 s — tools in use
+  // under a line about tools nobody uses.
+  const GARAGE = "A lean man in his late fifties with fair, weathered skin, graying hair under a woven straw cowboy hat, wearing a light blue denim button-up shirt";
+  const line = "That one belief keeps more good tools hanging silent on more garage walls than rust ever has.";
+
+  it("the planned picture of hand tools on a wall is drawn with nobody in it", () => {
+    const { scenes } = applyShotPlan(
+      [pic(7, line, "x")],
+      [{ scene: 7, hostUntil: null, shots: [{ from: "That one belief", show: "hand tools hanging silent on a pegboard wall in the garage" }] }]
+    );
+    markHostBroll(scenes, { hostLook: GARAGE, hostName: "Gary" }, "https://x/host.png");
+    const wall = scenes[0];
+    expect(wall.humanPresent).toBeFalsy();
+    expect(wall.brollHostLook).toBeUndefined();
+    expect(wall.brollHostRef).toBeUndefined();
+    const prompt = buildStillPrompt(wall);
+    expect(prompt).toContain(NO_FIGURES_SUFFIX);
+    expect(prompt).not.toContain(GARAGE);
+  });
+
+  it("a hand at work, or the host using hand tools, is still the host (job 406 scenes 9 and 20)", () => {
+    const scenes = [
+      pic(9, "This channel is about the work.", "the host working quietly at the garage workbench with simple hand tools", {
+        visualPrompt: "Bare weathered hands from the forearms down working with a simple hand tool at a wooden garage workbench",
+      }),
+      pic(10, "Grab the hammer.", "a hand lifting the hammer off the pegboard wall"),
+    ];
+    markHostBroll(scenes, { hostLook: GARAGE, hostName: "Gary" }, "https://x/host.png");
+    for (const s of scenes) {
+      expect(s.brollHostLook, s.showSubject).toBe(GARAGE);
+      expect(s.humanPresent, s.showSubject).toBe(true);
+    }
+  });
+
+  it("made by hand, second-hand and a clock's hands name no person; a hand in hand still does", () => {
+    for (const thing of [
+      "a hand-stitched quilt folded over the chair",
+      "a second-hand drill press in the corner of the garage",
+      "a basket woven by hand on the porch step",
+      "a hand saw and a hand plane on the bench",
+      "a tube of hand cream on the nightstand",
+      "Round analog clock on a wooden nightstand, white face and black hands pointing near three o'clock, cream lamp beside it glowing softly.", // job 405 scene 28
+    ])
+      expect(SHOWS_PERSON.test(thing), thing).toBe(false);
+    for (const hand of [
+      "two figures walking hand in hand along a sunny park path", // job 401 scene 19
+      "a hand reaching for the hammer on the pegboard",
+    ])
+      expect(SHOWS_PERSON.test(hand), hand).toBe(true);
+  });
+});
