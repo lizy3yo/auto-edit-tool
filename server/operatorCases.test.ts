@@ -5832,19 +5832,180 @@ describe("the graphics planner sees the picture (round 13 verification films, 20
     const { ask, told } = asking([stepCards]);
     const out = await planGraphics({ words: snack, cuts: snackCuts, film, ask, ensureIcon: async () => true });
     expect(out.cues).toEqual([]);
+    // Its steps are not all his words either ("all", "ask", "aisle"): a cue has one repair round, so it
+    // is told both at once (see the step-wording cases at the end of this file).
     expect(out.rounds[0].problems).toEqual([
-      { cue: "snack-steps", problem: "StepCards hides the pictures of 3 spoken steps (scenes #29, #30, #31), each drawn for its own step. Show them over the footage, which leaves every picture in view — StepLabels for the steps, a DimCaption for a line — or drop it" },
+      {
+        cue: "snack-steps",
+        problem: expect.stringMatching(
+          /^step 1 \("Wait until all served"\) shows "all", which the narrator does not say.* Also: StepCards hides the pictures of 3 spoken steps \(scenes #29, #30, #31\), each drawn for its own step\. Show them over the footage, which leaves every picture in view — StepLabels for the steps, a DimCaption for a line — or drop it$/
+        ),
+      },
     ]);
     expect(told[1]).toContain("StepLabels");
   });
 
   it("410: the same steps as StepLabels over those pictures are kept; the card is kept where the steps have no pictures of their own", async () => {
     const { planGraphics } = await import("../graphics/src/plan/planner");
-    const labels = { ...stepCards, id: "snack-step-labels", template: "StepLabels", props: { steps: stepCards.props.steps } };
+    // the steps in the narrator's own words, as the repair now writes them
+    const steps = [
+      { at: "@wait until everyone's been served", text: "Wait until everyone's been served" },
+      { at: "@then catch a flight attendant", text: "Catch a flight attendant" },
+      { at: "@and phrase it as an offer", text: "Phrase it as an offer" },
+    ];
+    const labels = { ...stepCards, id: "snack-step-labels", template: "StepLabels", props: { steps } };
     const over = await planGraphics({ words: snack, cuts: snackCuts, film: await snackFilm(), ask: asking([labels]).ask, ensureIcon: async () => true });
     expect(over.rounds[0].problems).toEqual([]);
     expect(over.cues.map(c => c.id)).toEqual(["snack-step-labels"]);
-    const card = await planGraphics({ words: snack, cuts: snackCuts, film: await snackFilm(false), ask: asking([stepCards]).ask, ensureIcon: async () => true });
+    const card = await planGraphics({ words: snack, cuts: snackCuts, film: await snackFilm(false), ask: asking([{ ...stepCards, props: { ...stepCards.props, steps } }]).ask, ensureIcon: async () => true });
     expect(card.cues.map(c => c.id)).toEqual(["snack-steps"]);
+  });
+});
+
+describe("a list row and a step are the narrator's words, whole (round 13 verification films, 2026-10-18)", () => {
+  // 409 (2:36-2:44): the "Everyone complains" window's last row read "The young are already rehearsing"
+  // for "and the young are already rehearsing the complaint" — cut to fit, it stopped on a verb with
+  // what it takes cut off. 410 (2:21-2:29): the step card read "Wait until all served → Ask in aisle or
+  // galley → Phrase it as offer" for "…wait until everyone's been served, then catch a flight attendant
+  // as they pass or step back to the galley and phrase it as an offer". Plans and words as stored.
+  const words = (s: string) =>
+    s.split(" ").map(t => {
+      const [text, range] = t.split("@");
+      const [start, end] = range.split("-").map(Number);
+      return { text, start, end };
+    });
+  const scene = (index: number, a: number, b: number, extra: Record<string, unknown> = {}) => ({ index, narrationStartSec: a, narrationEndSec: b, scriptText: "", hostPresent: false, cta: false, split: false, hostOpener: false, ...extra });
+  const asking = (answers: object[][]) => {
+    const told: string[] = [];
+    const ask = async (_system: string, messages: { content: string }[]) => {
+      told.push(messages[messages.length - 1].content);
+      return JSON.stringify({ cues: answers[told.length - 1] ?? [] });
+    };
+    return { ask, told };
+  };
+
+  const complaints = words(
+    "says.@155.259-155.519 The@156.2-156.3 farmer@156.38-156.72 complains,@156.76-157.38 the@157.68-157.8 senator@157.88-158.3 complains,@158.36-158.98 the@159.36-159.48 old@159.681-159.881 complain,@159.981-160.561 and@160.941-161.041 the@161.081-161.161 young@161.221-161.561 are@161.721-161.821 already@161.941-162.321 rehearsing@162.381-162.961 the@163.001-163.081 complaint.@163.121-163.582 Then@164.282-164.462 he@164.522-164.622 turns@164.682-164.982 the@165.042-165.162 whole@165.282-165.522"
+  );
+  const complaintsFilm = {
+    scenes: [
+      scene(28, 144.48, 156.11, { scriptText: "Everyone complains that life is too short, Seneca says." }),
+      scene(29, 156.11, 157.59, { scriptText: "The farmer complains,", listItem: "item" }),
+      scene(30, 157.59, 159.28, { scriptText: "the senator complains,", listItem: "item" }),
+      scene(31, 159.28, 160.85, { scriptText: "the old complain,", listItem: "item" }),
+      scene(32, 160.85, 164.13, { scriptText: "and the young are already rehearsing the complaint.", listItem: "item" }),
+      scene(33, 164.13, 170.51, { scriptText: "Then he turns the whole thing over in a single motion: life is not short." }),
+    ],
+  };
+  const everyone = {
+    id: "everyone-complains",
+    end: "already rehearsing the complaint.",
+    props: {
+      items: [
+        { at: "@The farmer complains", say: "The farmer complains", text: "The farmer complains" },
+        { at: "@the senator complains", say: "the senator complains", text: "The senator complains" },
+        { at: "@the old complain", say: "the old complain", text: "The old complain" },
+        { at: "@the young are already", say: "the young are already rehearsing the complaint", text: "The young are already rehearsing" },
+      ],
+      title: "Everyone complains",
+    },
+    start: "The farmer complains, the senator complains,",
+    endPad: 0.3,
+    startPad: 0,
+    template: "ListWindow",
+  };
+
+  it("409: the last row keeps 'the complaint' and leaves out 'already' to fit; the other rows are untouched", async () => {
+    const { planGraphics } = await import("../graphics/src/plan/planner");
+    const out = await planGraphics({ words: complaints, cuts: [144.48, 156.11, 157.59, 159.28, 160.85, 164.13], film: complaintsFilm, ask: asking([[everyone]]).ask, ensureIcon: async () => true });
+    expect(out.rounds[0].problems).toEqual([]);
+    expect((out.cues[0].props.items as { text: string }[]).map(i => i.text)).toEqual(["The farmer complains", "The senator complains", "The old complain", "The young are rehearsing the complaint"]);
+  });
+
+  it("409: a row the planner shortened in its own words, ending where the item may end, stays as written ('The kitchen table', 'What the remaining years are for')", async () => {
+    const { keepObject, objectCutOff } = await import("../graphics/src/plan/planner");
+    for (const [row, say] of [
+      ["The kitchen table", "the kitchen table at two in the morning"],
+      ["What the remaining years are for", "what the remaining years are actually for"],
+    ]) {
+      expect(objectCutOff(row, say)).toBeUndefined();
+      expect(keepObject(row, say, 6)).toBe(row);
+    }
+  });
+
+  const snack = words(
+    "So@141.115-141.275 wait@141.355-141.555 until@141.595-141.875 everyone's@142.015-142.415 been@142.455-142.615 served,@142.675-143.115 then@143.496-143.716 catch@143.756-143.996 a@144.036-144.056 flight@144.096-144.336 attendant@144.356-144.736 as@144.796-144.876 they@144.916-145.056 pass@145.116-145.556 or@146.076-146.276 step@146.356-146.596 back@146.636-146.796 to@146.836-146.936 the@146.956-147.016 galley@147.056-147.477 and@147.757-147.857 phrase@147.917-148.197 it@148.257-148.317 as@148.417-148.497 an@148.537-148.597 offer.@148.737-149.057"
+  );
+  const snackFilm = {
+    scenes: [
+      scene(28, 128.87, 141.29, { scriptText: "…and you're asking the crew to guess whether the last few rows will come up short. So" }),
+      scene(29, 141.29, 143.29, { scriptText: "wait until everyone's been served,", listItem: "step" }),
+      scene(30, 143.29, 147.62, { scriptText: "then catch a flight attendant as they pass, or step back to the galley,", listItem: "step" }),
+      scene(31, 147.62, 149.55, { scriptText: "and phrase it as an offer.", listItem: "step" }),
+      scene(32, 149.55, 163.5, { hostPresent: true, scriptText: "Two asks in, you might wonder how anyone keeps this straight." }),
+    ],
+  };
+  const snackCuts = [128.87, 141.29, 143.29, 147.62, 149.55];
+  const snackSteps = {
+    id: "snack-steps",
+    end: "phrase it as an offer.",
+    props: {
+      steps: [
+        { at: "@wait until everyone's been served", text: "Wait until all served" },
+        { at: "@then catch a flight attendant", text: "Ask in aisle or galley" },
+        { at: "@and phrase it as an offer", text: "Phrase it as offer" },
+      ],
+      kicker: "The second snack",
+    },
+    start: "wait until everyone's been served,",
+    endPad: 0.1,
+    startPad: -0.15,
+    template: "StepCards",
+  };
+
+  it("410: the card is told in one round that its steps are not his words AND that it hides the step pictures; the repair, StepLabels in his words, is kept with 'an offer'", async () => {
+    const { planGraphics } = await import("../graphics/src/plan/planner");
+    const repaired = {
+      ...snackSteps,
+      id: "snack-step-labels",
+      template: "StepLabels",
+      props: {
+        steps: [
+          { at: "@wait until everyone's been served", text: "Wait until everyone's been served" },
+          { at: "@then catch a flight attendant", text: "Catch a flight attendant" },
+          { at: "@and phrase it as an offer", text: "Phrase it as offer" },
+        ],
+      },
+    };
+    const { ask, told } = asking([[snackSteps], [repaired]]);
+    const out = await planGraphics({ words: snack, cuts: snackCuts, film: snackFilm, ask, ensureIcon: async () => true });
+    const [p] = out.rounds[0].problems;
+    expect(p.cue).toBe("snack-steps");
+    expect(p.problem).toContain(`step 1 ("Wait until all served") shows "all", which the narrator does not say — a step is his own words, shortened (he says "wait until everyone's been served")`);
+    expect(p.problem).toContain(`step 2 ("Ask in aisle or galley") shows "ask", "in", "aisle", which the narrator does not say`);
+    expect(p.problem).toContain("Also: StepCards hides the pictures of 3 spoken steps (scenes #29, #30, #31)");
+    // "Phrase it as offer" is no problem: its "an" is put back, never sent for repair
+    expect(p.problem).not.toContain("Phrase it as offer");
+    expect(told[1]).toContain(`he says "wait until everyone's been served"`);
+    expect(out.rounds[1].problems).toEqual([]);
+    expect(out.cues.map(c => c.id)).toEqual(["snack-step-labels"]);
+    expect((out.cues[0].props.steps as { text: string }[]).map(s => s.text)).toEqual(["Wait until everyone's been served", "Catch a flight attendant", "Phrase it as an offer"]);
+  });
+
+  it("a chain of steps on the narrator's words is kept exactly as written (Frederick's job 385)", async () => {
+    const { planGraphics } = await import("../graphics/src/plan/planner");
+    const said = "So get a stepladder, take one alarm down, and read the label.".split(" ").map((text, i) => ({ text, start: 60 + i * 0.3, end: 60 + i * 0.3 + 0.26 }));
+    const steps = {
+      id: "07-step-labels",
+      template: "StepLabels",
+      start: "So get a stepladder",
+      startPad: -0.15,
+      end: "read the label.",
+      endPad: 0.3,
+      props: { steps: [{ text: "Get a stepladder", at: "@get a stepladder" }, { text: "Take one alarm down", at: "@take one alarm down" }, { text: "Read the label", at: "@read the label" }] },
+    };
+    const out = await planGraphics({ words: said, film: { scenes: [scene(12, 59, 65, { scriptText: said.map(w => w.text).join(" ") })] }, ask: asking([[steps]]).ask, ensureIcon: async () => true });
+    expect(out.rounds[0].problems).toEqual([]);
+    expect((out.cues[0].props.steps as { text: string }[]).map(s => s.text)).toEqual(["Get a stepladder", "Take one alarm down", "Read the label"]);
   });
 });

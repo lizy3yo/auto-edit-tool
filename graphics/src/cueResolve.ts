@@ -127,6 +127,9 @@ function same(a: string, b: string): boolean {
   for (let i = 0; i < x.length && diff < 2; i++) if (x[i] !== y[i]) diff++;
   return diff === 1;
 }
+/** The resolver's one word for another (`same`), for a check that holds a graphic's shown words to
+ * the spoken ones by the same measure (the planner's steps, which have no word-timed line). */
+export const sameWord = same;
 
 /**
  * Match want[k] at index[i], forgiving how the two sides SPLIT a compound — the script's
