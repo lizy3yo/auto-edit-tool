@@ -2259,9 +2259,10 @@ forbids only when the picture's sentence rules something out.`;
 
 /**
  * A new picture starting inside a line, at `from` (its first words, verbatim). `other`: the person
- * who is not the host it shows (`otherPersonOf`), only when the check named one.
+ * who is not the host it shows (`otherPersonOf`) when the check named one, `null` when it answered
+ * that nobody else is in it (the host, the viewer, or no one), unset when it did not answer.
  */
-export type PictureSplit = { from: string; show: string; thing?: string; stage?: BuildStage; other?: string };
+export type PictureSplit = { from: string; show: string; thing?: string; stage?: BuildStage; other?: string | null };
 export type PictureFix = {
   id: number;
   show?: string;
@@ -2390,7 +2391,9 @@ function readPictureFixes(text: string, scenes: StoryboardScene[], panel: boolea
         show: clean(x?.show),
         thing: clean(x?.thing) || undefined,
         stage: buildStageOf(x?.stage),
-        other: otherPersonOf(x?.other),
+        // Read like a rewrite's `other`: an answer of nobody else (null, "the host", "you") is kept as
+        // null, so the new picture does not take the line's someone-else (`applyPictureSplits`).
+        other: !!x && typeof x === "object" && "other" in x ? otherPersonOf(x.other) ?? null : undefined,
       }))
       .filter((x: PictureSplit) => x.from && x.show);
     const who = panel ? undefined : whoOf(f?.who);
@@ -2751,8 +2754,16 @@ export function applyPictureSplits(
         // The person the check put in this new picture; else the line's, but only while the new part
         // still shows a person (the audit found "a woman customer" left on an incense holder, job 361
         // scene 32) — `markHostBroll` would otherwise draw them into a picture of something else.
-        otherPerson: cut.other ?? (showsPerson(cut.show) ? s.otherPerson : undefined),
-        otherPeople: cut.other ? otherPeopleOf(cut.other) : showsPerson(cut.show) ? s.otherPeople : undefined,
+        // An answer of NOBODY ELSE is kept: a split where a new sentence starts is where the person
+        // changes (job 399 scene 16: "the flight attendant pours your soda…" then "you can have the
+        // whole thing just by asking" — the viewer's hands, which the line's someone-else would draw
+        // as the crew member).
+        otherPerson: cut.other !== undefined ? cut.other ?? undefined : showsPerson(cut.show) ? s.otherPerson : undefined,
+        otherPeople: cut.other
+          ? otherPeopleOf(cut.other)
+          : cut.other === undefined && showsPerson(cut.show)
+            ? s.otherPeople
+            : undefined,
         // What the line rules out (answered for the whole line) stays out of this part too.
         forbids: s.forbids,
         stillImage: true,

@@ -3669,4 +3669,33 @@ describe("one picture, one subject: two sentences about different things are two
     const quick = pic(20, `${roof} ${rive}`, bolt, { joinedLine: true });
     expect(applyPictureSplits([quick], fixes, cabin, () => 5).split).toBe(0);
   });
+
+  it("job 399 scene 16: the viewer's half of a split is never drawn as the crew member who pours", () => {
+    // The person changes where the sentence does: the check answering nobody else for the new picture
+    // is kept, not replaced by the line's someone-else.
+    const pour =
+      "airlines, the flight attendant pours your soda into a plastic cup packed with ice, fills it about halfway, and the rest of the can rolls off down the aisle on the cart.";
+    const ask = "On many of those carriers, you can have the whole thing just by asking.";
+    const s = pic(16, `${pour} ${ask}`, "hands pouring soda into an ice-filled plastic cup at the cart", {
+      joinedLine: true,
+      humanPresent: true,
+    });
+    const fixes = parsePictureFixes(
+      JSON.stringify({
+        pictures: [
+          {
+            id: 0,
+            about: "the flight attendant pouring",
+            shows_it: true,
+            who: "a flight attendant",
+            split: [{ from: "On many of those carriers", show: "hands holding a full unopened soda can on a tray table", other: null }],
+          },
+        ],
+      }),
+      [s]
+    );
+    applyPictureFixes([s], fixes, []);
+    const r = applyPictureSplits([s], fixes, [], () => 14.45);
+    expect(r.scenes.map(x => x.otherPerson)).toEqual(["a flight attendant", undefined]);
+  });
 });

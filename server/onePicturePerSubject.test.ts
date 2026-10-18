@@ -201,3 +201,51 @@ describe("one picture, one subject: a line of two sentences about different thin
     expect(r.scenes).toEqual([s]);
   });
 });
+
+describe("a split where a new sentence starts takes the check's answer for who is in it (job 399 scene 16)", () => {
+  // Job 399 scene 16, as stored: one joined picture, 14.5 s, of two sentences — the crew member pouring,
+  // then what the viewer can ask for. The person changes where the sentence does.
+  const POUR =
+    "airlines, the flight attendant pours your soda into a plastic cup packed with ice, fills it about halfway, and the rest of the can rolls off down the aisle on the cart.";
+  const ASK = "On many of those carriers, you can have the whole thing just by asking.";
+  const scene16 = () =>
+    pic(16, `${POUR} ${ASK}`, "hands pouring soda into an ice-filled plastic cup at the cart", {
+      joinedLine: true,
+      humanPresent: true,
+      audioDuration: 14.45,
+    });
+  const answer = (split: Record<string, unknown>) =>
+    JSON.stringify({
+      pictures: [
+        {
+          id: 0,
+          about: "the flight attendant pouring the soda at the cart",
+          shows_it: true,
+          who: "a flight attendant",
+          split: [{ from: "On many of those carriers", show: "hands holding a full unopened soda can on a tray table", ...split }],
+        },
+      ],
+    });
+  const run = (json: string) => {
+    const s = scene16();
+    const fixes = parsePictureFixes(json, [s]);
+    applyPictureFixes([s], fixes, []);
+    return applyPictureSplits([s], fixes, [], () => 14.45);
+  };
+
+  it("an answer of nobody else keeps the crew member out of the viewer's picture", () => {
+    const r = run(answer({ thing: null, stage: null, other: null }));
+    expect(r.split).toBe(1);
+    expect(r.scenes.map(x => x.scriptText)).toEqual([POUR, ASK]);
+    expect(r.scenes[0].otherPerson).toBe("a flight attendant");
+    expect(r.scenes[1].otherPerson).toBeUndefined();
+    expect(r.scenes[1].humanPresent).toBe(true);
+    // "you" is the viewer, never someone else.
+    expect(run(answer({ other: "you" })).scenes[1].otherPerson).toBeUndefined();
+  });
+
+  it("a named person is drawn as that person; no answer at all still keeps the line's (as before)", () => {
+    expect(run(answer({ other: "an older passenger" })).scenes[1].otherPerson).toBe("an older passenger");
+    expect(run(answer({})).scenes[1].otherPerson).toBe("a flight attendant");
+  });
+});
