@@ -299,13 +299,17 @@ export function missingQuestion(expect: string): string {
 }
 
 /**
- * Whether the `detail` question is asked. OFF until it is measured (`PICTURE_DETAIL_CHECK=1` turns it
- * on): it would be asked of two thirds of all pictures — 66% of descriptions name a state, an action,
- * a count or a position — and how often it calls a RIGHT picture wrong is not known, while each such
- * answer is another picture and another check. Off, the check is exactly what it was before it. The
- * audit's 60 sampled wrong pictures and ~300 right ones, judged with and without it (~$1), decide it.
+ * Whether the `detail` question is asked. ON since 2026-10-18 — the operator approved it on condition
+ * that it does not raise what a video costs. It was off until measured: it is asked of two thirds of
+ * all pictures (66% of descriptions name a state, an action, a count or a position), and each "not as
+ * described" was another picture and another check. Measured on the 148 described pictures of jobs
+ * 401-407 it flagged 5, never more than 2 in one video (job 402 scene 26's "nearly empty snack basket"
+ * drawn well stocked). The condition is kept twice: the question rides this same call (no new one),
+ * and the redraws it may cause are capped per video (`server/detailRedraws.ts`, 3 by default) — past
+ * the cap a flagged picture ships and says so. `PICTURE_DETAIL_CHECK=0` turns it off: the check is
+ * then exactly what it was before it.
  */
-export const detailCheckOn = () => process.env.PICTURE_DETAIL_CHECK === "1";
+export const detailCheckOn = () => process.env.PICTURE_DETAIL_CHECK !== "0";
 
 /**
  * QUESTION 4b, asked with QUESTION 4: the thing is there, but is it the WAY its description says?
@@ -686,8 +690,8 @@ export async function scanStillDefects(
   try {
     const mustShow = expect && required?.length ? required : undefined;
     const ruledOut = forbids?.trim() || undefined;
-    // The state, action, number and position the description says — asked with `missing`, and only
-    // once it is turned on (`detailCheckOn`).
+    // The state, action, number and position the description says — asked with `missing`, unless it
+    // is turned off (`detailCheckOn`).
     const askDetail = !!expect && detailCheckOn();
     // Spelling and a named pattern need the larger frame.
     const [w, h] = allowedText || exactLook ? [1280, 720] : [DEFECT_SCAN_WIDTH, DEFECT_SCAN_HEIGHT];

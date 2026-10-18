@@ -10456,6 +10456,138 @@ describe("the thing the way its description says — one redraw, told the detail
   });
 });
 
+describe("the detail check never raises a video's cost — its redraws are capped per video (2026-10-18)", () => {
+  // The operator turned the `detail` question on with this condition. Job 402 scene 26: "beverage cart
+  // in the rear rows with a nearly empty snack basket" came back well stocked.
+  const pngOf = (bg: string) =>
+    sharp({ create: { width: 8, height: 8, channels: 3, background: bg } }).png().toBuffer();
+  const verdict = (over: Record<string, unknown> = {}) => ({ overlay: false, broken: false, what: "", ...over }) as any;
+  const FULL = { detail: true, detailWhat: "snack basket well stocked, not nearly empty", what: "full basket" };
+  const cart = (index: number) =>
+    ({
+      index,
+      scriptText: "Ask while the cart is still working its way back,",
+      showSubject: "beverage cart in the rear rows with a nearly empty snack basket",
+      visualPrompt: "A beverage cart in the rear rows with a nearly empty snack basket.",
+    }) as any;
+  const checks = (...vs: Record<string, unknown>[]) => {
+    mockScanStillDefects.mockReset();
+    for (const v of vs) mockScanStillDefects.mockResolvedValueOnce(verdict(v));
+    mockScanStillDefects.mockResolvedValue(verdict());
+  };
+  const draws = async (n: number, tag: string) => {
+    const fn = vi.fn();
+    for (let k = 0; k < n; k++) fn.mockResolvedValueOnce({ success: true, fileData: await pngOf(`#${tag}${k}`) });
+    return fn;
+  };
+
+  afterEach(() => {
+    delete process.env.DETAIL_REDRAWS_PER_VIDEO;
+    mockScanStillDefects.mockReset();
+    mockScanStillDefects.mockResolvedValue(verdict());
+    mockScanNearCopy.mockReset();
+    mockScanNearCopy.mockResolvedValue({ copy: false, what: "" });
+  });
+
+  it("three detail redraws per video; the fourth flagged picture ships at once, saying so", async () => {
+    const { withCostMeter } = await import("./costMeter");
+    const { detailRedrawsTaken } = await import("./detailRedraws");
+    const { DETAIL_CLAUSE_START } = await import("./longformVideo");
+    const job = 9601;
+    for (const index of [26, 27, 28]) {
+      checks(FULL);
+      const genImage = await draws(2, "a1");
+      const out = await withCostMeter(job, () => generateValidatedStill(cart(index), 4, undefined, genImage));
+      expect(genImage).toHaveBeenCalledTimes(2);
+      expect(genImage.mock.calls[1][0].prompt).toContain(DETAIL_CLAUSE_START);
+      expect(out.flaws).toBeUndefined();
+    }
+    expect(detailRedrawsTaken(job)).toBe(3);
+    checks(FULL);
+    const genImage = await draws(2, "b1");
+    const scene = cart(29);
+    const out = await withCostMeter(job, () => generateValidatedStill(scene, 4, undefined, genImage));
+    expect(genImage).toHaveBeenCalledTimes(1); // past the cap: no fourth extra picture
+    expect(out.flaws).toEqual(["detail"]);
+    expect(scene.pictureChecks.map((c: any) => c.flags)).toEqual([["detail"]]);
+    expect(out.missing).toBe(false); // its thing is in it: still a fit memory
+    expect(detailRedrawsTaken(job)).toBe(3);
+  });
+
+  it("past the cap the frame still meets the later checks — a staged look keeps its own redraw", async () => {
+    const { withCostMeter } = await import("./costMeter");
+    const { takeDetailRedraw } = await import("./detailRedraws");
+    const job = 9602;
+    for (let k = 0; k < 3; k++) takeDetailRedraw(job);
+    checks({ ...FULL, staged: true });
+    const genImage = await draws(2, "c1");
+    const out = await withCostMeter(job, () => generateValidatedStill(cart(26), 4, undefined, genImage));
+    expect(genImage).toHaveBeenCalledTimes(2);
+    expect(out.flaws).toBeUndefined();
+  });
+
+  it("a picture already redrawn for a missing thing shares that redraw — never a second one, never counted", async () => {
+    const { withCostMeter } = await import("./costMeter");
+    const { detailRedrawsTaken } = await import("./detailRedraws");
+    const job = 9603;
+    checks({ missing: true, what: "an empty aisle" }, FULL);
+    const genImage = await draws(3, "d1");
+    const out = await withCostMeter(job, () => generateValidatedStill(cart(26), 4, undefined, genImage));
+    expect(genImage).toHaveBeenCalledTimes(2);
+    expect(out.flaws).toEqual(["detail"]);
+    // Missing and detail on the same draw: the missing redraw is the one taken.
+    checks({ ...FULL, missing: true });
+    const both = await draws(2, "d2");
+    await withCostMeter(job, () => generateValidatedStill(cart(27), 4, undefined, both));
+    expect(both).toHaveBeenCalledTimes(2);
+    expect(detailRedrawsTaken(job)).toBe(0);
+  });
+
+  it("a detail on a draw redrawn anyway for a staged look or a ruled-out thing IS that redraw — no extra picture, not counted", async () => {
+    const { withCostMeter } = await import("./costMeter");
+    const { detailRedrawsTaken } = await import("./detailRedraws");
+    const { DETAIL_CLAUSE_START } = await import("./longformVideo");
+    const job = 9604;
+    // Staged twice: the second staged answer finds that redraw spent, as it would without the detail.
+    checks({ ...FULL, staged: true }, { staged: true });
+    const staged = await draws(3, "e1");
+    const out = await withCostMeter(job, () => generateValidatedStill(cart(26), 4, undefined, staged));
+    expect(staged).toHaveBeenCalledTimes(2);
+    expect(staged.mock.calls[1][0].prompt).toContain(DETAIL_CLAUSE_START);
+    expect(out.flaws).toEqual(["staged"]);
+    checks({ ...FULL, forbidden: true }, { forbidden: true });
+    const ruled = await draws(3, "e2");
+    const kept = await withCostMeter(job, () => generateValidatedStill(cart(27), 4, undefined, ruled));
+    expect(ruled).toHaveBeenCalledTimes(2);
+    expect(kept.flaws).toEqual(["ruled out"]);
+    expect(detailRedrawsTaken(job)).toBe(0);
+  });
+
+  it("each video has its own cap", async () => {
+    const { withCostMeter } = await import("./costMeter");
+    const { takeDetailRedraw } = await import("./detailRedraws");
+    for (let k = 0; k < 3; k++) takeDetailRedraw(9605);
+    checks(FULL);
+    const spent = await draws(2, "f1");
+    await withCostMeter(9605, () => generateValidatedStill(cart(26), 4, undefined, spent));
+    expect(spent).toHaveBeenCalledTimes(1);
+    checks(FULL);
+    const fresh = await draws(2, "f2");
+    await withCostMeter(9606, () => generateValidatedStill(cart(26), 4, undefined, fresh));
+    expect(fresh).toHaveBeenCalledTimes(2);
+  });
+
+  it("DETAIL_REDRAWS_PER_VIDEO=0: a detail is only flagged, never redrawn", async () => {
+    const { withCostMeter } = await import("./costMeter");
+    process.env.DETAIL_REDRAWS_PER_VIDEO = "0";
+    checks(FULL);
+    const genImage = await draws(2, "a7");
+    const out = await withCostMeter(9607, () => generateValidatedStill(cart(26), 4, undefined, genImage));
+    expect(genImage).toHaveBeenCalledTimes(1);
+    expect(out.flaws).toEqual(["detail"]);
+  });
+});
+
 describe("a picture that ships with a fault says so, and two faults get one changed redraw (R9, the audit 2026-10-18)", () => {
   const pngOf = (bg: string) =>
     sharp({ create: { width: 8, height: 8, channels: 3, background: bg } }).png().toBuffer();

@@ -113,6 +113,7 @@ import {
   varietyLane,
   withScreenTurn,
 } from "./pictureVariety";
+import { detailRedrawsPerVideo, takeDetailRedraw } from "./detailRedraws";
 
 /**
  * Redraws a host picture gets when it shows someone else — or the face it must never show — before
@@ -10645,23 +10646,43 @@ async function drawValidatedStill(
       // otherwise (`pictureDetailClause`). Not on a softened content-policy prompt, where naming the
       // description again could trip the filter it was softened for. The frame is the fallback, and
       // is still a fit memory: its thing is in it.
+      // A HARD CAP PER VIDEO (2026-10-18: the operator turned the question on only if it does not
+      // raise what a video costs). A redraw only the detail asks for is one of the video's
+      // `DETAIL_REDRAWS_PER_VIDEO` (`takeDetailRedraw`, 3). One this draw gets anyway — it also shows
+      // what its line rules out, a brand, the wrong place or a staged look, with that redraw left —
+      // IS that redraw: it spends that budget and none of the video's, so it costs no extra picture.
+      // A picture already redrawn for a missing thing has no redraw left here (one budget for both)
+      // and is never counted. Past the cap the frame goes on to the later checks and, when nothing
+      // else redraws it, ships carrying "detail" (`pictureFlaws`: the card's badge, a job warning).
       if (defects.detail && offSubjectRerolls < 1) {
-        offSubjectRerolls++;
-        lastError = `Still image does not show "${scene.showSubject}" as described`;
-        offSubjectFallback ??= drawn;
-        if (!visualOverride && tier === 0) {
-          const cut = prompt.indexOf(DETAIL_CLAUSE_START);
-          prompt = `${cut >= 0 ? prompt.slice(0, cut).trimEnd() : prompt} ${pictureDetailClause(
-            scene.showSubject,
-            defects.detailWhat,
-            !!scene.memoryRefUrls?.length
-          )}`;
+        const sharesRuledOut = !!defects.forbidden && ruledOutRerolls < 1;
+        const sharesClean =
+          !sharesRuledOut && (defects.messy || defects.wrongPlace || defects.staged) && cleanRerolls < 1;
+        if (sharesRuledOut || sharesClean || takeDetailRedraw(currentCostJobId())) {
+          offSubjectRerolls++;
+          if (sharesRuledOut) ruledOutRerolls++;
+          if (sharesClean) cleanRerolls++;
+          lastError = `Still image does not show "${scene.showSubject}" as described`;
+          offSubjectFallback ??= drawn;
+          if (!visualOverride && tier === 0) {
+            const cut = prompt.indexOf(DETAIL_CLAUSE_START);
+            prompt = `${cut >= 0 ? prompt.slice(0, cut).trimEnd() : prompt} ${pictureDetailClause(
+              scene.showSubject,
+              defects.detailWhat,
+              !!scene.memoryRefUrls?.length
+            )}`;
+          }
+          console.warn(
+            `[Longform] scene ${scene.index} still shows "${scene.showSubject}" but not as described ` +
+              `(${defects.detailWhat ?? defects.what}, attempt ${attempt}/${attempts}) → drawing it again`
+          );
+          continue;
         }
         console.warn(
           `[Longform] scene ${scene.index} still shows "${scene.showSubject}" but not as described ` +
-            `(${defects.detailWhat ?? defects.what}, attempt ${attempt}/${attempts}) → drawing it again`
+            `(${defects.detailWhat ?? defects.what}) — the video's ${detailRedrawsPerVideo()} detail ` +
+            "redraws are spent → keeping it, flagged"
         );
-        continue;
       }
       // WHAT THE LINE RULES OUT (2026-10-18, the audit: production 203-143 drew the lumber stack
       // beside the furnace under "and away from the furnace"): one fresh seed. The prompt is NOT told

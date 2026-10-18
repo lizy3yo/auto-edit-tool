@@ -5271,3 +5271,45 @@ describe("the picture behind the big QR card: a worn thing off the body, the wor
     expect(guardPitchVisuals([box])).toEqual([]);
   });
 });
+
+describe("job 402 scene 26: the detail check is on, and never raises what a video costs", () => {
+  // The practice films of 2026-10-18: "beverage cart in the rear rows with a nearly empty snack
+  // basket" came back well stocked, and only the `detail` question — then off — saw it. The operator
+  // turned it on with one condition: its redraws are capped per video, and past the cap the picture
+  // ships with the fault on its card instead of costing another picture.
+  const BASKET = "beverage cart in the rear rows with a nearly empty snack basket";
+
+  it("is asked by default, of the picture's own description, and PICTURE_DETAIL_CHECK=0 turns it off", async () => {
+    const { detailCheckOn, detailQuestion } = await import("./overlayTextScan");
+    const was = process.env.PICTURE_DETAIL_CHECK;
+    try {
+      delete process.env.PICTURE_DETAIL_CHECK;
+      expect(detailCheckOn()).toBe(true);
+      expect(detailQuestion(BASKET)).toContain("nearly empty snack basket");
+      process.env.PICTURE_DETAIL_CHECK = "0";
+      expect(detailCheckOn()).toBe(false);
+    } finally {
+      if (was === undefined) delete process.env.PICTURE_DETAIL_CHECK;
+      else process.env.PICTURE_DETAIL_CHECK = was;
+    }
+  });
+
+  it("a video takes three detail redraws; a fourth flagged picture ships and its card says why", async () => {
+    const { takeDetailRedraw, detailRedrawsTaken } = await import("./detailRedraws");
+    const { checkFlags } = await import("./pictureCheckLog");
+    const { pictureFlawWarning, sceneShippedFlaws, shippedFlaws } = await import("@shared/pictureFlaws");
+    const video = 40226;
+    expect([1, 2, 3, 4].map(() => takeDetailRedraw(video))).toEqual([true, true, true, false]);
+    expect(detailRedrawsTaken(video)).toBe(3);
+    // The flag the check put on the frame is what ships on the scene.
+    const flaws = shippedFlaws(checkFlags({ detail: true }));
+    expect(flaws).toEqual(["detail"]);
+    const scene = pic(26, "Ask while the cart is still working its way back,", BASKET, { pictureFlaws: flaws });
+    expect(sceneShippedFlaws(scene)).toEqual({ flaws: ["detail"], panel: false });
+    expect(pictureFlawWarning(26, flaws, false)).toBe(
+      "Scene 26: picture shipped with its subject not as described — its redraws did not clear it"
+    );
+    // Another video's redraws are its own.
+    expect(takeDetailRedraw(40227)).toBe(true);
+  });
+});

@@ -302,9 +302,10 @@ describe("the thing the way its description says — the detail verdict (2026-10
   const LUMPY = "a bobbin wound lumpy and uneven beside the machine"; // 285-125, drawn neat
   const RAISED = "the host from behind, both arms raised over her head"; // 233-134, drawn arms down
 
-  // Off until it is measured: these cases turn it on; the last ones check it is off by default.
+  // On by default since 2026-10-18 (the operator, with a per-video cap on its redraws): these cases
+  // run with the switch unset; the last ones check that `PICTURE_DETAIL_CHECK=0` turns it off.
   beforeEach(() => {
-    process.env.PICTURE_DETAIL_CHECK = "1";
+    delete process.env.PICTURE_DETAIL_CHECK;
   });
   afterEach(() => {
     delete process.env.PICTURE_DETAIL_CHECK;
@@ -361,28 +362,45 @@ describe("the thing the way its description says — the detail verdict (2026-10
     expect(mockInvoke.mock.calls[0][0].systemSuffix).not.toContain("QUESTION 4b");
   });
 
-  it("off by default (and with PICTURE_DETAIL_CHECK=0): exactly the check it was before", async () => {
+  it("on by default — and with any setting but 0 — riding the one check call, never a second", async () => {
+    const { detailCheckOn } = await import("./overlayTextScan");
     const img = await imageOf(1280, 720);
-    for (const setting of [undefined, "0"]) {
+    for (const setting of [undefined, "", "1", "yes"]) {
       if (setting === undefined) delete process.env.PICTURE_DETAIL_CHECK;
       else process.env.PICTURE_DETAIL_CHECK = setting;
+      expect(detailCheckOn()).toBe(true);
       mockInvoke.mockReset();
-      mockInvoke.mockResolvedValue({ text: '{"overlay":false,"broken":false,"writing":false,"missing":false,"detail":true}' } as any);
+      mockInvoke.mockResolvedValue({ text: '{"overlay":false,"broken":false,"writing":false,"missing":false,"detail":true,"detail_what":"padlock shut"}' } as any);
       const v = await scanStillDefects(img, OPEN, "and a padlock that just hangs there open,");
-      expect(v).toEqual({
-        overlay: false,
-        broken: false,
-        writing: false,
-        missing: false,
-        messy: false,
-        wrongPlace: false,
-        staged: false,
-        what: "",
-      });
-      const off = mockInvoke.mock.calls[0][0];
-      expect(off.systemSuffix).not.toContain("detail");
-      expect(off.userMessage).not.toMatch(/the way it is described/);
+      expect(v.detail).toBe(true);
+      expect(v.detailWhat).toBe("padlock shut");
+      // The condition it was turned on under: no new call — the question is in the one check.
+      expect(mockInvoke).toHaveBeenCalledTimes(1);
+      expect(mockInvoke.mock.calls[0][0].systemSuffix).toContain("QUESTION 4b — detail");
+      expect(mockInvoke.mock.calls[0][0].userMessage).toMatch(/the way it is described/);
     }
+  });
+
+  it("PICTURE_DETAIL_CHECK=0 turns it off: exactly the check it was before", async () => {
+    const { detailCheckOn } = await import("./overlayTextScan");
+    process.env.PICTURE_DETAIL_CHECK = "0";
+    expect(detailCheckOn()).toBe(false);
+    mockInvoke.mockReset();
+    mockInvoke.mockResolvedValue({ text: '{"overlay":false,"broken":false,"writing":false,"missing":false,"detail":true}' } as any);
+    const v = await scanStillDefects(await imageOf(1280, 720), OPEN, "and a padlock that just hangs there open,");
+    expect(v).toEqual({
+      overlay: false,
+      broken: false,
+      writing: false,
+      missing: false,
+      messy: false,
+      wrongPlace: false,
+      staged: false,
+      what: "",
+    });
+    const off = mockInvoke.mock.calls[0][0];
+    expect(off.systemSuffix).not.toContain("detail");
+    expect(off.userMessage).not.toMatch(/the way it is described/);
   });
 
   it("parses detail only when it is true, and its words only beside it", async () => {
