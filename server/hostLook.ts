@@ -115,18 +115,28 @@ export const WORN_ON_BODY =
 /** "strand(s)" not followed by "of" something that is not hair ("of pearls", "of yarn", "of lights"). */
 const NOT_A_STRAND_OF_SOMETHING_ELSE = String.raw`(?!\s+of\s+(?!(?:[a-z-]+\s+){0,2}hair\b))`;
 /**
+ * "strand(s)" not NAMED as something else by the word before it ("a pearl strand", "stray yarn
+ * strands", "light strands") or after it ("single strand pearl necklace", "strand lights"): a strand
+ * named that way is that thing wherever it lies, a drain or a brush included.
+ */
+const NOT_A_NAMED_STRAND =
+  String.raw`(?<!\b(?:pearl|bead|yarn|wool|cotton|thread|floss|tinsel|light|wire|fabric|cloth|silk|fib(?:er|re)|rope|twine|string|ribbon|garland)s?[\s-])` +
+  String.raw`(?=strands?(?![\s-]+(?:necklaces?|pearls?|beads?|bracelets?|chokers?|lights?)\b))`;
+/**
  * A STRAND that is HAIR, the only strand that is part of a person (2026-10-18, round 9's review):
- * "strand" counted on its own, so "a pearl strand resting inside the open jewelry box" or "single
- * strand pearl necklace … on the dressing room table" (the pearl-necklace films, jobs 325 and 395)
- * read as a person under ANY line and became a host picture — the host drawn into a picture of a
- * necklace on a dresser. "strands of gray hair" counts through "hair" itself; without that word a
- * strand is hair only when it is a kind only hair has (stray, flyaway, fallen, shed) or lies where
- * hair falls (in a brush, a comb, a drain). A strand OF anything else — pearls, beads, yarn, lights —
- * never counts, and neither does a jewellery "single strand" or "pearl strand".
+ * "strand" counted on its own, so "pearl strand necklace resting unused inside the open jewelry box"
+ * (job 223 scene 12), "single strand pearl necklace … laid on the dressing room table" (job 234
+ * scene 7) and "chunky strand of large oat-toned matte beads on a soft cloth" (job 392 scenes 26-28,
+ * under "oat, / a warm coral, / mother of pearl.") read as a person under ANY line and became host
+ * pictures — the host drawn into a picture of a necklace set down. "strands of gray hair" counts
+ * through "hair" itself; without that word a strand is hair only when it is a kind only hair has
+ * (stray, flyaway, fallen, shed) or lies where hair falls (in a brush, a comb, a drain). A strand OF
+ * anything else — pearls, beads, yarn, lights — never counts, and neither does one its own name
+ * makes a thing (`NOT_A_NAMED_STRAND`: a "pearl strand", a "single strand pearl necklace").
  */
 const HAIR_STRAND =
-  String.raw`(?:stray|flyaway|fly-away|fallen|shed)\s+(?:[a-z-]+\s+)?strands?${NOT_A_STRAND_OF_SOMETHING_ELSE}|` +
-  String.raw`strands?${NOT_A_STRAND_OF_SOMETHING_ELSE}(?=[^.;]{0,40}?\b(?:in|on|caught in|stuck in|around)\s+(?:(?:a|an|the|her|his|their|my|your)\s+)?(?:[a-z-]+\s+){0,2}(?:brush|hairbrush|comb|drain)\b)`;
+  String.raw`(?:stray|flyaway|fly-away|fallen|shed)\s+(?:[a-z-]+\s+)?${NOT_A_NAMED_STRAND}strands?${NOT_A_STRAND_OF_SOMETHING_ELSE}|` +
+  String.raw`${NOT_A_NAMED_STRAND}strands?${NOT_A_STRAND_OF_SOMETHING_ELSE}(?=[^.;]{0,40}?\b(?:in|on|caught in|stuck in|around)\s+(?:(?:a|an|the|her|his|their|my|your)\s+)?(?:[a-z-]+\s+){0,2}(?:brush|hairbrush|comb|drain)\b)`;
 
 /** The person words themselves (the notes are under `SHOWS_PERSON`). */
 const PERSON_WORDS = new RegExp(

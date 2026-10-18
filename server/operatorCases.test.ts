@@ -2483,13 +2483,17 @@ describe("job 400 scene 27: a typed panel is drawn from its own words, not the s
 });
 
 describe("a pearl strand on a dresser is a necklace, not the host (round 9's review, 2026-10-18)", () => {
-  // "strand" alone counted as a person (it was meant for hair), so the pearl-necklace films (jobs 325
-  // and 395) drew the host into pictures of a necklace set down, under lines about anything at all.
+  // "strand" alone counted as a person (it was meant for hair), so the necklace films drew the host
+  // into pictures of a necklace set down, under lines about anything at all: job 392 scenes 26-28,
+  // the beads of "oat, / a warm coral, / mother of pearl." each lying on a cloth, were host pictures.
   it("a strand of pearls or beads is never a person; a strand of hair still is", () => {
     for (const thing of [
       "a pearl strand on the dresser",
-      "single strand pearl necklace with round ivory pearls on the dressing room table near the window",
+      "pearl strand necklace resting unused inside the open jewelry box", // job 223 scene 12
+      "single strand pearl necklace with round ivory pearls laid on the dressing room table", // job 234 scene 7
+      "chunky strand of large oat-toned matte beads on a soft cloth, close view", // job 392 scene 26
       "a loose strand of pearls caught in the bathroom drain",
+      "a pearl strand caught in the drain",
     ])
       expect(SHOWS_PERSON.test(thing), thing).toBe(false);
     for (const hair of ["A few strands of gray hair caught in a round brush on the counter.", "stray gray strands catching the window light"])
@@ -2497,15 +2501,19 @@ describe("a pearl strand on a dresser is a necklace, not the host (round 9's rev
   });
 
   it("the necklace picture under a line not about the neck keeps nobody in it", () => {
+    const box = "pearl strand necklace resting unused inside the open jewelry box";
     const scenes = [
-      pic(1, "Pearls never really go out of style.", "a pearl strand resting inside the open jewelry box"),
-      pic(2, "A single strand sitting right at the collarbone.", "a pearl strand resting inside the open jewelry box"), // job 325 scene 12
+      pic(12, "The mistake with pearls is saving them.", box), // job 223 scene 12
+      pic(26, "oat,", "chunky strand of large oat-toned matte beads on a soft cloth, close view"), // job 392 scene 26
+      pic(12, "A single strand sitting right at the collarbone.", box), // job 325 scene 12's line
     ];
     expect(markHostBroll(scenes, { hostLook: "a woman with silver hair" }, "https://x/host.png")).toBe(1);
-    expect(scenes[0].humanPresent).toBeFalsy();
-    expect(scenes[0].brollHostLook).toBeUndefined();
+    for (const s of scenes.slice(0, 2)) {
+      expect(s.humanPresent, s.showSubject).toBeFalsy();
+      expect(s.brollHostLook, s.showSubject).toBeUndefined();
+    }
     // Under a line about the collarbone the piece is still worn by the host (`wornAtTheNeck`).
-    expect(scenes[1].brollHostLook).toBe("a woman with silver hair");
-    expect(scenes[1].showSubject).toMatch(/worn at the host's own neck/);
+    expect(scenes[2].brollHostLook).toBe("a woman with silver hair");
+    expect(scenes[2].showSubject).toMatch(/worn at the host's own neck/);
   });
 });
