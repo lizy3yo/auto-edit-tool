@@ -3845,6 +3845,10 @@ night") is NOT in the group — it keeps its own picture, even in the middle of 
 across a "----" line. A line that rules something out ("never…", "don't…", "instead of…", "I don't
 mean…", "keep it away from…") is grouped only when the group's picture shows the right way, and that
 picture never shows or names what any of its lines rules out — not even with "without" or "away from".
+Lines that COMPARE are never one group: one place, time or way set against another ("in most
+kitchens… in a camper…", "whereas", "unlike", "instead,", "while in…"), or a line saying a place is
+empty or has none next to a line where the thing is there ("the shelf is bare… a jar stands there").
+One still shows only one side, and that side under the other side's words gives the point away.
 
 The group's picture must fit the FIRST line of the group above all: it is what plays when the
 picture appears.
@@ -3906,7 +3910,8 @@ export type ContextGroup = { ids: number[]; show: string };
 
 /**
  * The model's groups, kept only when they are real: 2+ consecutive ids inside ONE run, not
- * overlapping another group, with a picture description. Anything else is dropped. Pure.
+ * overlapping another group, with a picture description, and not spanning a comparison
+ * (`contrastAcross`). Anything else is dropped. Pure.
  */
 export function parseContextGroups(
   text: string,
@@ -3914,7 +3919,9 @@ export function parseContextGroups(
   /** Each candidate picture's own description, by scene position — see `namesSomethingElse`. */
   showOf?: (i: number) => string | undefined,
   /** Whether a candidate picture shows someone at work, by scene position — see below. */
-  atWorkOf?: (i: number) => boolean
+  atWorkOf?: (i: number) => boolean,
+  /** What is said under each candidate picture, by scene position — see `contrastAcross`. */
+  saidOf?: (i: number) => string | undefined
 ): ContextGroup[] {
   const parsed = safeParseJSON<any>(text);
   const raw: unknown[] =
@@ -3958,6 +3965,11 @@ export function parseContextGroups(
       // Pictures of a thing on its own never take a group picture of someone at work: that is a
       // later line's moment, and each keeps its own picture instead.
       if (atWorkOf && !part.some(atWorkOf) && showsPerson(show)) continue;
+      // Lines that compare are never one picture, and the whole part goes: the model wrote ONE
+      // picture across both sides and nothing says which side it shows (job 408, scenes 2-3: the
+      // reveal's bin, under "In most American bathrooms, it is empty"). Each line keeps its own
+      // picture, which the line check then holds to its line.
+      if (saidOf && contrastAcross(part.map(id => saidOf(id) ?? ""))) continue;
       part.forEach(id => used.add(id));
       out.push({ ids: part, show });
     }
@@ -3978,6 +3990,157 @@ export function namesSomethingElse(own: string | undefined, group: string): bool
   const inGroup = new Set(words(group));
   const missing = thing.filter(w => !inGroup.has(w) && !inGroup.has(w.replace(/s$/, ""))).length;
   return missing / thing.length > 0.5;
+}
+
+/**
+ * A clause opening on a word that sets it against what came before. Bare "but" is not one ("it
+ * looks simple, but it took a week" is one picture); "but in …" is a second setting, unless it is
+ * only a figure of speech. "instead of …" holds both sides itself, and a line that rules something
+ * out has its own rule in CONTEXT_SYSTEM.
+ */
+const CONTRAST_OPENER =
+  /^(?:whereas|unlike|by contrast|in contrast|on the other hand|compared (?:to|with)|as opposed to|while (?:in|at|on|across|over)\b|instead\b(?!\s+of)|but (?:in|across|throughout) (?!(?:the end|fact|time|truth|short|general|practice|theory|a way|any case|the meantime)\b))/i;
+/** A clause opening on a turn: counts only when it then says the place is empty. */
+const TURN_OPENER = /^(?:but|yet|instead|however|though)\b/i;
+/**
+ * A place said to be EMPTY ("it is empty", "stands bare", "nothing there", "there are none",
+ * "Empty."). Never a figure of speech — on the local films "there's nothing a farmhouse kitchen goes
+ * through faster", "the cost is nothing at all" and "make it do, or do without" were not empty places.
+ */
+const SAID_EMPTY = [
+  /(?:\b(?:is|are|was|were|be|been|stands?|stood|sits?|sat|stays?|stayed|remains?|remained|lies?|lay|looks?|looked|goes|went|left|leaves?|kept|keeps?|it|them)|'s|'re)\s+(?:(?:usually|often|mostly|always|still|just|completely|totally|entirely|almost|nearly|simply|quite|again)\s+)*(?:empty|bare|vacant)\b/i,
+  /\bnothing\s+(?:\w+\s+)?(?:there|here|in it|on it)\b|\bthere(?:'s| is| was| are| were)\s+(?:nothing|none)(?=\s*(?:[.,;:!?]|$|there\b|here\b|left\b|in it\b|on it\b))|\bnone (?:there|at all)\b/i,
+  /\b(?:leave|leaves|left|keep|keeps|kept)\s+(?:(?:that|this|the|their|its|our|your|my)\s+)?(?:[\w-]+\s+){1,2}(?:empty|bare|vacant)\b/i,
+  /\b(?:go|goes|went|gone)\s+without\s+(?:a|an|one|any|it|them)\b/i,
+  /^(?:empty|bare|nothing|none)\W*$/i,
+];
+/**
+ * A clause that still says something is NOT there, in any words ("and nobody sees another robin
+ * until spring", job 404): after an empty place it continues the absence, it does not show the thing.
+ */
+const SAYS_NONE = /\b(?:no|nobody|none|nothing|never|not|without|empty|bare|vacant)\b|n't\b/i;
+/**
+ * A clause that puts a thing THERE ("a small bin stands there", "there is a basket", "you'll find a
+ * hook"). After an empty place only that is the other side: "At least, that's what just about
+ * everybody figures" after "the grass sits empty" (job 404) is a comment, not the thing.
+ */
+const SAYS_THERE =
+  /\bthere(?:'s| is| are| was| were)\s+(?:a|an|one|some|always|usually|often)\b|\b(?:you(?:'ll| will)?|we|they|people)\s+(?:find|see|keep|put)\s+(?:a|an|one|some)\b|\b(?:a|an|one|some)\s+(?:[\w-]+\s+){0,4}?(?:stands?|stood|sits?|sat|hangs?|hung|lies?|lay|waits?|rests?|is|are|was|were)\s+(?:right\s+)?(?:there|here|on|in|by|beside|next to|against|under|beneath|behind)\b/i;
+/**
+ * A named place or time after "in…": "in most American homes", "in a German bathroom", "in March".
+ * Never someone's place ("in Ann's kitchen" names a person, not where the comparison is).
+ */
+const PLACE_IN =
+  /\b(?:[Ii]n|[Aa]cross|[Tt]hroughout)\s+(?:(?:most|many|some|all|plenty of|lots of|a lot of|nearly all|almost every|every|a|an|the|our|your|their|these|those|this|that)\s+)*([A-Z][A-Za-z]*(?:\.[A-Z][A-Za-z]*)*\.?)(?!['A-Za-z])/g;
+/**
+ * A month or a weekday is a TIME, compared only with another time: "the robin you see in January"
+ * then "down in Florida" (job 404) is not one place set against another.
+ */
+const TIME_NAME =
+  /^(?:January|February|March|April|May|June|July|August|September|October|November|December|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)$/;
+/** Two names of one place ("America", "American"; "Germany", "German"): one starts the other. */
+const samePlace = (a: string, b: string) => {
+  const x = a.toLowerCase().replace(/\./g, "");
+  const y = b.toLowerCase().replace(/\./g, "");
+  let k = 0;
+  while (k < x.length && k < y.length && x[k] === y[k]) k++;
+  return k >= Math.min(4, x.length, y.length);
+};
+
+/**
+ * A CONTRAST IS NOT ONE TOPIC (2026-10-18, job 408 scenes 2-3). The same-topic pass joined
+ * "That little stretch of tile between the bowl and the wall. In most American bathrooms," and "it
+ * is empty. In a German bathroom, usually, a small bin stands there, with a lid." into one topic and
+ * drew the reveal for both, so the bin stood on the floor under the words saying the floor is empty
+ * (the same spoiler job 403 had). CONTEXT_SYSTEM asks for a picture that fits the first line, and the
+ * model drew the more visual side anyway — so it is held here, in code.
+ *
+ * Whether these lines, in order, set one side against another ACROSS a line boundary: two different
+ * places or times named after "in…" ("in most American homes" … "in a German one"), a clause opening
+ * on a contrast ("whereas", "unlike", "by contrast", "on the other hand", "compared to", "while in",
+ * "instead", "but in …"), a clause saying a place is empty followed by one that puts a thing there,
+ * or a "but / yet / instead / however" clause saying it is empty after one that does not. A
+ * comparison wholly inside ONE line is that line's own: its picture faces it joined or not. On the
+ * 232 local films' 9,530 neighbouring pictures it fires only on jobs 403 and 408's opening. Pure.
+ */
+export function contrastAcross(lines: string[]): boolean {
+  const texts = lines.map(l => (l ?? "").replace(/[’‘]/g, "'").replace(/\s+/g, " ").trim());
+  let joined = "";
+  const lineStarts: number[] = [];
+  texts.forEach((t, k) => {
+    if (k > 0) joined += " ";
+    lineStarts.push(joined.length);
+    joined += t;
+  });
+  const lineAt = (pos: number) => {
+    let k = 0;
+    while (k + 1 < lineStarts.length && lineStarts[k + 1] <= pos) k++;
+    return k;
+  };
+  // Sentences, then clauses inside them — cut before a turn or contrast word after a comma.
+  type Piece = { text: string; start: number; end: number; sentence: number };
+  const sentences: Piece[] = [];
+  const clauses: Piece[] = [];
+  const add = (into: Piece[], from: number, to: number, sentence: number) => {
+    const raw = joined.slice(from, to);
+    const text = raw.trim();
+    if (!text) return;
+    const start = from + raw.indexOf(text);
+    into.push({ text, start, end: start + text.length, sentence });
+  };
+  const sentenceEnd = /[.!?;:]["')\]]*\s+|\s*[—–]\s*/g;
+  let from = 0;
+  Array.from(joined.matchAll(sentenceEnd)).forEach(m => {
+    add(sentences, from, m.index! + m[0].length, sentences.length);
+    from = m.index! + m[0].length;
+  });
+  add(sentences, from, joined.length, sentences.length);
+  const clauseCut =
+    /,\s+(?=(?:but|yet|whereas|while|unlike|instead|however|though|compared|as opposed|by contrast|in contrast|on the other hand)\b)/gi;
+  sentences.forEach((s, n) => {
+    let at = s.start;
+    Array.from(joined.slice(s.start, s.end).matchAll(clauseCut)).forEach(m => {
+      add(clauses, at, s.start + m.index! + m[0].length, n);
+      at = s.start + m.index! + m[0].length;
+    });
+    add(clauses, at, s.end, n);
+  });
+  // A contrast counts when what it compares — from the sentence holding the one side to the end of
+  // the sentence holding the other — runs over more than one line.
+  const across = (n: number, m: number) =>
+    lineAt(sentences[n].start) !== lineAt(sentences[m].end - 1);
+  const saysEmpty = (t: string) => SAID_EMPTY.some(r => r.test(t));
+  for (let k = 1; k < clauses.length; k++) {
+    const a = clauses[k - 1];
+    const b = clauses[k];
+    // The thing may come after one short aside ("…leave that shelf bare. Mine? A row of jars…").
+    const c = clauses[k + 1];
+    const there = (x: Piece | undefined) =>
+      !!x && across(a.sentence, x.sentence) && !SAYS_NONE.test(x.text) && SAYS_THERE.test(x.text);
+    const aside = b.text.split(/\s+/).length <= 3 && !SAYS_THERE.test(b.text);
+    if (saysEmpty(a.text) && (there(b) || (aside && there(c)))) return true;
+    if (!across(a.sentence, b.sentence)) continue;
+    const opens = b.text.replace(/^[^A-Za-z]+/, "");
+    if (CONTRAST_OPENER.test(opens)) return true;
+    if (!saysEmpty(a.text) && saysEmpty(b.text) && TURN_OPENER.test(opens)) return true;
+  }
+  const sentenceAt = (pos: number) => {
+    const n = sentences.findIndex(s => pos >= s.start && pos < s.end);
+    return n < 0 ? sentences.length - 1 : n;
+  };
+  const named = Array.from(joined.matchAll(PLACE_IN), m => ({
+    name: m[1],
+    sentence: sentenceAt(m.index! + m[0].length - m[1].length),
+  }));
+  for (const time of [true, false]) {
+    const marks = named.filter(p => TIME_NAME.test(p.name) === time);
+    for (let k = 1; k < marks.length; k++) {
+      const a = marks[k - 1];
+      const b = marks[k];
+      if (!samePlace(a.name, b.name) && across(a.sentence, b.sentence)) return true;
+    }
+  }
+  return false;
 }
 
 /**
@@ -4094,7 +4257,8 @@ export async function markSameContext(
           r.text,
           runs,
           i => scenes[i]?.showSubject ?? scenes[i]?.visualPrompt,
-          i => atWork(scenes[i])
+          i => atWork(scenes[i]),
+          i => scenes[i]?.scriptText
         )
       );
     } catch {

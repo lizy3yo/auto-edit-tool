@@ -32,6 +32,7 @@ import {
   applyShotPlan,
   atWork,
   CONTINUITY_SYSTEM,
+  contrastAcross,
   foldSnappedFlashes,
   foldUnseenBeats,
   joinShortSplits,
@@ -5665,5 +5666,47 @@ describe("the film never ends on a host shot under a second (the audit, 2026-10-
       at(2, "H", 10, 10.8, "Bye now."),
     ];
     expect(closingFoldTarget(notTail, 1)).toBe(-1);
+  });
+});
+
+describe("Werner's job 408 scenes 2-3: lines that compare are never one picture (round 13)", () => {
+  // The same-topic pass joined the set-up, "it is empty" and the reveal into one topic and drew the
+  // reveal for all of it: the bin stood beside the toilet under "In most American bathrooms, it is
+  // empty", and the Versus card then said the American side is empty (job 403 the same).
+  const setUp = "That little stretch of tile between the bowl and the wall. In most American bathrooms,";
+  const reveal = "it is empty. In a German bathroom, usually, a small bin stands there, with a lid.";
+  const binShow =
+    "a small white plastic bin with a closed hinged lid on pale beige tile floor beside the base of a white porcelain toilet, water swirling in the bowl as it flushes";
+
+  it("the set-up and the reveal each keep their own picture", () => {
+    const scenes = [
+      pic(0, setUp, "the narrow stretch of tile floor between a white toilet and the wall"),
+      pic(1, reveal, "a small white plastic bin with a closed hinged lid on tile beside a toilet"),
+    ];
+    const groups = parseContextGroups(
+      JSON.stringify({ groups: [{ ids: [0, 1], show: binShow }] }),
+      [[0, 1]],
+      i => scenes[i].showSubject,
+      i => atWork(scenes[i]),
+      i => scenes[i].scriptText
+    );
+    expect(contrastAcross([setUp, reveal])).toBe(true);
+    expect(groups).toEqual([]);
+  });
+
+  it("two lines about the one bin still share a picture", () => {
+    const show = "a small white bin with a lid beside a toilet";
+    const scenes = [
+      pic(0, "In a German bathroom, usually, a small bin stands there, with a lid.", show),
+      pic(1, "It has a lid, and it is emptied once a week.", show),
+    ];
+    const groups = parseContextGroups(
+      JSON.stringify({ groups: [{ ids: [0, 1], show }] }),
+      [[0, 1]],
+      i => scenes[i].showSubject,
+      i => atWork(scenes[i]),
+      i => scenes[i].scriptText
+    );
+    expect(groups).toEqual([{ ids: [0, 1], show }]);
   });
 });
