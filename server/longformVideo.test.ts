@@ -11518,6 +11518,26 @@ describe("someone else's face is asked about in the one check, and drawn again f
     expect(turnOthersAway(prompt)).toBe(prompt);
     expect(buildStillPrompt(passenger())).not.toContain(OTHERS_TURNED_AWAY_CLAUSE);
   });
+
+  it("who is asked, and whose words lose a smile: someone else in the picture, never a host take or the QR backdrop", async () => {
+    const { othersFaceAsked, faceNeverShown } = await import("./longformVideo");
+    expect(othersFaceAsked(passenger(), false, false)).toBe(true);
+    // Drawn with nobody in it, a split's square panel, the picture behind the big QR card: no one.
+    expect(othersFaceAsked(passenger(), true, false)).toBe(false);
+    expect(othersFaceAsked(passenger(), false, true)).toBe(false);
+    expect(othersFaceAsked({ ...passenger(), qrHero: true }, false, false)).toBe(false);
+    expect(faceNeverShown(passenger())).toBe(true);
+    // A host take is the host's own face: its prompt preview keeps "a slight smile" (job 111 scene 43).
+    const take = {
+      index: 43,
+      hostPresent: true,
+      humanPresent: true,
+      visualPrompt:
+        "The host seated, speaking with a wry smile to camera about customers asking for a matching set of four coasters.",
+    } as any;
+    expect(faceNeverShown(take)).toBe(false);
+    expect(buildStillPrompt(take)).toContain("a wry smile");
+  });
 });
 
 describe("a look on the host's own face shows her face, and only hers (the operator's decision on the audit's cause 9)", () => {

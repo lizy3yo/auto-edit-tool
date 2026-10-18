@@ -1147,6 +1147,13 @@ const LEAN: Record<string, string> = { "": "lean", s: "leans", es: "leans", ed: 
 const FLINCH: Record<string, string> = { e: "flinch", es: "flinches", ed: "flinched", ing: "flinching" };
 
 /**
+ * "with a/an <words>" for a phrase whose article was swallowed with the face word: "with an anxious
+ * expression" → "with an anxious set to the shoulders", never "with a anxious".
+ */
+const withA = (words: string, rest: string): string =>
+  `with ${/^[aeiou]/i.test(words) ? "an" : "a"} ${words}${rest}`;
+
+/**
  * A FACE'S EXPRESSION SAID WITH THE BODY (2026-10-18, job 410 scene 8). A picture whose person shows
  * no face — someone else (`otherPerson`), the host from behind or the side — was described with
  * what only a face can show: "an older woman seen from the side smiling politely up at a flight
@@ -1160,17 +1167,19 @@ const FLINCH: Record<string, string> = { e: "flinch", es: "flinches", ed: "flinc
  */
 export function expressionAsBody(text: string): string {
   if (!text) return text;
-  const rules: [RegExp, string][] = [
+  // Every phrase that starts on "a"/"an" starts on a WORD: unanchored, the "an" ending "man" began
+  // one, and "a man with a frown" came back "a mwith tense shoulders".
+  const rules: [RegExp, string | ((m: string, words?: string) => string)][] = [
     // Tears in or down the face.
     [new RegExp(String.raw`${FACE_LEAD}(?:with\s+)?tears\s+(?:welling\s+(?:up\s+)?in|filling|brimming\s+in|glistening\s+in|in)\s+(?:her|his|their)\s+eyes\b`, "gi"), ", head bowed"],
     [new RegExp(String.raw`${FACE_LEAD}(?:with\s+)?tears\s+(?:rolling|running|streaming|trickling)\s+down\s+(?:her|his|their)\s+(?:face|cheeks?)\b`, "gi"), ", head bowed"],
     [/\b(?:teary[- ]eyed|tearful)\s+(?=[a-z])/gi, ""],
     // A smile, a frown, a look or an expression ON the face.
-    [new RegExp(String.raw`(?:with\s+)?(?:a|an)\s+((?:[a-z-]+\s+){0,2}?)(?:smile|grin)\s+on\s+${FACE_OWNER}\s+face\b`, "gi"), "with a $1nod"],
-    [new RegExp(String.raw`(?:wearing\s+|with\s+)?(?:a|an)\s+(?:[a-z-]+\s+){0,2}?(?:frown|scowl|grimace|wince)(?:\s+on\s+${FACE_OWNER}\s+face)?\b`, "gi"), "with tense shoulders"],
-    [new RegExp(String.raw`(?:with\s+)?(?:a|the)\s+look\s+of\s+([a-z-]+(?:\s+[a-z-]+)?)\s+on\s+${FACE_OWNER}\s+face\b`, "gi"), "with $1 in the shoulders"],
-    [new RegExp(String.raw`(?:with\s+)?(?:a|an)\s+((?:[a-z-]+\s+){0,2}?)(?:facial\s+)?(?:expression|look)\s+on\s+${FACE_OWNER}\s+face\b`, "gi"), "with a $1set to the shoulders"],
-    [/\bwith\s+(?:a|an)\s+((?:[a-z-]+\s+){0,2}?)(?:facial\s+)?expression\b/gi, "with a $1set to the shoulders"],
+    [new RegExp(String.raw`\b(?:with\s+|wearing\s+|wears\s+)?(?:a|an)\s+((?:[a-z-]+\s+){0,2}?)(?:smile|grin)\s+on\s+${FACE_OWNER}\s+face\b`, "gi"), (_m, w = "") => withA(w, "nod")],
+    [new RegExp(String.raw`\b(?:wearing\s+|wears\s+|with\s+)?(?:a|an)\s+(?:[a-z-]+\s+){0,2}?(?:frown|scowl|grimace|wince)(?:\s+on\s+${FACE_OWNER}\s+face)?\b`, "gi"), "with tense shoulders"],
+    [new RegExp(String.raw`\b(?:with\s+)?(?:a|the)\s+look\s+of\s+([a-z-]+(?:\s+[a-z-]+)?)\s+on\s+${FACE_OWNER}\s+face\b`, "gi"), "with $1 in the shoulders"],
+    [new RegExp(String.raw`\b(?:with\s+)?(?:a|an)\s+((?:[a-z-]+\s+){0,2}?)(?:facial\s+)?(?:expression|look)\s+on\s+${FACE_OWNER}\s+face\b`, "gi"), (_m, w = "") => withA(w, "set to the shoulders")],
+    [/\bwith\s+(?:a|an)\s+((?:[a-z-]+\s+){0,2}?)(?:facial\s+)?expression\b/gi, (_m, w = "") => withA(w, "set to the shoulders")],
     [new RegExp(String.raw`\b(${FACE_OWNER})\s+(?:facial\s+)?expression\b`, "gi"), "$1 posture"],
     // The eyes, the brows and the mouth.
     [new RegExp(String.raw`${FACE_LEAD}(?:with\s+)?(?:her|his|their)\s+eyes\s+(?:wide(?:ned)?(?:\s+open)?|widening|open\s+wide)(?:\s+(?:in|with)\s+[a-z]+)?`, "gi"), ", drawing back a little"],
@@ -1184,7 +1193,9 @@ export function expressionAsBody(text: string): string {
   ];
   let out = text;
   for (const [re, to] of rules)
-    out = to.startsWith(", ")
+    out = typeof to === "function"
+      ? out.replace(re, to)
+      : to.startsWith(", ")
       ? // A phrase set off by commas closes with one when the sentence goes on: "a man with raised
         // eyebrows looking at the tag" → "a man, drawing back a little, looking at the tag".
         out.replace(re, (...a: any[]) => {
@@ -1201,10 +1212,15 @@ export function expressionAsBody(text: string): string {
     /\bbeaming(?=\s+(?:at|up\s+at|with\s+(?:pride|joy|delight)|proudly|happily|warmly|broadly)\b)/gi,
     () => ({ to: "nodding", ing: false })
   );
+  // "frowning in concentration" leans FORWARD in it: "leaning in in concentration", "leaning in into
+  // the sun" was the plain swap.
   out = swapExpression(
     out,
-    /\b(?:frown|scowl|glower|squint)(s|ed|ing)?\b(\s+(?:down\s+|up\s+)?(?:at|toward|towards|over|across\s+at)\b)?/gi,
-    ([end, toward]) => ({ to: `${LEAN[end]} ${toward ? "toward" : "in"}`, ing: end === "ing" && !toward })
+    /\b(?:frown|scowl|glower|squint)(s|ed|ing)?\b(\s+(?:down\s+|up\s+)?(?:at|toward|towards|over|across\s+at)\b)?(?=(\s+in(?:to)?\b)?)/gi,
+    ([end, toward, inNext]) => ({
+      to: `${LEAN[end]} ${toward ? "toward" : inNext ? "forward" : "in"}`,
+      ing: end === "ing" && !toward,
+    })
   );
   out = swapExpression(out, /\bglar(ing|es|ed)\s+(?:down\s+|up\s+|across\s+)?at\b/gi, ([end]) => ({ to: `${LEAN[end]} toward`, ing: false }));
   out = swapExpression(out, /\b(?:winc|grimac)(e|es|ed|ing)\b/gi, ([end]) => ({ to: FLINCH[end], ing: end === "ing" }));

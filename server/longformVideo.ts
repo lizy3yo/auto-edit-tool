@@ -6611,7 +6611,8 @@ export function turnOthersAway(prompt: string): string {
  * so a description written before that rule, or typed into a redo, asks for no smile either. Pure.
  */
 export function faceNeverShown(scene: StoryboardScene): boolean {
-  if (!scene.humanPresent) return false;
+  // A host take IS the host's face (the prompt preview builds a still prompt for one too).
+  if (!scene.humanPresent || scene.hostPresent) return false;
   return !!scene.otherPerson || !(scene.brollHostLook && scene.hostFaceShown);
 }
 

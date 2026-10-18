@@ -712,6 +712,29 @@ describe("a face's expression said with the body, on a picture that shows no fac
     for (const [, said] of cases) expect(expressionAsBody(said), said).toBe(said);
   });
 
+  it("a phrase starts on a whole word, keeps its article, and a frown 'in' something leans forward", async () => {
+    const { expressionAsBody } = await import("./hostLook");
+    const cases: [string, string][] = [
+      // The "an" ending "man"/"woman" began the phrase: "a mwith tense shoulders", "a womwith …".
+      ["a man with a frown reading the bill", "a man with tense shoulders reading the bill"],
+      ["a woman wears a frown as she reads the letter", "a woman with tense shoulders as she reads the letter"],
+      ["a man wearing a smile on his face", "a man with a nod"],
+      // "with a anxious set to the shoulders" was the plain swap.
+      ["an older woman with an anxious expression, reading the letter", "an older woman with an anxious set to the shoulders, reading the letter"],
+      ["a woman with an awkward smile on her face", "a woman with an awkward nod"],
+      ["a man with an uneasy look on his face", "a man with an uneasy set to the shoulders"],
+      // "leaning in in concentration", "leaning in into the sun".
+      ["a man frowning in concentration at the bill", "a man leaning forward in concentration at the bill"],
+      ["a woman squinting into the sun", "a woman leaning forward into the sun"],
+      ["the man frowns", "the man leans in"],
+    ];
+    for (const [asked, said] of cases) expect(expressionAsBody(asked), asked).toBe(said);
+    for (const [, said] of cases) expect(expressionAsBody(said), said).toBe(said);
+    // Clean: an animal's look keeps its words, a word ending in "a" before it included.
+    const dog = "a mama dog with a look of hope on its face beside the bowl";
+    expect(expressionAsBody(dog)).toBe(dog);
+  });
+
   it("clean: a thing, an animal's face, tearing and light keep their words, byte for byte", async () => {
     const { expressionAsBody, withoutFaceAsks } = await import("./hostLook");
     for (const as of [
