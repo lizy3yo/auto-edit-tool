@@ -10577,6 +10577,84 @@ describe("the detail check never raises a video's cost — its redraws are cappe
     expect(fresh).toHaveBeenCalledTimes(2);
   });
 
+  it("on the last draw no redraw is taken: the video keeps it, and the frame still meets the later checks", async () => {
+    const { withCostMeter } = await import("./costMeter");
+    const { detailRedrawsTaken } = await import("./detailRedraws");
+    const { PERSON_FREE_FALLBACK } = await import("./longformVideo");
+    const job = 9608;
+    // A picture of the host at work, one attempt: a redraw taken here would end the loop with no
+    // picture drawn, count it anyway, and ship the frame as a fallback the host check never saw.
+    const hostAtWork = (index: number) => ({ ...cart(index), humanPresent: true, brollHostRef: "https://x/host.png" });
+    try {
+      mockScanSameHost.mockReset();
+      mockScanSameHost.mockResolvedValue({ same: true, what: "" });
+      checks(FULL);
+      const last = await draws(2, "a8");
+      const out = await withCostMeter(job, () => generateValidatedStill(hostAtWork(26), 1, undefined, last));
+      expect(last).toHaveBeenCalledTimes(1);
+      expect(mockScanSameHost).toHaveBeenCalledTimes(1);
+      expect(out.flaws).toEqual(["detail"]);
+      expect(detailRedrawsTaken(job)).toBe(0);
+      // Someone else on that last draw is still refused — drawn once more with nobody in it.
+      mockScanSameHost.mockReset();
+      mockScanSameHost.mockResolvedValue({ same: false, what: "a younger man" } as any);
+      checks(FULL);
+      const stranger = await draws(2, "b8");
+      await withCostMeter(job, () => generateValidatedStill(hostAtWork(27), 1, undefined, stranger));
+      expect(stranger).toHaveBeenCalledTimes(2);
+      expect(stranger.mock.calls[1][0].prompt).toContain(PERSON_FREE_FALLBACK);
+      expect(detailRedrawsTaken(job)).toBe(0);
+      // With a draw left the same picture takes one, as ever.
+      checks(FULL);
+      const more = await draws(2, "c8");
+      await withCostMeter(job, () => generateValidatedStill(cart(28), 2, undefined, more));
+      expect(more).toHaveBeenCalledTimes(2);
+      expect(detailRedrawsTaken(job)).toBe(1);
+    } finally {
+      mockScanSameHost.mockReset();
+      mockScanSameHost.mockResolvedValue({ same: true, what: "" });
+    }
+  });
+
+  it("a frame that comes back with only the detail again still meets the host check — never kept unchecked", async () => {
+    const { withCostMeter } = await import("./costMeter");
+    const { takeDetailRedraw } = await import("./detailRedraws");
+    const hostAtWork = (index: number) => ({ ...cart(index), humanPresent: true, brollHostRef: "https://x/host.png" });
+    try {
+      // The detail redraw comes back with the same detail: it is not redrawn for it again (one
+      // redraw), but "the same faults twice" must not ship it past the host check — with the detail
+      // check off this frame would have met it.
+      mockScanSameHost.mockReset();
+      mockScanSameHost.mockResolvedValueOnce({ same: false, what: "a younger man" } as any);
+      mockScanSameHost.mockResolvedValue({ same: true, what: "" });
+      checks(FULL, FULL, FULL);
+      const again = await draws(3, "d9");
+      const out = await withCostMeter(9609, () => generateValidatedStill(hostAtWork(26), 4, undefined, again));
+      expect(mockScanSameHost).toHaveBeenCalledTimes(2);
+      expect(again).toHaveBeenCalledTimes(3);
+      expect(out.flaws).toEqual(["detail"]);
+      // Past the cap, redrawn by the host check, back with only the detail: met by the host check again.
+      for (let k = 0; k < 3; k++) takeDetailRedraw(9610);
+      mockScanSameHost.mockReset();
+      mockScanSameHost.mockResolvedValueOnce({ same: false, what: "a younger man" } as any);
+      mockScanSameHost.mockResolvedValue({ same: true, what: "" });
+      checks(FULL, FULL);
+      const past = await draws(3, "e9");
+      await withCostMeter(9610, () => generateValidatedStill(hostAtWork(27), 4, undefined, past));
+      expect(mockScanSameHost).toHaveBeenCalledTimes(2);
+      expect(past).toHaveBeenCalledTimes(2);
+      // Any other fault twice in a row is still kept as before (job 343): a staged look, redrawn once.
+      checks({ staged: true }, { staged: true });
+      const staged = await draws(3, "f9");
+      const kept = await withCostMeter(9611, () => generateValidatedStill(hostAtWork(28), 4, undefined, staged));
+      expect(staged).toHaveBeenCalledTimes(2);
+      expect(kept.flaws).toEqual(["staged"]);
+    } finally {
+      mockScanSameHost.mockReset();
+      mockScanSameHost.mockResolvedValue({ same: true, what: "" });
+    }
+  });
+
   it("DETAIL_REDRAWS_PER_VIDEO=0: a detail is only flagged, never redrawn", async () => {
     const { withCostMeter } = await import("./costMeter");
     process.env.DETAIL_REDRAWS_PER_VIDEO = "0";

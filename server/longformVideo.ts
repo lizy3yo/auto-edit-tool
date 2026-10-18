@@ -10566,9 +10566,15 @@ async function drawValidatedStill(
       // time). Keep this one. A redraw that changes what is wrong still gets its next try — two of
       // that film's screens came right on the third and fourth. `REDRAW_SAME_FAULTS=1` restores
       // the old run to the last attempt.
+      // NOT A DETAIL ALONE (2026-10-18, the detail check turned on by default): a detail is never
+      // redrawn twice — one redraw (`offSubjectRerolls`), or none past the video's cap — so keeping
+      // here saves no picture; it only skips the checks below. A host picture whose detail redraw
+      // came back with the same detail shipped without ever meeting the host check, which with the
+      // detail check off it would have met: the face or a stranger, unasked. It goes on to them.
       if (
         faults &&
         faults === lastFaults &&
+        faults !== "detail" &&
         !defects.unchecked &&
         process.env.REDRAW_SAME_FAULTS !== "1"
       ) {
@@ -10654,11 +10660,15 @@ async function drawValidatedStill(
       // A picture already redrawn for a missing thing has no redraw left here (one budget for both)
       // and is never counted. Past the cap the frame goes on to the later checks and, when nothing
       // else redraws it, ships carrying "detail" (`pictureFlaws`: the card's badge, a job warning).
+      // On the LAST draw nothing is taken: the `continue` would end the loop with no picture drawn,
+      // so the video would lose a redraw it never got, and the frame would ship as a fallback without
+      // the later checks — it goes on to them exactly as past the cap.
       if (defects.detail && offSubjectRerolls < 1) {
         const sharesRuledOut = !!defects.forbidden && ruledOutRerolls < 1;
         const sharesClean =
           !sharesRuledOut && (defects.messy || defects.wrongPlace || defects.staged) && cleanRerolls < 1;
-        if (sharesRuledOut || sharesClean || takeDetailRedraw(currentCostJobId())) {
+        const drawLeft = attempt < attempts;
+        if (sharesRuledOut || sharesClean || (drawLeft && takeDetailRedraw(currentCostJobId()))) {
           offSubjectRerolls++;
           if (sharesRuledOut) ruledOutRerolls++;
           if (sharesClean) cleanRerolls++;
@@ -10680,8 +10690,11 @@ async function drawValidatedStill(
         }
         console.warn(
           `[Longform] scene ${scene.index} still shows "${scene.showSubject}" but not as described ` +
-            `(${defects.detailWhat ?? defects.what}) — the video's ${detailRedrawsPerVideo()} detail ` +
-            "redraws are spent → keeping it, flagged"
+            `(${defects.detailWhat ?? defects.what}) — ` +
+            (drawLeft
+              ? `the video's ${detailRedrawsPerVideo()} detail redraws are spent`
+              : "no draw is left") +
+            " → not redrawn for it, flagged"
         );
       }
       // WHAT THE LINE RULES OUT (2026-10-18, the audit: production 203-143 drew the lumber stack
