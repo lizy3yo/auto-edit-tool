@@ -378,7 +378,10 @@ describe("Diane's job 309, Lance's job 311, Pearl's job 310", () => {
     ];
     const out = markCtaQrBlock(scenes, { qrImageUrl: "q.png", bookTitle: "Pearl's Knitting Companion", bookCoverImageUrl: "c.png" } as any, true);
     const order = out.filter(s => s.cta).map(s => (s.qrHero ? "Q" : s.coverHero ? "B" : "H")).join("");
-    expect(order).toBe("HBHQ");
+    // The cover starts on the clause that names the book (jobs 411/412), so "It's the know-how … kitchen
+    // tables," stays a host beat before it — joined to the host before by `joinBackToBackHostTakes`.
+    expect(order).toBe("HHBHQ");
+    expect(out.find(s => s.coverHero)?.scriptText).toBe("and I put it together in a digital book called Pearl's Knitting Companion.");
     expect(out.find(s => s.qrHero)?.scriptText).toMatch(/^To get it, use the link/);
   });
 });
@@ -2661,7 +2664,10 @@ describe("the book cover lands on the line that says the title, never on one wor
       cta(2, "and I collected a hundred and one fixes like it into a digital book called The Locksmith Way."),
     ];
     const out = markCoverReveal(scenes, { bookTitle: "The Locksmith Way", bookCoverImageUrl: "c.png" } as any);
-    expect(out.filter(s => s.coverHero).map(s => s.index)).toEqual([2]);
+    // …from where the book is named: the ten words before "a digital book" stay before it (jobs 411/412).
+    expect(out.filter(s => s.coverHero).map(s => [s.index, s.scriptText])).toEqual([
+      [3, "a digital book called The Locksmith Way."],
+    ]);
   });
 });
 
@@ -7637,5 +7643,58 @@ describe("a dimming caption is a glance, and two never come back to back (round 
     const out = await planGraphics({ words: said, cuts, film, ask: asking([[fine, deeper]]).ask, ensureIcon: async () => true });
     expect(out.rounds[0].problems).toEqual([]);
     expect(out.cues.map(c => c.id)).toEqual(["toilet-is-fine", "stick-deeper"]);
+  });
+});
+
+describe("the book cover comes up when the host names the book (jobs 411 and 412)", () => {
+  // Round-12 verification films: the cover took the whole beat that said the title, so it came up
+  // 4-7 s before the book was mentioned — 411 on "What bird scientists and patient window-watchers
+  // have learned over the years," ("one digital book" 5.6 s later), 412 on "along with what
+  // behaviorists and lifelong cat people have worked out," ("my book" 4.2 s later).
+  const cta = (index: number, scriptText: string, hostPresent = true) =>
+    ({ index, scriptText, hostPresent, cta: true, ctaIndex: 0, showSubject: "x" }) as StoryboardScene;
+  const run = (title: string, scenes: StoryboardScene[]) =>
+    markCtaQrBlock(scenes, { ctaBooks: [{ ctaIndex: 0, bookId: 0, title, coverImageUrl: "c.png" }] } as any, true);
+  const shape = (out: StoryboardScene[]) =>
+    out.filter(s => s.cta).map(s => [s.qrHero ? "Q" : s.coverHero ? "B" : "H", s.scriptText?.split(" ").slice(0, 4).join(" ")]);
+
+  it("411: the words before 'I boiled down into one digital book' stay before the cover", () => {
+    const out = run("The Backyard Birder", [
+      host(1, "And that’s easy to miss with the storm windows shut.", { hostOpener: true }),
+      cta(2, "While the robins work on that holly, here’s something to help you name everything else out there."),
+      cta(3, "What bird scientists and patient window-watchers have learned over the years, I boiled down into one digital book, The Backyard Birder.", false),
+      cta(4, "It covers more than thirty birds over nine chapters, and every bird’s profile runs the same six parts."),
+      cta(5, "If your phone’s within reach, point its camera at the code in this video, and when a link shows on the phone, tap it."),
+    ]);
+    expect(shape(out)).toEqual([
+      ["H", "While the robins work"],
+      ["H", "What bird scientists and"],
+      ["B", "I boiled down into"],
+      ["H", "It covers more than"],
+      ["Q", "If your phone’s within"],
+    ]);
+  });
+
+  it("412: the cover from 'into my book', not from 'along with what behaviorists'", () => {
+    const out = run("Everything Your Cat Can't Tell You", [
+      host(1, "Hello.", { hostOpener: true }),
+      cta(2, "Freeze that picture for a minute, because a cat training a person is exactly the kind of signal I’ve gathered,"),
+      cta(3, "along with what behaviorists and lifelong cat people have worked out, into my book, Everything Your Cat Can’t Tell You.", false),
+      cta(4, "It’s a digital download, five hundred and ninety-two pages. Getting it is simple."),
+      cta(5, "Aim your phone’s camera at the code on your screen, hold steady, and tap the message that appears."),
+    ]);
+    expect(out.find(s => s.coverHero)?.scriptText).toBe("into my book, Everything Your Cat Can’t Tell You.");
+    expect(out.find(s => s.scriptText?.startsWith("along with"))?.coverHero).toBeFalsy();
+  });
+
+  it("unchanged: a beat that opens on the title keeps the whole beat as the cover", () => {
+    const out = run("The Kitchen Table Crochet Book", [
+      host(1, "Hello.", { hostOpener: true }),
+      cta(2, "And when you're ready for more after these, here is where it all lives."),
+      cta(3, "The Kitchen Table Crochet Book is a digital book with ten chapters, each one a project that sells."),
+      cta(4, "Hold your phone up to the screen and tap the link that appears."),
+    ]);
+    expect(shape(out).map(([k]) => k).join("")).toBe("HBQ");
+    expect(out.find(s => s.coverHero)?.scriptText).toMatch(/^The Kitchen Table Crochet Book is a digital book/);
   });
 });

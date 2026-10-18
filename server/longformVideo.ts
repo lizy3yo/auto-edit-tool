@@ -368,7 +368,7 @@ import {
   scriptParagraphs,
 } from "./delivery";
 import { fetchAudioBuffer, repairSkippedNarration } from "./narrationSkips";
-import { enforcePlanRules } from "./planGate";
+import { breakBetween, enforcePlanRules } from "./planGate";
 import { scanClipGlitch } from "./clipGlitchScan";
 import { assemblyPhase, levelPhase, type JobPhase } from "../shared/jobPhase";
 import {
@@ -9809,10 +9809,11 @@ export function titleMatcher(
  * Mark the book-cover reveal beat: inside EACH contiguous CTA run, flip the first scene that
  * names the book (`titleMatcher`) into a full-frame cover still — `coverHero: true`,
  * `stillImage: true`, `hostPresent: false`, no split — keeping its own narration (which speaks the
- * title) so the cover lands exactly as the host names it. No-op without both a cover image and a
- * resolvable title, or when a run never names the book. The QR-hero beat (no title in its line) is
- * skipped naturally. Idempotent via the `!s.coverHero` guard. Mutates in place; returns it. Pure —
- * unit-tested.
+ * title). A beat that says other words before naming the book is split there first
+ * (`splitCoverAtNaming`), so the cover lands as the host names it, not seconds before. No-op without
+ * both a cover image and a resolvable title, or when a run never names the book. The QR-hero beat
+ * (no title in its line) is skipped naturally. Idempotent: a run with a cover is left alone. Mutates
+ * in place (splicing a split); returns it. Pure — unit-tested.
  */
 export function markCoverReveal(
   scenes: StoryboardScene[],
@@ -9823,6 +9824,7 @@ export function markCoverReveal(
   // nothing to reveal.
   if (!params.bookCoverImageUrl && !params.ctaBooks?.length) return scenes;
   let i = 0;
+  let split = false;
   while (i < scenes.length) {
     if (scenes[i].cta !== true) {
       i++;
@@ -9846,15 +9848,20 @@ export function markCoverReveal(
       s.splitVisual = undefined;
     };
     const namesBook = titleMatcher(title);
-    let done = false;
-    for (let k = i; k < j; k++) {
+    // Already marked (idempotent). The whole run, not the beats before the cover: the words a split
+    // kept before it can pass as naming the book too ("A hundred and one repairs…" for "…101 Free
+    // Repairs", job 403), and a second pass would make them a second cover.
+    let done = scenes.slice(i, j).some(s => s.coverHero);
+    for (let k = i; k < j && !done; k++) {
       const s = scenes[k];
-      if (s.coverHero) {
-        done = true;
-        break; // already marked (idempotent)
-      }
       if (namesBook(s.scriptText ?? s.narration ?? "")) {
-        reveal(s);
+        // The cover starts where the host names the book, not where the beat starts (jobs 411/412).
+        const at = splitCoverAtNaming(scenes, k, title);
+        if (at !== k) {
+          j++;
+          split = true;
+        }
+        reveal(scenes[at]);
         done = true;
         break;
       }
@@ -9867,6 +9874,7 @@ export function markCoverReveal(
     if (!done && book) reveal(scenes[i]);
     i = j;
   }
+  if (split) scenes.forEach((s, k) => (s.index = k + 1)); // the beats after a split moved up one
   return scenes;
 }
 
@@ -9909,6 +9917,161 @@ export function coverBeatFor(
   // book → host → big QR) instead of the book sitting on the line before the scan.
   if (pitch.length === 0) return fallback;
   return scenes[pitch[Math.floor((pitch.length - 1) / 2)]];
+}
+
+/** What a host calls the book they sell: "book", "e-book", "guide", "playbook", "a digital download"… */
+const BOOK_NOUN = String.raw`(?:e-?books?|books?|guide(?:book)?s?|handbooks?|playbooks?|workbooks?|cookbooks?|manuals?|downloads?|pdfs?)`;
+/** A describing word between the determiner and the book word ("one DIGITAL book", "my own little
+ * guide") — never a joining word, so "one of the books" and "a way to guide" do not name a book. */
+const BOOK_FILLER = String.raw`(?:(?!(?:to|of|and|or|but|is|was|are|were|that|which|who|for|with|in|on|at|from|by|than)\b)[\w'’-]+\s+)`;
+/**
+ * The host naming their own book without its title: "my book", "my e-book", "one digital book", "a
+ * digital download", and "the guide I put together" (a "the" counts only with the host's own "I"/"we"
+ * after it — "the book of nature says…" is not theirs).
+ */
+const BOOK_REFERENCE = new RegExp(
+  String.raw`\b(?:(?:my|our|this|a|an|one)\s+${BOOK_FILLER}{0,2}${BOOK_NOUN}\b|the\s+${BOOK_FILLER}{0,2}${BOOK_NOUN}\s+(?:that\s+|which\s+)?(?:i|we)\b)`,
+  "i"
+);
+/** The longest stretch of words searched for the spoken title. */
+const TITLE_MAX_WORDS = 20;
+
+/** Words of `text` with their offsets. */
+function wordSpans(text: string): { w: string; at: number; end: number }[] {
+  return Array.from(text.matchAll(/\S+/g), m => ({
+    w: m[0],
+    at: m.index ?? 0,
+    end: (m.index ?? 0) + m[0].length,
+  }));
+}
+
+/**
+ * Where the title itself is said in `text` (an offset), or -1: the stretch of words that names the
+ * book (`titleMatcher`) and says the MOST of its words — the shortest such stretch, then the first —
+ * taken back over a leading "The"/"A". The most, not the first: a title's words are often the
+ * channel's own and are said before it — job 412's "…lifelong cat people… into my book, Everything
+ * Your Cat Can't Tell You" names "cat" first, and job 403's "A hundred and one repairs… called
+ * Werner's One Hundred and One Free Repairs" passes as naming "Werner's 101 Free Repairs" on its
+ * first five words. Pure.
+ */
+function titleSaidAt(text: string, title: string | undefined): number {
+  const namesBook = titleMatcher(title);
+  // Counted by `titleMatcher`'s own tests: each distinctive word once, curly apostrophes straight.
+  const tests = title ? Array.from(new Set(getBookNameTokens(title)), tokenTest) : [];
+  const hits = (t: string) => {
+    const hay = t.toLowerCase().replace(/[‘’]/g, "'");
+    return tests.filter(fn => fn(hay)).length;
+  };
+  const words = wordSpans(text);
+  let best: { i: number; len: number; hits: number } | undefined;
+  for (let i = 0; i < words.length; i++) {
+    for (let j = i; j < words.length && j - i < TITLE_MAX_WORDS; j++) {
+      const stretch = text.slice(words[i].at, words[j].end);
+      if (!namesBook(stretch)) continue;
+      const h = hits(stretch);
+      const len = j - i;
+      if (!best || h > best.hits || (h === best.hits && len < best.len)) best = { i, len, hits: h };
+    }
+  }
+  if (!best) return -1;
+  // Back over the title's own capitalised words a test did not count ("A Hundred Air Hostess
+  // Secrets" — "a hundred" is not the "100" it tests for, job 399), never past a clause break or
+  // "I", then over one leading article.
+  const opensTitle = (w: string) =>
+    /^["'“‘(]*[A-Z0-9]/.test(w) && !CLAUSE_END.test(w) && !/^["'“‘(]*I(?:['’][a-z]+)?$/.test(w);
+  let i = best.i;
+  while (i > 0 && opensTitle(words[i - 1].w)) i--;
+  if (i > 0 && /^["'“‘(]*(?:the|a|an)$/i.test(words[i - 1].w)) i--;
+  return words[i].at;
+}
+
+/**
+ * Where `text` first names the book (an offset), or -1: the earlier of the host's own words for it
+ * (`BOOK_REFERENCE`: "my book", "one digital book", "the guide I put together") and the title itself
+ * (`titleSaidAt`). Pure.
+ */
+export function bookNamedAt(text: string, title: string | undefined): number {
+  const ref = text.match(BOOK_REFERENCE);
+  const said = titleSaidAt(text, title);
+  const at = [ref?.index ?? -1, said].filter(n => n >= 0);
+  return at.length ? Math.min(...at) : -1;
+}
+
+/** The fewest words the host says before the cover takes over — the shot list's own hand-off floor
+ * (`HOST_HANDOFF_MIN_WORDS`, 5): fewer would blink a host take in before the book. */
+export const COVER_HEAD_MIN_WORDS = 5;
+/**
+ * The most words the cover may come up ahead of the book being named so it starts on its clause's
+ * own pause (about 2 s at a narrator's pace). Job 411's "…over the years, | I boiled down into one
+ * digital book" opens on the comma's 0.42 s pause four words ahead; further back than this, the cut
+ * goes to a natural break at the naming itself instead.
+ */
+export const COVER_LEAD_MAX_WORDS = 6;
+/** A word that closes a clause — where a voice leaves a real pause. */
+const CLAUSE_END = /(?:[,;:.!?…]["'”’)\]]*|[—–]|--)$/;
+
+/**
+ * Where to cut a cover beat so the cover starts when the host NAMES the book (an offset into
+ * `text`), or -1 to leave it whole. The book cover used to take the whole beat that named it, and a
+ * beat is a sentence or a clause cut by word count, so it came up seconds before anyone said
+ * "book": job 411 at 160.1 s on "What bird scientists and patient window-watchers have learned over
+ * the years," with "one digital book, The Backyard Birder" at 165.7 s; job 412 at 155.7 s on "along
+ * with what behaviorists and lifelong cat people have worked out," with "my book" at 159.9 s.
+ *
+ * The cut goes to the start of the CLAUSE that names the book (`bookNamedAt`) — after the comma,
+ * semicolon, dash or full stop before it, where the voice leaves a real pause for the final
+ * alignment to snap onto (`assignSceneRanges`) — when that is at most `COVER_LEAD_MAX_WORDS` ahead
+ * of the naming; the beat's own start counts as one, so a short lead-in keeps the beat whole. A
+ * longer clause hands over at the natural break nearest the naming (`breakBetween`: before "my", "a",
+ * a count or a preposition with its object — job 403's "…are gathered in | a digital book called…"),
+ * else at the clause start. Never when the host would say fewer than `COVER_HEAD_MIN_WORDS` first:
+ * a title at the start of its beat ("The Kitchen Table Crochet Book is a digital book…") keeps it.
+ * Pure — unit-tested.
+ */
+export function coverCutAt(text: string, title: string | undefined): number {
+  const named = bookNamedAt(text, title);
+  if (named <= 0) return -1;
+  const words = wordSpans(text);
+  const k = words.findIndex(w => w.at >= named);
+  if (k < COVER_HEAD_MIN_WORDS) return -1;
+  // The clause the naming is said in begins after the last clause break before it, else with the beat.
+  let clause = 0;
+  for (let c = k; c >= 1; c--) {
+    if (CLAUSE_END.test(words[c - 1].w)) {
+      clause = c;
+      break;
+    }
+  }
+  const at = (c: number) => (c >= COVER_HEAD_MIN_WORDS ? words[c].at : -1);
+  if (k - clause <= COVER_LEAD_MAX_WORDS) return at(clause);
+  for (let c = k; c > clause && c >= k - COVER_LEAD_MAX_WORDS; c--) {
+    if (c < COVER_HEAD_MIN_WORDS) break;
+    if (breakBetween(text.slice(0, words[c].at), text.slice(words[c].at))) return words[c].at;
+  }
+  return at(clause);
+}
+
+/**
+ * Split the beat at `k` so its cover starts where the book is named (`coverCutAt`): the words before
+ * stay a pitch beat of their own — the host take before it in a marked CTA (`hostTheCtaPitch`, then
+ * `joinBackToBackHostTakes` makes them one take with the host before) — and the rest is the beat the
+ * caller turns into the cover. Runs before voicing, so the final alignment puts the cut on the
+ * transcript (the pause the clause break leaves). Returns the index of the beat that takes the cover:
+ * `k`, or `k + 1` after a split. Mutates `scenes` (splices). Pure otherwise — unit-tested.
+ */
+export function splitCoverAtNaming(
+  scenes: StoryboardScene[],
+  k: number,
+  title: string | undefined
+): number {
+  const s = scenes[k];
+  if (!s || s.hostOpener || s.qrHero || s.coverHero || s.assetImageUrl) return k;
+  const cut = coverCutAt(s.scriptText ?? "", title);
+  if (cut <= 0) return k;
+  const [head, tail] = splitSceneAtOffset(s, cut);
+  if (!head.scriptText || !tail.scriptText) return k;
+  scenes.splice(k, 1, head, tail);
+  return k + 1;
 }
 
 /**
@@ -9996,7 +10159,8 @@ function joinSplitAnchor(
  * on-topic still under the big card (operator, 2026-09-23 — a plain backdrop was tried and
  * dropped). The last beat is flagged `qrTail` (it no longer
  * freezes — `QR_TAIL_HOLD_SEC` is retired — but narration alignment anchors on it). The first
- * pitch beat that NAMES the book becomes the cover reveal (`coverBeatFor`). A marked block without
+ * pitch beat that NAMES the book becomes the cover reveal (`coverBeatFor`), from the clause that
+ * names it (`splitCoverAtNaming`). A marked block without
  * the trigger line starts the card on its first SCAN sentence (`SCAN_INTENT`), else on its last
  * ~`QR_GUIDANCE_WORDS` (`markQrFromCtaTails`). A `joinSplitAnchor` pre-pass re-stitches a trigger or
  * release phrase segmentation broke across a scene boundary. No-op without a channel QR or a book;
@@ -10042,13 +10206,22 @@ function markScanWindow(
   scenes[end].qrTail = true;
   // Cover reveal on the beat that NAMES the book (falling back to the beat right before the
   // window when the pitch never names it). Needs a configured cover image.
-  const cover = coverBeatFor(scenes, start, params);
+  const beat = coverBeatFor(scenes, start, params);
   if (
-    cover &&
-    coverImageForScene(cover, params) &&
-    !cover.qrHero &&
-    !cover.coverHero
+    beat &&
+    coverImageForScene(beat, params) &&
+    !beat.qrHero &&
+    !beat.coverHero
   ) {
+    // …starting where the host names it, not where the beat starts (jobs 411/412: 4-7 s early), on
+    // the title `coverBeatFor` looked for. The scan window is marked already, so the split (before
+    // it) moves nothing this function still reads by index.
+    const at = splitCoverAtNaming(
+      scenes,
+      scenes.indexOf(beat),
+      bookForScene(scenes[start], params.ctaBooks)?.title ?? params.bookTitle
+    );
+    const cover = scenes[at];
     cover.coverHero = true;
     cover.stillImage = true;
     cover.hostPresent = false;
