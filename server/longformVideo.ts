@@ -107,11 +107,13 @@ import {
   nearCopyCandidates,
   MAX_VARIETY_REDRAWS,
   nextScreenSetup,
+  PANEL_LANE_WAIT_MS,
   pictureFingerprint,
   pictureThumb,
   REDRAW_CAMERAS,
   REDRAW_VIEWS,
   rememberPicture,
+  rememberShippedPicture,
   screenPicture,
   screenSells,
   varietyLane,
@@ -7675,6 +7677,48 @@ export function sameThingReference(scene: StoryboardScene): string | undefined {
   return refs[scene.memoryRightBefore ?? 0] ?? refs[0];
 }
 
+/** A picture's relatives for the near-copy check (`nearCopyRelatives`). */
+export type NearCopyRelatives = { drawnFrom: number[]; keptSmall: boolean; groupItem: boolean };
+
+/**
+ * A PICTURE'S RELATIVES FOR THE NEAR-COPY CHECK (round 13, `NearCopyRelated` in pictureVariety.ts),
+ * read as the picture comes in, before any redraw drops its memory. `drawnFrom`: the scenes whose
+ * pictures it is drawn from — the picture maker copies their composition, and job 410 scene 20 came
+ * back as scene 3's seat row, job 409 scene 5 as scene 3's man at the card rack. None for a SCREEN:
+ * its reference is only the small photo inside the listing (`SCREEN_ITEM_VIEW`) and lends no
+ * composition to copy. `keptSmall`: its key thing is kept small beside its subject (`BACKGROUND_VIEW`),
+ * so the same-thing check never lays its memory beside it — both of those copies were such pictures.
+ * `groupItem`: a list item drawn from its group picture (`SET_ITEM_VIEW`), a close-up of one item in it
+ * by design. Pure.
+ */
+export function nearCopyRelatives(scene: StoryboardScene): NearCopyRelatives {
+  return {
+    drawnFrom: scene.memoryView === SCREEN_ITEM_VIEW ? [] : (scene.memoryRefScenes ?? []).map(r => r.index),
+    keptSmall: scene.memoryView === BACKGROUND_VIEW,
+    groupItem: scene.memoryView === SET_ITEM_VIEW,
+  };
+}
+
+/**
+ * Whether the near-copy check looks at a draw's CLOSEST relative however far its fingerprint reads
+ * (`NearCopyRelated.lookAtClosest`): only when the side-by-side look a memory picture gets from the
+ * same-thing check did not happen on this draw, and was owed — a thing kept small beside its subject
+ * (job 410 scene 20 and job 409 scene 5, both copies of the picture they were drawn from, met no
+ * side-by-side check at all), or a picture a redraw left with no memory to be laid beside. It is the
+ * look such a picture would have had, never a second one. Not a list item drawn from its group picture
+ * (a look per item for a copy that is not there) nor a picture whose references show only other things
+ * or whose same-thing check is spent (`sameThingMove`) — each keeps meeting its relatives on the wider
+ * line (`RELATED_NEAR_COPY_BITS`). Pure.
+ */
+export function looksAtClosestRelative(
+  relatives: NearCopyRelatives,
+  scene: Pick<StoryboardScene, "memoryRefUrls">,
+  sameThingRan: boolean
+): boolean {
+  if (sameThingRan || relatives.groupItem || !relatives.drawnFrom.length) return false;
+  return relatives.keptSmall || !scene.memoryRefUrls?.length;
+}
+
 /**
  * A MEMORY PICTURE THAT COPIES TWICE IS DRAWN FROM WORDS (2026-10-18, job 399 scene 17: the same
  * hands, can and cup as scene 16, only the background new — the same-thing check's one redraw was
@@ -10551,11 +10595,13 @@ export type ValidatedStill = {
  * in flight at the same moment. Screens are where a film repeats itself; everything else stays
  * parallel.
  *
- * A split panel (`square`) is still CHECKED against every picture drawn before it, but never waits
- * in a lane: it is awaited against its host scene's own clock (`server/splitPanel.ts`), and a panel
- * queued behind its key thing's other draws, each up to several minutes, would ship its scene as
- * the host take alone — worse than a copy drawn at the same moment as its original. A panel of a
- * key thing already waits for that thing's earlier pictures (`memoryFor`), so those are drawn first.
+ * A split panel (`square`) is CHECKED against every picture drawn before it, and waits in its lane
+ * only `PANEL_LANE_WAIT_MS`: it is awaited against its host scene's own clock (`server/splitPanel.ts`),
+ * and a panel queued behind its key thing's other draws, each up to several minutes, would ship its
+ * scene as the host take alone. It used to wait in no lane, so a panel drawn from the same memory as
+ * a full-frame picture was drawn at the same moment and neither saw the other (job 408 scenes 4 and
+ * 5, one bathroom shot twice, both drawn from scene 2). A panel of a key thing already waits for that
+ * thing's earlier pictures (`memoryFor`), so those are drawn first.
  */
 export async function generateValidatedStill(
   ...args: Parameters<typeof drawValidatedStill>
@@ -10563,8 +10609,8 @@ export async function generateValidatedStill(
   const [scene, , , , , , square] = args;
   const job = currentCostJobId();
   const lane = varietyLane(scene);
-  return lane && job != null && !square && process.env.PICTURE_VARIETY !== "0"
-    ? withScreenTurn(job, () => drawValidatedStill(...args), lane)
+  return lane && job != null && process.env.PICTURE_VARIETY !== "0"
+    ? withScreenTurn(job, () => drawValidatedStill(...args), lane, square ? PANEL_LANE_WAIT_MS : undefined)
     : drawValidatedStill(...args);
 }
 
@@ -10662,6 +10708,18 @@ async function drawValidatedStill(
   // picture of the same video is drawn once more, told to differ.
   let varietyRerolls = 0;
   const varietyJob = currentCostJobId();
+  // The pictures it is drawn from, read before any redraw drops them (`nearCopyRelatives`): every draw
+  // is compared with them, and with whatever else was drawn from them.
+  const relatives = nearCopyRelatives(scene);
+  // EVERY FRAME THAT SHIPS IS REMEMBERED (round 13, `rememberShippedPicture`): only a frame that passed
+  // the near-copy check was, so a fallback — job 409 scene 3, out of draws on its near copies — was
+  // never compared with anything after it, and scene 5 came back as that same man at the card rack.
+  const varietyOn = varietyJob != null && !referenceImageUrl && process.env.PICTURE_VARIETY !== "0";
+  const ship = async (f: Drawn): Promise<ValidatedStill> => {
+    if (varietyOn)
+      await rememberShippedPicture(varietyJob!, scene.index, f.buffer, square, scene.screenSetup, relatives.drawnFrom);
+    return shipped(f);
+  };
   // The concrete camera a continuation is drawn from (`memoryViewFor`), -1 for any other picture.
   const ownCamera = (REDRAW_CAMERAS as readonly string[]).indexOf(scene.memoryView ?? "");
   // No near-copy redraw sends it "much further back" (`nearCopyCameraIndex`): a picture of one small
@@ -10906,6 +10964,9 @@ async function drawValidatedStill(
     // Whether the same-thing check laid this frame beside the picture it must not repeat
     // (`memoryRightBefore`) — the near-copy check below then need not look at that pair again.
     let comparedWithPartner = false;
+    // Whether the same-thing check laid any reference beside this frame at all: when none did, the
+    // near-copy check looks at its closest relative instead (`NearCopyRelated.lookAtClosest`).
+    let sameThingRan = false;
     if (!referenceImageUrl) {
       const defects = await scanStillDefects(
         buffer,
@@ -11003,7 +11064,7 @@ async function drawValidatedStill(
         console.warn(
           `[Longform] scene ${scene.index} still came back with the same faults (${faults}) → keeping it`
         );
-        return shipped(drawn);
+        return ship(drawn);
       }
       lastFaults = faults;
       if (defects.broken) {
@@ -11179,7 +11240,10 @@ async function drawValidatedStill(
         sameThingRefused !== "different" &&
         scene.memoryView !== SCREEN_ITEM_VIEW &&
         // A remembered thing kept small beside the subject is not compared side by side: it is
-        // meant to look small and placed, not to fill a frame like its memory.
+        // meant to look small and placed, not to fill a frame like its memory. It is not left
+        // unchecked: the near-copy check lays its closest relative beside it instead
+        // (`looksAtClosestRelative`) — the picture whose composition it may have copied (job 410
+        // scene 20 was scene 3's seat row with the woman gone).
         scene.memoryView !== BACKGROUND_VIEW &&
         // References of the other things only (`memoryOthersOnly`): there is nothing of its own
         // thing to compare it with — a first mattress is not "a different mattress" than a heater.
@@ -11187,9 +11251,10 @@ async function drawValidatedStill(
       ) {
         // Laid beside the picture it must not repeat when that is one of its memories — shown right
         // before it, or the one it continues: the copy a viewer would see is a copy of THAT picture
-        // (`sameThingReference`), and only a little closer or further back counts as a copy of it.
+        // (`sameThingReference`), and a tighter or looser crop of it counts as a copy of it.
         const justShown = scene.memoryRightBefore != null;
         const same = await scanSameThing(sameThingReference(scene)!, buffer, scene.keyThing, justShown);
+        sameThingRan = true;
         if (justShown) comparedWithPartner = true;
         const move = sameThingMove(same, sameThingRefused, !!scene.partOf);
         if (move === "redraw") {
@@ -11260,6 +11325,13 @@ async function drawValidatedStill(
       // fingerprinted as the square it shows (`pictureFingerprint`), laid over every earlier picture
       // (`fingerprintDistance`), remembered under its scene's number for every later one, and a copy
       // is redrawn told to differ exactly like a full-frame picture.
+      // ITS RELATIVES (round 13, `NearCopyRelated`): the pictures it was drawn from, and the others
+      // drawn from them, are candidates on a wider line — the picture maker copies the composition it
+      // is handed (job 409 scene 5 read 22 bits from scene 3, the picture it was drawn from; job 408
+      // scene 5 24 from the panel drawn from the same picture) — and when no same-thing look laid a
+      // reference beside this draw, the closest of them is looked at however far it reads (job 410
+      // scene 20, kept small beside the subject, never met scene 3, whose seat row it copied). The
+      // looks per draw stay capped, and the redraws at `MAX_VARIETY_REDRAWS`.
       if (varietyJob != null && process.env.PICTURE_VARIETY !== "0") {
         try {
           const print = await pictureFingerprint(buffer, square);
@@ -11267,8 +11339,12 @@ async function drawValidatedStill(
           let copies: number | null = null;
           let copiedSetup: string | undefined;
           const partner = comparedWithPartner ? undefined : nearCopyPartner(scene)?.index;
+          const related = {
+            drawnFrom: relatives.drawnFrom,
+            lookAtClosest: looksAtClosestRelative(relatives, scene, sameThingRan),
+          };
           if (varietyRerolls < MAX_VARIETY_REDRAWS)
-            for (const c of nearCopyCandidates(varietyJob, scene.index, print, partner)) {
+            for (const c of nearCopyCandidates(varietyJob, scene.index, print, partner, related)) {
               const look = await scanNearCopy(c.thumb, thumb);
               if (look.copy) {
                 copies = c.index;
@@ -11316,7 +11392,7 @@ async function drawValidatedStill(
             );
             continue;
           }
-          rememberPicture(varietyJob, scene.index, print, thumb, scene.screenSetup);
+          rememberPicture(varietyJob, scene.index, print, thumb, scene.screenSetup, relatives.drawnFrom);
         } catch {
           /* a fingerprint that cannot be taken never costs the picture */
         }
@@ -11343,7 +11419,7 @@ async function drawValidatedStill(
       `[Longform] scene ${scene.index} still never showed "${scene.showSubject}" after ` +
         `${attempts} attempts → shipping the closest frame`
     );
-    return shipped(offSubjectFallback);
+    return ship(offSubjectFallback);
   }
   // A frame that copies its memory, kept only when its redraw from words found nothing better: a
   // clean frame of the right thing, shown twice, still reads truer than stamped text or broken
@@ -11353,14 +11429,14 @@ async function drawValidatedStill(
       `[Longform] scene ${scene.index} still was never drawn apart from its memory picture after ` +
         `${attempts} attempts → shipping the copy`
     );
-    return shipped(copyFallback);
+    return ship(copyFallback);
   }
   if (textyFallback) {
     console.warn(
       `[Longform] scene ${scene.index} still has overlay text after ${attempts} ` +
         `attempts → shipping it: ${scene.visualPrompt.slice(0, 80)}`
     );
-    return shipped(textyFallback);
+    return ship(textyFallback);
   }
   // A person behind the big QR card reads as someone holding the code — kept only over broken geometry.
   if (personFallback) {
@@ -11368,14 +11444,14 @@ async function drawValidatedStill(
       `[Longform] scene ${scene.index} still showed a person behind the QR card after ${attempts} ` +
         `attempts → shipping it: ${scene.visualPrompt.slice(0, 80)}`
     );
-    return shipped(personFallback);
+    return ship(personFallback);
   }
   if (brokenFallback) {
     console.warn(
       `[Longform] scene ${scene.index} still has broken geometry after ${attempts} ` +
         `attempts → shipping the least-bad frame: ${scene.visualPrompt.slice(0, 80)}`
     );
-    return shipped(brokenFallback);
+    return ship(brokenFallback);
   }
   throw new Error(lastError);
 }

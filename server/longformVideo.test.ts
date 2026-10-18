@@ -11787,6 +11787,179 @@ describe("a split panel meets the near-copy check like any picture (job 405 scen
   });
 });
 
+describe("a picture meets the pictures it was drawn from (round 13, jobs 408-410)", () => {
+  // Seeded "photos", so the fingerprints are real ones.
+  const photo = (seed: number, w: number, h: number) => {
+    let a = seed >>> 0;
+    const rnd = () => {
+      a = (a + 0x6d2b79f5) >>> 0;
+      let t = a;
+      t = Math.imul(t ^ (t >>> 15), t | 1);
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+    const cols = Math.round((w / h) * 9);
+    const px = Buffer.alloc(cols * 9 * 3);
+    for (let i = 0; i < cols * 9; i++) px.fill(Math.floor(rnd() * 256), i * 3, i * 3 + 3);
+    return sharp(px, { raw: { width: cols, height: 9, channels: 3 } }).resize(w, h, { kernel: "cubic", fit: "fill" }).png().toBuffer();
+  };
+  const drawsOf = (...frames: Buffer[]) => {
+    const fn = vi.fn();
+    for (const f of frames) fn.mockResolvedValueOnce({ success: true, fileData: f });
+    return fn;
+  };
+  const SCENE_2 = "https://r2/still-src-2.png";
+  afterEach(() => {
+    mockScanNearCopy.mockReset();
+    mockScanNearCopy.mockResolvedValue({ copy: false, what: "" });
+    mockScanSameThing.mockReset();
+    mockScanSameThing.mockResolvedValue({ same: true, copy: false, what: "" });
+    mockScanStillDefects.mockReset();
+    mockScanStillDefects.mockResolvedValue({ overlay: false, broken: false, what: "" } as any);
+  });
+
+  it("409-3/5: scene 3 ships as a fallback and is remembered; scene 5, kept small beside its subject, is laid beside it and redrawn without it", async () => {
+    const { withCostMeter } = await import("./costMeter");
+    const { pictureFingerprint, pictureThumb, fingerprintDistance, RELATED_NEAR_COPY_BITS, DIFFERENT_PICTURE_CLAUSE } =
+      await import("./pictureVariety");
+    const { BACKGROUND_VIEW } = await import("./pictureMemory");
+    const { NEAR_COPY } = await import("../shared/pictureFlaws");
+    const job = 9701;
+    const [three, drawn, fresh] = await Promise.all([photo(3, 1536, 864), photo(55, 1536, 864), photo(56, 1536, 864)]);
+    // Far apart by fingerprint: only being drawn from scene 3 puts the pair in front of the look.
+    expect(fingerprintDistance(await pictureFingerprint(three), await pictureFingerprint(drawn))).toBeGreaterThan(RELATED_NEAR_COPY_BITS);
+    // Scene 3's only draw has broken geometry: it ships as its fallback — and is remembered.
+    mockScanStillDefects.mockResolvedValueOnce({ overlay: false, broken: true, what: "a hand through the card" } as any);
+    const card = "weathered hands holding a cream greeting card in a pharmacy aisle";
+    const out3 = await withCostMeter(job, () =>
+      generateValidatedStill({ index: 3, showSubject: card, visualPrompt: card, keyThing: "pharmacy aisle" } as any, 1, undefined, drawsOf(three))
+    );
+    expect(out3.buffer.equals(three)).toBe(true);
+    expect(out3.flaws?.length).toBeGreaterThan(0);
+    // Scene 5 is drawn from scene 3 with the aisle kept small beside its subject: no same-thing look.
+    const words = "weathered hands holding the cream greeting card, seen from behind among the rows of cards";
+    const five = {
+      index: 5,
+      showSubject: words,
+      visualPrompt: words,
+      keyThing: "pharmacy aisle",
+      memoryRefUrls: ["https://r2/still-src-3.png"],
+      memoryRefScenes: [{ index: 3, own: true }],
+      memoryView: BACKGROUND_VIEW,
+    } as any as StoryboardScene;
+    mockScanNearCopy.mockResolvedValueOnce({ copy: true, what: "the same man at the same card rack" });
+    const genImage = drawsOf(drawn, fresh);
+    const out5 = await withCostMeter(job, () => generateValidatedStill(five, 4, undefined, genImage));
+    expect(mockScanSameThing).not.toHaveBeenCalled();
+    // Laid beside scene 3's shipped fallback, however far its fingerprint read — on both draws.
+    const threeThumb = await pictureThumb(three);
+    expect(mockScanNearCopy).toHaveBeenCalledTimes(2);
+    expect(mockScanNearCopy.mock.calls[0][0].equals(threeThumb)).toBe(true);
+    expect(mockScanNearCopy.mock.calls[1][0].equals(threeThumb)).toBe(true);
+    // The copy is redrawn told to differ, without scene 3 as its reference.
+    expect(genImage).toHaveBeenCalledTimes(2);
+    expect(genImage.mock.calls[0][0].referenceImageUrl).toBe("https://r2/still-src-3.png");
+    expect(genImage.mock.calls[1][0].referenceImageUrl).toBeUndefined();
+    expect(genImage.mock.calls[1][0].prompt).toContain(DIFFERENT_PICTURE_CLAUSE);
+    expect(five.pictureChecks?.[0].flags).toContain(NEAR_COPY);
+    expect(out5.buffer.equals(fresh)).toBe(true);
+    expect(out5.flaws).toBeUndefined();
+  });
+
+  it("408-4/5: drawn at once from scene 2, the panel waits for scene 5 and is laid beside it", async () => {
+    const { withCostMeter } = await import("./costMeter");
+    const { pictureThumb } = await import("./pictureVariety");
+    const { MEMORY_VIEWS } = await import("./pictureMemory");
+    const job = 9702;
+    const [five, fresh] = await Promise.all([photo(5, 1536, 864), photo(57, 1024, 1024)]);
+    const copy = await sharp(five).extract({ left: 336, top: 0, width: 864, height: 864 }).resize(1024, 1024).png().toBuffer();
+    const fromTwo = { memoryRefUrls: [SCENE_2], memoryRefScenes: [{ index: 2, own: true as const }], memoryView: MEMORY_VIEWS[1] };
+    const bin = "a small white plastic bin with its lid open on pale beige tile beside the toilet base";
+    const fullFrame = { index: 5, showSubject: bin, visualPrompt: bin, keyThing: "bin", ...fromTwo } as StoryboardScene;
+    const host = {
+      index: 4,
+      hostPresent: true,
+      splitVisual: "a bathroom floor beside a toilet, a small lidded waste bin next to it",
+      keyThing: "toilet",
+      scriptText: "The toilet is not a trash can.",
+    } as StoryboardScene;
+    // The panel as `withSplitMemory` hands it over: the toilet's memory, scene 2.
+    const panel = { ...buildSplitRightScene(host), keyThing: "toilet", ...fromTwo };
+    const order: string[] = [];
+    const slow = vi.fn(
+      () =>
+        new Promise(r =>
+          setTimeout(() => {
+            order.push("scene 5 drawn");
+            r({ success: true, fileData: five });
+          }, 60)
+        )
+    );
+    const panelDraws = vi.fn();
+    panelDraws
+      .mockImplementationOnce(async () => (order.push("panel drawn"), { success: true, fileData: copy }))
+      .mockImplementationOnce(async () => ({ success: true, fileData: fresh }));
+    mockScanNearCopy.mockResolvedValueOnce({ copy: true, what: "the same bin beside the same toilet" });
+    const [, out] = await Promise.all([
+      withCostMeter(job, () => generateValidatedStill(fullFrame, 4, undefined, slow as any)),
+      withCostMeter(job, () => generateValidatedStill(panel, 4, undefined, panelDraws, undefined, undefined, true)),
+    ]);
+    // One lane: the panel is drawn only once scene 5 is done, then laid beside it and drawn again.
+    expect(order).toEqual(["scene 5 drawn", "panel drawn"]);
+    expect(mockScanNearCopy.mock.calls[0][0].equals(await pictureThumb(five))).toBe(true);
+    expect(panelDraws).toHaveBeenCalledTimes(2);
+    expect(panelDraws.mock.calls[1][0].square).toBe(true);
+    expect(out.buffer.equals(fresh)).toBe(true);
+  });
+
+  it("a memory picture the same-thing check saw meets no extra look at a far reference; nor does a list item drawn from its group picture", async () => {
+    const { withCostMeter } = await import("./costMeter");
+    const { pictureFingerprint, pictureThumb, rememberPicture } = await import("./pictureVariety");
+    const { MEMORY_VIEWS, SET_ITEM_VIEW } = await import("./pictureMemory");
+    const [two, drawn] = await Promise.all([photo(2, 1536, 864), photo(58, 1536, 864)]);
+    rememberPicture(9703, 2, await pictureFingerprint(two), await pictureThumb(two));
+    const kettle = "a dented steel kettle on the back of the stove";
+    await withCostMeter(9703, () =>
+      generateValidatedStill(
+        {
+          index: 6,
+          showSubject: kettle,
+          visualPrompt: kettle,
+          keyThing: "kettle",
+          memoryRefUrls: [SCENE_2],
+          memoryRefScenes: [{ index: 2, own: true }],
+          memoryView: MEMORY_VIEWS[2],
+        } as StoryboardScene,
+        4,
+        undefined,
+        drawsOf(drawn)
+      )
+    );
+    expect(mockScanSameThing).toHaveBeenCalledTimes(1);
+    expect(mockScanNearCopy).not.toHaveBeenCalled();
+    // A list item: a close-up of one item of its group picture by design — no look forced.
+    rememberPicture(9704, 10, await pictureFingerprint(two), await pictureThumb(two));
+    const spoon = "a wooden spoon, just this one item from the group";
+    await withCostMeter(9704, () =>
+      generateValidatedStill(
+        {
+          index: 11,
+          showSubject: spoon,
+          visualPrompt: spoon,
+          listCut: true,
+          memoryRefUrls: ["https://r2/still-src-10.png"],
+          memoryRefScenes: [{ index: 10, own: true }],
+          memoryView: SET_ITEM_VIEW,
+        } as StoryboardScene,
+        4,
+        undefined,
+        drawsOf(drawn)
+      )
+    );
+    expect(mockScanNearCopy).not.toHaveBeenCalled();
+  });
+});
+
 describe("notePictureFlaws — the scene and the job say what a picture shipped with", () => {
   it("sets the field and warns; a picture drawn again replaces it, one drawn clean takes it away", async () => {
     const { notePictureFlaws, clearJobWarnings, jobProgress } = await import("./longformVideo");

@@ -18,6 +18,13 @@
  *      panel at scene 9 was scene 2's walking cat again, 14 s later, never compared. A panel is now
  *      fingerprinted as the square it shows and compared with every picture of the video
  *      (`pictureFingerprint`, `fingerprintDistance`), and a copy is redrawn told to differ.
+ *   4. (round 13, the review of jobs 408-410) Copies of the picture a picture was DRAWN FROM still
+ *      shipped: a fallback was never remembered, so nothing later was compared with it
+ *      (`rememberShippedPicture`); a thing kept small beside the subject met no side-by-side check;
+ *      a relative read past the 20-bit line; and two pictures drawn from one memory picture were drawn
+ *      at once in two lanes. A picture's relatives — what it was drawn from, and what else was drawn
+ *      from that — are now candidates on a wider line, the closest looked at when no other check laid
+ *      one beside it (`NearCopyRelated`), and they share its lane (`varietyLane`).
  *
  * Applies to every channel; nothing here names one.
  */
@@ -243,6 +250,18 @@ const MAX_CANDIDATES = 2;
  */
 export const PANEL_NEAR_COPY_BITS = 24;
 export const PANEL_CANDIDATES = 3;
+/**
+ * A picture against one it is RELATED to — a picture it was drawn from (a memory reference), or one
+ * drawn from the same reference — is a candidate up to this many bits, whatever the two shapes: the
+ * picture maker copies the composition of the picture it is handed, so a copy of a relative is far
+ * likelier than of any other picture, and the 20-bit line, measured on unrelated pairs, missed the
+ * copies of relatives the round-13 review found. On the films' frames: job 409 scene 5 read 22 bits
+ * from scene 3, the picture it was drawn from (the same man holding the same card at the same rack);
+ * job 408 scene 5 read 24 from scene 4's panel, both drawn from scene 2 (the same bin beside the same
+ * toilet, the panel a little closer). A picture has a few relatives, and the looks per draw stay
+ * capped (`MAX_CANDIDATES`, `PANEL_CANDIDATES`).
+ */
+export const RELATED_NEAR_COPY_BITS = 24;
 
 interface Drawn {
   print: PictureFingerprint;
@@ -250,6 +269,8 @@ interface Drawn {
   thumb: Buffer;
   /** The screen setting it was drawn in, if it is a screen. */
   setup?: string;
+  /** The scenes whose pictures it was drawn from (its memory references), if any. */
+  sources?: number[];
 }
 const drawn = new Map<number, Map<number, Drawn>>();
 const MAX_JOBS = 12;
@@ -277,6 +298,31 @@ export async function pictureThumb(image: Buffer, square = false): Promise<Buffe
 }
 
 /**
+ * The pictures a picture is RELATED to, for `nearCopyCandidates` (round 13, the review of jobs
+ * 408-410). Words name one partner at most (`nearCopyPartner` in pictureMemory.ts: the picture it
+ * continues, or the one right before it), and the copies the review found were of pictures no words
+ * named — the ones they were DRAWN FROM: job 410 scene 20 was scene 3's seat row with the woman taken
+ * out, 80 s later, drawn from scene 3 as the beverage cart's memory; job 409 scene 5 was scene 3's man
+ * at the card rack again, drawn from it as the aisle's memory; job 408's panel at scene 4 and scene 5
+ * were one bathroom shot twice, both drawn from scene 2.
+ */
+export interface NearCopyRelated {
+  /** The scenes whose pictures this one was drawn from (its memory references, `memoryRefScenes`). */
+  drawnFrom?: number[];
+  /**
+   * The side-by-side look a memory picture gets from the same-thing check did not happen on this draw
+   * and was owed — it skips a thing kept small beside the subject (`BACKGROUND_VIEW`), and a picture a
+   * redraw left with no memory has none to be laid beside (`looksAtClosestRelative` in
+   * longformVideo.ts): the CLOSEST related picture is then looked at whatever its distance, the look it
+   * did not get. Job 409 scene 5 and job 410 scene 20 were both kept-small pictures, never laid beside
+   * anything.
+   */
+  lookAtClosest?: boolean;
+}
+
+type Candidate = { index: number; thumb: Buffer; bits: number; setup?: string };
+
+/**
  * Earlier pictures of this video close enough to `print` to be looked at, closest first (scene
  * index and its thumbnail). A scene is never compared with its own earlier draw.
  *
@@ -286,39 +332,80 @@ export async function pictureThumb(image: Buffer, square = false): Promise<Buffe
  * under the house again a little closer, read 23 bits from scene 10; job 405 scene 8, the cat on
  * the sleeper again at the same distance, shipped unflagged after its redraw from words.
  *
+ * `related` (`NearCopyRelated`): a picture this one was drawn from, or one drawn from the same
+ * picture, is a candidate up to `RELATED_NEAR_COPY_BITS`; with `lookAtClosest` and no `always`
+ * partner, the closest of them is looked at first however far it reads — the fingerprint decides the
+ * partner the words did not name.
+ *
  * A split panel (`print.square`) is compared with every earlier picture too — a full-frame one by
  * `fingerprintDistance` up to `PANEL_NEAR_COPY_BITS`, another panel by the ordinary line — and its
- * `PANEL_CANDIDATES` closest are looked at.
+ * `PANEL_CANDIDATES` closest are looked at. The looks per draw stay capped however many qualify.
  */
 export function nearCopyCandidates(
   jobId: number,
   sceneIndex: number,
   print: string | PictureFingerprint,
-  always?: number
-): { index: number; thumb: Buffer; bits: number; setup?: string }[] {
+  always?: number,
+  related: NearCopyRelated = {}
+): Candidate[] {
   const p = asPrint(print);
-  const out: { index: number; thumb: Buffer; bits: number; setup?: string }[] = [];
-  let partner: { index: number; thumb: Buffer; bits: number; setup?: string } | undefined;
+  const from = new Set(related.drawnFrom ?? []);
+  const out: Candidate[] = [];
+  const kin: Candidate[] = [];
+  let partner: Candidate | undefined;
   jobPictures(jobId).forEach((d, index) => {
     if (index === sceneIndex) return;
-    const bits = fingerprintDistance(d.print, p);
-    const limit = p.square && !d.print.square ? PANEL_NEAR_COPY_BITS : NEAR_COPY_BITS;
-    if (index === always) partner = { index, thumb: d.thumb, bits, setup: d.setup };
-    else if (bits <= limit) out.push({ index, thumb: d.thumb, bits, setup: d.setup });
+    const c: Candidate = { index, thumb: d.thumb, bits: fingerprintDistance(d.print, p), setup: d.setup };
+    const isKin = from.has(index) || !!d.sources?.some(x => from.has(x));
+    if (isKin) kin.push(c);
+    const limit = isKin ? RELATED_NEAR_COPY_BITS : p.square && !d.print.square ? PANEL_NEAR_COPY_BITS : NEAR_COPY_BITS;
+    if (index === always) partner = c;
+    else if (c.bits <= limit) out.push(c);
   });
-  const closest = out.sort((a, b) => a.bits - b.bits);
+  const byBits = (a: Candidate, b: Candidate) => a.bits - b.bits;
+  if (!partner && related.lookAtClosest) partner = kin.sort(byBits)[0];
+  const closest = out.filter(c => c !== partner).sort(byBits);
   return (partner ? [partner, ...closest] : closest).slice(0, p.square ? PANEL_CANDIDATES : MAX_CANDIDATES);
 }
 
-/** Remember the picture a scene kept — a split screen's panel under its scene's number. */
+/**
+ * Remember the picture a scene kept — a split screen's panel under its scene's number — with the
+ * scenes it was drawn from (`sources`), so a later picture drawn from one of them is compared with it
+ * (`NearCopyRelated`).
+ */
 export function rememberPicture(
   jobId: number,
   sceneIndex: number,
   print: string | PictureFingerprint,
   thumb: Buffer,
-  setup?: string
+  setup?: string,
+  sources?: number[]
 ): void {
-  jobPictures(jobId).set(sceneIndex, { print: asPrint(print), thumb, setup });
+  jobPictures(jobId).set(sceneIndex, { print: asPrint(print), thumb, setup, ...(sources?.length ? { sources } : {}) });
+}
+
+/**
+ * Remember a picture that SHIPPED without passing the near-copy check — a fallback when the draws ran
+ * out, or a frame kept for coming back with the same faults twice. Only a passing picture used to be
+ * remembered, so no later picture was ever compared with one of these: job 409 scene 3 spent its
+ * draws on near copies and shipped a fallback, and scene 5, drawn from it seven seconds later, came
+ * back as the same man at the same card rack with nothing there to compare it with. Never throws: a
+ * fingerprint that cannot be taken costs nothing.
+ */
+export async function rememberShippedPicture(
+  jobId: number,
+  sceneIndex: number,
+  image: Buffer,
+  square = false,
+  setup?: string,
+  sources?: number[]
+): Promise<void> {
+  try {
+    const [print, thumb] = await Promise.all([pictureFingerprint(image, square), pictureThumb(image, square)]);
+    rememberPicture(jobId, sceneIndex, print, thumb, setup, sources);
+  } catch {
+    /* a fingerprint that cannot be taken never costs the picture */
+  }
 }
 
 /** Redraws a picture gets when it nearly copies another of the same video. */
@@ -328,15 +415,32 @@ const screenTurns = new Map<string, Promise<unknown>>();
 /**
  * Run `fn` after every earlier draw in the same LANE of the same video has finished, so each picture
  * is compared with all the pictures before it in that lane (drawn together, two never see each
- * other). Lanes: "screen" for screen pictures, "thing:<name>" for pictures of one key thing —
- * Frederick's job 375 test drew three near-identical "smoke alarm held, back label facing viewer"
- * pictures at the same moment. Other pictures stay parallel.
+ * other). Lanes (`varietyLane`): "screen" for screen pictures, "from:<scene>" for pictures drawn from
+ * the same memory picture, "thing:<name>" for the other pictures of one key thing — Frederick's job
+ * 375 test drew three near-identical "smoke alarm held, back label facing viewer" pictures at the
+ * same moment. Other pictures stay parallel.
+ *
+ * `maxWaitMs`: wait at most this long for the draws before, then draw anyway — a split panel, which is
+ * awaited against its host scene's own clock (`PANEL_LANE_WAIT_MS`). Every later draw in the lane
+ * still waits for this one AND every draw before it, so none overtakes a draw it was queued behind.
  */
-export function withScreenTurn<T>(jobId: number, fn: () => Promise<T>, lane = "screen"): Promise<T> {
+export function withScreenTurn<T>(
+  jobId: number,
+  fn: () => Promise<T>,
+  lane = "screen",
+  maxWaitMs?: number
+): Promise<T> {
   const key = `${jobId}|${lane}`;
   const before = screenTurns.get(key) ?? Promise.resolve();
-  const mine = before.then(fn, fn);
-  const settled = mine.catch(() => undefined);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const turn =
+    maxWaitMs == null
+      ? before
+      : Promise.race([before, new Promise<void>(r => (timer = setTimeout(r, maxWaitMs)))]).finally(() =>
+          clearTimeout(timer)
+        );
+  const mine = turn.then(fn, fn);
+  const settled = Promise.all([before, mine.catch(() => undefined)]).then(() => undefined);
   screenTurns.set(key, settled);
   void settled.then(() => {
     if (screenTurns.get(key) === settled) screenTurns.delete(key);
@@ -344,9 +448,33 @@ export function withScreenTurn<T>(jobId: number, fn: () => Promise<T>, lane = "s
   return mine;
 }
 
-/** The lane a picture is drawn in (`withScreenTurn`), or null for a picture drawn in parallel. Pure. */
-export function varietyLane(scene: Pick<StoryboardScene, "screenSetup" | "keyThing">): string | null {
+/**
+ * The longest a split panel waits for the draws before it in its lane (`withScreenTurn`). Panels never
+ * waited in a lane: one is awaited against its host scene's own clock (`server/splitPanel.ts`), and
+ * queued behind every picture of its thing — each up to several minutes — it would ship its scene as
+ * the host take alone. So it never saw a picture drawn from the same memory at the same moment: job
+ * 408's panel at scene 4 and scene 5, both drawn from scene 2 once it was made, came back as one
+ * bathroom shot twice. Three minutes lets the draw in front of it — one image and its checks, about
+ * one to two minutes — finish and be remembered, and costs the host clock (25 min, less 3 for the
+ * composite) at most that.
+ */
+export const PANEL_LANE_WAIT_MS = 3 * 60_000;
+
+/**
+ * The lane a picture is drawn in (`withScreenTurn`), or null for a picture drawn in parallel. A
+ * picture drawn from memory goes in the lane of the picture its memory starts from — the earliest of
+ * its references of its OWN thing, else the earliest of them — so pictures drawn from the same
+ * memory are drawn one after another and each is compared with the others (job 408: the toilet's
+ * panel at scene 4 and the bin at scene 5, two key things, were both drawn from scene 2 and drawn at
+ * once, in two lanes). The later pictures of one key thing still share a lane: their own references
+ * all start from that thing's first picture, which they wait for anyway (`memoryFor`). Pure.
+ */
+export function varietyLane(scene: Pick<StoryboardScene, "screenSetup" | "keyThing" | "memoryRefScenes">): string | null {
   if (scene.screenSetup) return "screen";
+  const refs = scene.memoryRefScenes ?? [];
+  const own = refs.filter(r => r.own);
+  const root = (own.length ? own : refs).map(r => r.index).sort((a, b) => a - b)[0];
+  if (root != null) return `from:${root}`;
   const thing = scene.keyThing?.trim().toLowerCase();
   return thing ? `thing:${thing}` : null;
 }

@@ -810,17 +810,38 @@ export async function hasOverlayText(buffer: Buffer): Promise<boolean> {
 const SAME_THING_MODEL = () => process.env.SAME_THING_MODEL || "claude-sonnet-5";
 
 /**
+ * THE SAME LAYOUT IS THE SAME PICTURE (round 13, the review of jobs 408-410). Both side-by-side checks
+ * let two kinds of copy through, as "a different distance" or as "another subject". A punch-in or a
+ * pull-back on one layout: job 410 scene 23 was scene 22's carry-on bag under the same seat, the
+ * bottle in the same mesh pocket, only closer — 18.5 s of one picture, both checks clean — and job 408
+ * scene 5 was scene 4's panel, the same bin beside the same toilet, a little further back. The same
+ * place with a person taken out: job 410 scene 20 was scene 3's seat row, window, curtain and cart in
+ * the same spots with the woman gone. A real new view stays one — one small part filling the frame,
+ * another side or height, or a view so wide the place is most of the picture. Said the same way to
+ * both checks (`NEAR_COPY_SYSTEM`, `JUST_SHOWN_COPY_NOTE`), so the two cannot drift. Pure data.
+ */
+export const SAME_LAYOUT_RULE =
+  "The same layout is the same picture whatever the crop: the same things in the same arrangement, " +
+  "seen from the same side and height, only closer or further back (a punch-in or a pull-back on the " +
+  "same shelf), is a copy — and so is the same place and arrangement with a person or a hand taken out " +
+  "or put in (the same table and chairs with the person who sat there gone). It is a new view only " +
+  "when it shows one small part filling the frame with the rest out of it, the subject from another " +
+  "side or height, or so much more of the place around it that the place is most of the picture.";
+
+/**
  * Would a viewer think the same picture was shown twice? (2026-10-15, the review: "Dale repeats
  * phone-screen pictures that look almost the same".) Asked only of pairs a picture fingerprint
  * flagged (`server/pictureVariety.ts`), since the fingerprint alone cannot tell a near-copy from
- * another picture of the same workshop.
+ * another picture of the same workshop. A tighter or looser crop of one layout, and one layout with a
+ * person taken out, are copies too (`SAME_LAYOUT_RULE`).
  */
 export const NEAR_COPY_SYSTEM =
   "You compare two pictures from the same video. copy: true when a viewer would think the same " +
   "picture was shown twice — the same kind of subject in the same setting, from nearly the same " +
   "spot, distance and framing (two near-identical phone screens on the same bench, the same pile " +
-  "of pieces from the same angle). copy: false when they are clearly different pictures — " +
-  "another subject, another place, or the same subject from a clearly different distance or side. " +
+  `of pieces from the same angle). ${SAME_LAYOUT_RULE} copy: false when they are clearly different ` +
+  "pictures — another subject, another place, or such a new view of the same subject; a person added " +
+  "or taken away does not make another subject. " +
   "One of them may be square, with black bars at its sides (a picture shown beside the host): " +
   "compare what the two pictures show, never the shape of their frames.\n" +
   'Return ONLY JSON: {"copy":true|false,"what":"<what makes them look alike, a few words, or empty>"}';
@@ -1043,12 +1064,16 @@ export function parseSameThingVerdict(
  * let a slightly tighter frame of the same composition through as a new view: job 405 scene 24 was
  * scene 22 "only slightly tighter", job 403 scene 14 scene 10's pipe run a little closer, job 402
  * scene 12 scene 9's stocked galley with "only the camera closer". A real close-up of one part, a
- * wide view, another side or height is still a new view. Pure data.
+ * wide view, another side or height is still a new view.
+ * NOT ONLY "A LITTLE" (round 13): job 410 scene 23, told "a close-up of one small detail … filling the
+ * frame", came back as scene 22's whole carry-on bag a good deal closer, and job 410 scene 28 as the
+ * basket handout of scene 27 with one more passenger in it — both passed this check, which counted only
+ * "a little closer or further back" as a copy. It now says the near-copy check's own rule
+ * (`SAME_LAYOUT_RULE`). Pure data.
  */
 export const JUST_SHOWN_COPY_NOTE =
   "The LEFT photo is shown in the video just before the RIGHT one, so the RIGHT must be a clearly " +
-  "new photo: the same camera angle with the same things in the same arrangement, only a little " +
-  "closer or further back, is a copy.";
+  `new photo. ${SAME_LAYOUT_RULE}`;
 
 /** The question asked with the pair (`scanSameThing`); `justShown` adds `JUST_SHOWN_COPY_NOTE`. Pure. */
 export function sameThingQuestion(thing: string, justShown = false): string {

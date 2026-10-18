@@ -6121,3 +6121,96 @@ describe("a staged redraw never takes what the picture is (the stored films, rou
     expect((await redraw(s)).fields.showSubject).toBe("a wealthy man in a fine off-white toga, standing beside a throne in a hall, seen from behind");
   });
 });
+
+describe("no near copy of the picture a picture was drawn from (round 13, jobs 408-410)", () => {
+  // The rows as the films stored them (local jobs 408-410), and hashes as strings of 64 bits.
+  const ones = (n: number, from = 0) =>
+    Array.from({ length: 64 }, (_, i) => (i >= from && i < from + n ? "1" : "0")).join("");
+  const ref = (index: number, own = true) => ({ index, ...(own ? { own: true as const } : {}) });
+  const thumbOf = async () => {
+    const sharp = (await import("sharp")).default;
+    return sharp({ create: { width: 64, height: 36, channels: 3, background: "#777" } }).jpeg().toBuffer();
+  };
+
+  it("410-23 and 410-28: a punch-in on the picture just shown, or the same handout with one more passenger, is a copy to both checks", async () => {
+    const { NEAR_COPY_SYSTEM, JUST_SHOWN_COPY_NOTE, SAME_LAYOUT_RULE, sameThingQuestion } = await import("./overlayTextScan");
+    expect(SAME_LAYOUT_RULE).toMatch(/only closer or further back .* is a copy/);
+    expect(SAME_LAYOUT_RULE).toMatch(/a person or a hand taken out or put in/);
+    expect(sameThingQuestion("carry-on bag", true)).toContain(SAME_LAYOUT_RULE);
+    expect(JUST_SHOWN_COPY_NOTE).not.toMatch(/only a little closer/);
+    // 410-20: scene 3's seat row with the woman gone is not "another subject".
+    expect(NEAR_COPY_SYSTEM).toContain(SAME_LAYOUT_RULE);
+    expect(NEAR_COPY_SYSTEM).toMatch(/a person added or taken away does not make another subject/);
+    // A picture not shown right before keeps the same-thing check's own rule: a new distance is fine.
+    expect(sameThingQuestion("carry-on bag")).not.toContain(SAME_LAYOUT_RULE);
+  });
+
+  it("410-20 and 409-5: kept small beside the subject, each is laid beside the closest picture it was drawn from", async () => {
+    const { nearCopyRelatives, looksAtClosestRelative } = await import("./longformVideo");
+    const { nearCopyCandidates, rememberPicture } = await import("./pictureVariety");
+    // 410-20: "a small clear plastic cup of orange juice … on a metal beverage cart", drawn from scenes 3 and 16.
+    const juice = {
+      index: 20,
+      keyThing: "beverage cart",
+      memoryView: BACKGROUND_VIEW,
+      memoryRefUrls: ["https://r2/still-src-3.png", "https://r2/still-src-16.png"],
+      memoryRefScenes: [ref(3), ref(16)],
+    } as StoryboardScene;
+    const relatives = nearCopyRelatives(juice);
+    expect(relatives).toEqual({ drawnFrom: [3, 16], keptSmall: true, groupItem: false });
+    expect(looksAtClosestRelative(relatives, juice, false)).toBe(true);
+    const thumb = await thumbOf();
+    rememberPicture(94100, 3, ones(30), thumb);
+    rememberPicture(94100, 16, ones(38, 20), thumb);
+    const zero = ones(0);
+    expect(nearCopyCandidates(94100, 20, zero, undefined, { drawnFrom: [3, 16], lookAtClosest: true })[0].index).toBe(3);
+    // 409-5: "viewed from behind among the rows of cards", drawn from scene 3 (22 bits on the frames).
+    rememberPicture(94090, 3, ones(22), thumb);
+    rememberPicture(94090, 2, ones(33, 20), thumb);
+    expect(nearCopyCandidates(94090, 5, zero, undefined, { drawnFrom: [3, 2] }).map(c => c.index)).toEqual([3]);
+    // A picture drawn from nothing it is near keeps the 20-bit line: neither is looked at.
+    expect(nearCopyCandidates(94090, 5, zero)).toEqual([]);
+  });
+
+  it("the extra look is only the one a picture was owed: none beside a same-thing look, a screen's item photo or a list item's group picture", async () => {
+    const { nearCopyRelatives, looksAtClosestRelative } = await import("./longformVideo");
+    const { SET_ITEM_VIEW, MEMORY_VIEWS } = await import("./pictureMemory");
+    const urls = ["https://r2/still-src-2.png"];
+    // An ordinary memory picture: the same-thing check laid its memory beside it — no second look.
+    const bin = { index: 5, keyThing: "bin", memoryView: MEMORY_VIEWS[1], memoryRefUrls: urls, memoryRefScenes: [ref(2)] } as StoryboardScene;
+    expect(looksAtClosestRelative(nearCopyRelatives(bin), bin, true)).toBe(false);
+    // …but once a redraw took its memory away (drawn from words), the look is owed again.
+    expect(looksAtClosestRelative(nearCopyRelatives(bin), { memoryRefUrls: undefined }, false)).toBe(true);
+    // References of other things only keep the wider line, with no forced look.
+    const others = { ...bin, memoryView: undefined, memoryOthersOnly: true } as StoryboardScene;
+    expect(looksAtClosestRelative(nearCopyRelatives(others), others, false)).toBe(false);
+    const screen = { index: 9, memoryView: SCREEN_ITEM_VIEW, memoryRefUrls: urls, memoryRefScenes: [ref(4)] } as StoryboardScene;
+    expect(nearCopyRelatives(screen).drawnFrom).toEqual([]);
+    expect(looksAtClosestRelative(nearCopyRelatives(screen), screen, false)).toBe(false);
+    const item = { index: 7, listCut: true, memoryView: SET_ITEM_VIEW, memoryRefUrls: urls, memoryRefScenes: [ref(5)] } as StoryboardScene;
+    // Still related to the list's other items (412: "ribs" and "knee" came back alike), never forced.
+    expect(nearCopyRelatives(item)).toEqual({ drawnFrom: [5], keptSmall: false, groupItem: true });
+    expect(looksAtClosestRelative(nearCopyRelatives(item), { memoryRefUrls: undefined }, false)).toBe(false);
+  });
+
+  it("408-4/5: the toilet's panel and the bin, both drawn from scene 2, share one lane; pictures of other memories do not", async () => {
+    const { varietyLane } = await import("./pictureVariety");
+    const panel = { index: 4, hostPresent: true, keyThing: "toilet", memoryRefScenes: [ref(2)] } as StoryboardScene;
+    const bin = { index: 5, keyThing: "bin", memoryRefScenes: [ref(2), ref(3)] } as StoryboardScene;
+    expect(varietyLane(panel)).toBe(varietyLane(bin));
+    // 409: the sympathy card's first picture and the aisle drawn from scene 3 are not one memory.
+    expect(varietyLane({ index: 2, keyThing: "sympathy card" } as StoryboardScene)).not.toBe(varietyLane(bin));
+  });
+
+  it("409-3: a fallback that shipped is remembered, so the next picture drawn from it meets it", async () => {
+    const sharp = (await import("sharp")).default;
+    const { nearCopyCandidates, pictureHash, rememberShippedPicture } = await import("./pictureVariety");
+    const frame = await sharp({ create: { width: 320, height: 180, channels: 3, background: "#5a3c1e" } })
+      .composite([{ input: Buffer.from(`<svg width="320" height="180"><rect x="200" y="0" width="120" height="180" fill="white"/></svg>`), left: 0, top: 0 }])
+      .png()
+      .toBuffer();
+    await rememberShippedPicture(94091, 3, frame, false, undefined, [2]);
+    const far = (await pictureHash(frame)).replace(/./g, (b, i) => (i < 30 ? (b === "1" ? "0" : "1") : b));
+    expect(nearCopyCandidates(94091, 5, far, undefined, { drawnFrom: [3], lookAtClosest: true }).map(c => c.index)).toEqual([3]);
+  });
+});
