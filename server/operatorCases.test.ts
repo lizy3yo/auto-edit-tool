@@ -2481,3 +2481,31 @@ describe("job 400 scene 27: a typed panel is drawn from its own words, not the s
     expect(buildStillPrompt(panel, false, undefined, undefined, true)).toContain(`EXACT LOOK — ${PAPYRUS}.`);
   });
 });
+
+describe("a pearl strand on a dresser is a necklace, not the host (round 9's review, 2026-10-18)", () => {
+  // "strand" alone counted as a person (it was meant for hair), so the pearl-necklace films (jobs 325
+  // and 395) drew the host into pictures of a necklace set down, under lines about anything at all.
+  it("a strand of pearls or beads is never a person; a strand of hair still is", () => {
+    for (const thing of [
+      "a pearl strand on the dresser",
+      "single strand pearl necklace with round ivory pearls on the dressing room table near the window",
+      "a loose strand of pearls caught in the bathroom drain",
+    ])
+      expect(SHOWS_PERSON.test(thing), thing).toBe(false);
+    for (const hair of ["A few strands of gray hair caught in a round brush on the counter.", "stray gray strands catching the window light"])
+      expect(SHOWS_PERSON.test(hair), hair).toBe(true);
+  });
+
+  it("the necklace picture under a line not about the neck keeps nobody in it", () => {
+    const scenes = [
+      pic(1, "Pearls never really go out of style.", "a pearl strand resting inside the open jewelry box"),
+      pic(2, "A single strand sitting right at the collarbone.", "a pearl strand resting inside the open jewelry box"), // job 325 scene 12
+    ];
+    expect(markHostBroll(scenes, { hostLook: "a woman with silver hair" }, "https://x/host.png")).toBe(1);
+    expect(scenes[0].humanPresent).toBeFalsy();
+    expect(scenes[0].brollHostLook).toBeUndefined();
+    // Under a line about the collarbone the piece is still worn by the host (`wornAtTheNeck`).
+    expect(scenes[1].brollHostLook).toBe("a woman with silver hair");
+    expect(scenes[1].showSubject).toMatch(/worn at the host's own neck/);
+  });
+});

@@ -112,9 +112,27 @@ export function withoutMirrors(text: string): string {
 export const WORN_ON_BODY =
   /\bworn (?:on|over|with|under|around|at|high|low|long|open|loose|together)\b|\b(?:sit(?:s|ting)?|rest(?:s|ing)?|l(?:ies|ying)|hang(?:s|ing)?|fall(?:s|ing)?|drap(?:ed|es|ing)) (?:(?:high|low|flat|straight|just|right|well|down) )*(?:on|at|against|across|over|below|above|around) (?:(?:the|her|his|their|a) )?(?:chest(?! of)|shoulders?|waist|hips?|lap|chin|jaw|throat|ankles?|body|bust)\b|\b(?:under|beneath|below) (?:the|her|his|their) chin\b|\b(?:shoes?|boots?|sneakers?|slippers?|sandals?|sleeves?|cuffs?|pant legs?|trouser legs?|coat|jacket)\b[^.,;]{0,50}\b(?:stepping|walking|striding|brushing (?:past|against)|reaching)\b/i;
 
+/** "strand(s)" not followed by "of" something that is not hair ("of pearls", "of yarn", "of lights"). */
+const NOT_A_STRAND_OF_SOMETHING_ELSE = String.raw`(?!\s+of\s+(?!(?:[a-z-]+\s+){0,2}hair\b))`;
+/**
+ * A STRAND that is HAIR, the only strand that is part of a person (2026-10-18, round 9's review):
+ * "strand" counted on its own, so "a pearl strand resting inside the open jewelry box" or "single
+ * strand pearl necklace … on the dressing room table" (the pearl-necklace films, jobs 325 and 395)
+ * read as a person under ANY line and became a host picture — the host drawn into a picture of a
+ * necklace on a dresser. "strands of gray hair" counts through "hair" itself; without that word a
+ * strand is hair only when it is a kind only hair has (stray, flyaway, fallen, shed) or lies where
+ * hair falls (in a brush, a comb, a drain). A strand OF anything else — pearls, beads, yarn, lights —
+ * never counts, and neither does a jewellery "single strand" or "pearl strand".
+ */
+const HAIR_STRAND =
+  String.raw`(?:stray|flyaway|fly-away|fallen|shed)\s+(?:[a-z-]+\s+)?strands?${NOT_A_STRAND_OF_SOMETHING_ELSE}|` +
+  String.raw`strands?${NOT_A_STRAND_OF_SOMETHING_ELSE}(?=[^.;]{0,40}?\b(?:in|on|caught in|stuck in|around)\s+(?:(?:a|an|the|her|his|their|my|your)\s+)?(?:[a-z-]+\s+){0,2}(?:brush|hairbrush|comb|drain)\b)`;
+
 /** The person words themselves (the notes are under `SHOWS_PERSON`). */
-const PERSON_WORDS =
-  /\b(hands?|fingers?|fingertips?|host|she|he|her|his|herself|himself|someone|a person|a woman|a man|wearing|worn by|collarbone|neck|wrists?|earlobes?|held (?:up|out|near|against|over|to|above|beside|in front)|hold(?:s|ing) (?:up|out)|in use|scalp|skin|nails|fingernails|forehead|cheeks?|eyelashes|eyebrows?|hairline|strands?|hair(?!\s*(?:dryer|brush|clip|tie|spray|band|pin|comb|product|net|cut(?:ting)? scissors)))\b/i;
+const PERSON_WORDS = new RegExp(
+  String.raw`\b(hands?|fingers?|fingertips?|host|she|he|her|his|herself|himself|someone|a person|a woman|a man|wearing|worn by|collarbone|neck|wrists?|earlobes?|held (?:up|out|near|against|over|to|above|beside|in front)|hold(?:s|ing) (?:up|out)|in use|scalp|skin|nails|fingernails|forehead|cheeks?|eyelashes|eyebrows?|hairline|${HAIR_STRAND}|hair(?!\s*(?:dryer|brush|clip|tie|spray|band|pin|comb|product|net|cut(?:ting)? scissors)))\b`,
+  "i"
+);
 
 /**
  * The person's OWN face or a part of it, with a possessive ("her face", "your lips", "under the
@@ -888,9 +906,15 @@ export function namesOnlyAnimal(text: string): boolean {
   return !!text.match(ANIMAL) && !namedPeople(text) && !SHOWS_PERSON.test(withoutAnimalPronouns(text));
 }
 
-/** Words naming a part of the body (not a thing used on it — a hair dryer is a thing). */
-export const BODY_PART_WORDS =
-  /\b(?:scalp|skin|nails|fingernails|forehead|cheeks?|eyelashes|eyebrows?|hairline|strands?|hair(?!\s*(?:dryer|brush|clip|tie|spray|band|pin|comb|product|net)))\b/i;
+/**
+ * Words naming a part of the body (not a thing used on it — a hair dryer is a thing, and a strand
+ * is one only when it is hair, `HAIR_STRAND`: a split panel of "a pearl strand on the dresser" is
+ * not about the host's body).
+ */
+export const BODY_PART_WORDS = new RegExp(
+  String.raw`\b(?:scalp|skin|nails|fingernails|forehead|cheeks?|eyelashes|eyebrows?|hairline|${HAIR_STRAND}|hair(?!\s*(?:dryer|brush|clip|tie|spray|band|pin|comb|product|net)))\b`,
+  "i"
+);
 
 /** A description asking for a body part OFF the body: "a lock of hair laid across a towel". */
 export const DETACHED_BODY_PART =
