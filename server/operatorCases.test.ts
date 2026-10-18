@@ -2178,3 +2178,17 @@ describe("a quote card signed with the host's name is the host's own words (roun
     ).toBeUndefined();
   });
 });
+
+describe("a quote the host introduces as her own saying stays a quote (round 10 graphics review, 2026-10-18)", () => {
+  // The A5 check above first read "always"/"just" as a command wherever it stood, so "Like I always
+  // say," — the host introducing her OWN saying — read as handing the viewer a line, and "please" as a
+  // verb read as a request. Both refused the very line a Quote is for; job 399 stays refused.
+  it("'Like I always say, \"…\"' and 'You can't please everyone, so why try?' pass; job 399 is still refused", async () => {
+    const { notTheHostsWords } = await import("../graphics/src/plan/planner");
+    expect(notTheHostsWords("Measure twice, cut once.", "Like I always say,", true)).toBeUndefined();
+    expect(notTheHostsWords("Slow is smooth, and smooth is fast.", "As I always tell them:", true)).toBeUndefined();
+    expect(notTheHostsWords("You can't please everyone, so why try?")).toBeUndefined();
+    expect(notTheHostsWords("Could I keep the rest of the can, please?", "So when the cart reaches your row, speak up.", true)).toBeDefined();
+    expect(notTheHostsWords("Could I see the one in the window?", "So always ask:")).toBeDefined();
+  });
+});

@@ -673,3 +673,46 @@ describe("a quote is the host's own words, never a line the viewer is told to sa
     expect(out.rounds[0].problems).toEqual([]);
   });
 });
+
+describe("a quote led in by the host's own 'I always say' is the host's; 'please' as a verb asks nothing (A5 review)", () => {
+  // The first build read "always"/"just" as a command wherever it stood, so "Like I always say," — the
+  // host introducing her OWN saying, the line a Quote is for — read as handing the viewer a line, and a
+  // saying the script puts in quotation marks after it was refused. And any "please" before a "?" read
+  // as a request, so a maxim with the VERB ("You can't please everyone, so why try?") was refused too.
+  it("a speech verb after the host as its subject, adverb or not, hands nothing over", () => {
+    expect(notTheHostsWords("Measure twice, cut once.", "Like I always say,", true)).toBeUndefined();
+    expect(notTheHostsWords("Measure twice, cut once.", "Here's what I always say:", true)).toBeUndefined();
+    expect(notTheHostsWords("Slow is smooth, and smooth is fast.", "As I always tell them:", true)).toBeUndefined();
+    expect(notTheHostsWords("Why would I rush a good board?", "And I always ask:")).toBeUndefined();
+    expect(notTheHostsWords("Thanks for the reminder, but I'll wait.", "And then I just say:", true)).toBeUndefined();
+  });
+
+  it("the same adverbs on a command at the start of a clause still hand the viewer a line", () => {
+    expect(notTheHostsWords("Could I see the one in the window?", "So always ask:")).toMatch(/hands it to the viewer/);
+    expect(notTheHostsWords("Could I see the one in the window?", "When they come by, just ask.")).toMatch(/hands it to the viewer/);
+    expect(notTheHostsWords("Could I see the one in the window?", "Why not just ask?")).toMatch(/hands it to the viewer/);
+    expect(notTheHostsWords("Could I see the one in the window?", "You can simply ask the clerk.")).toMatch(/hands it to the viewer/);
+    expect(notTheHostsWords("Can we get the bigger one?", "And then ask.")).toMatch(/hands it to the viewer/);
+  });
+
+  it("'please' as a verb is no request; the courtesy word still is", () => {
+    expect(notTheHostsWords("You can't please everyone, so why try?")).toBeUndefined();
+    expect(notTheHostsWords("We want to please everyone, and that is the trap.")).toBeUndefined();
+    expect(notTheHostsWords("Can you please everyone and still keep yourself?")).toBeUndefined();
+    expect(notTheHostsWords("You cannot please everyone.", "So tell them.")).toBeUndefined();
+    expect(notTheHostsWords("Could you please hold it for a day?")).toMatch(/request to someone/);
+    expect(notTheHostsWords("We'd like the window seats, please.")).toMatch(/request to someone/);
+    expect(notTheHostsWords("Please check your alarms tonight.", "So tell them.")).toMatch(/hands it to the viewer/);
+  });
+
+  it("planGraphics keeps a quoted saying after 'Like I always say,' — the script's quotation marks are the host's own", async () => {
+    const words = [...W("Like I always say,", 10), ...W("Measure twice, cut once.", 11.6), ...W("Then the board is ready.", 14)];
+    const film = { scenes: [scene(4, 9.5, 16, { scriptText: 'Like I always say, "Measure twice, cut once." Then the board is ready.' })] };
+    expect(quotedInScript(film, 11.6, 12.5, "Measure twice, cut once.")).toBe(true);
+    const quote: CueSpec = { id: "measure-quote", template: "Quote", start: "Measure twice, cut once", startPad: -0.15, end: "cut once.", endPad: 0.3, props: { quote: { text: "Measure twice, cut once.", words: true }, author: "The Host" } };
+    const ask = async () => JSON.stringify({ cues: [quote] });
+    const out = await planGraphics({ words, film, ask, ensureIcon: async () => true });
+    expect(out.rounds[0].problems).toEqual([]);
+    expect(out.cues.map(c => c.id)).toEqual(["measure-quote"]);
+  });
+});

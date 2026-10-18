@@ -320,11 +320,15 @@ export function namesTheDanger(text: string): boolean {
  * a subject is the host speaking ("here's what I tell everyone who asks"), and one followed by what
  * it is about hands over nothing (Dale's job 389: "…and tell me in the comments which of the three
  * sells best where you live." before his own signed "Build it well, price it honest, …").
- * (Joined from parts: where the command starts, the verb, to whom, how.)
+ * An adverb is part of the COMMAND only at the start of a clause ("Just ask:", "so always ask", "why
+ * not just ask"): after a subject it is the host telling what they do themselves — "Like I always say,"
+ * / "As I always tell them:" lead into the host's OWN saying, the very line a Quote is for.
+ * (Joined from parts: where the command starts, its adverbs, the verb, to whom, how.)
  */
 const HANDS_A_LINE = new RegExp(
   [
-    "(?:^|[,;:]\\s*|\\b(?:so|then|and|just|simply|always|politely|nicely|kindly|instead|now|you (?:can|could|should|might|may|will|just))\\s+)",
+    "(?:^|[,;:]\\s*|\\b(?:so|then|and|now|instead|why not)\\s+|\\byou (?:can|could|should|might|may|will|just)\\s+)",
+    "(?:(?:just|simply|always|politely|nicely|kindly|instead|now|then)\\s+)*",
     "(?:speak|pipe up|say|ask|tell|request|call out|try saying|try asking|go with)",
     "(?: (?:to )?(?:them|him|her|someone|somebody|anyone|anybody|(?:the|your|a|an) [a-z']+(?: [a-z']+)?))?",
     "(?: (?:up|out|this|it|that|something like this|something like|like this|like so|for it|nicely|politely|kindly|plainly|simply|directly|out loud|aloud|clearly|instead|first|again))*$",
@@ -332,14 +336,21 @@ const HANDS_A_LINE = new RegExp(
 );
 /** A REQUEST TO SOMEONE, whoever says it: a question asked with "please" (job 399's "Could I keep the
  * rest of the can, please?"), "would you mind…", "excuse me…", or wanting something with "please"
- * ("I'd like the aisle seat, please."). Never the host's own saying. */
-const A_REQUEST = /\bplease\b.*\?$|^(?:would|do) you mind\b|^(?:excuse|pardon) me\b|^(?:i|we)(?:'d| would|'ll| will)? (?:like|love|take|have|want|need|prefer)\b.*\bplease\b/;
+ * ("I'd like the aisle seat, please."). Never the host's own saying. The "please" is the courtesy word
+ * (`asksPolitely`), never the verb. */
+const A_REQUEST = /^(?:would|do) you mind\b|^(?:excuse|pardon) me\b/;
+const WANTS_SOMETHING = /^(?:i|we)(?:'d| would|'ll| will)? (?:like|love|take|have|want|need|prefer)\b/;
+/** "please" as a VERB — to please someone — asks nothing: "You can't please everyone, so why try?" and
+ * "We want to please everyone, and that is the trap." are a host's own sayings. */
+const PLEASE_AS_VERB =
+  /\b(?:to|can't|cannot|can not|couldn't|won't|never|trying to|try to)\s+please\b|\bplease\s+(?:everyone|everybody|anyone|anybody|nobody|no one|people|others|them|him|her|yourself|myself|ourselves|themselves|the (?:crowd|customers?|buyers?|people))\b/g;
+const asksPolitely = (q: string) => /\bplease\b/.test(q.replace(PLEASE_AS_VERB, ""));
 /** A line that sounds SAID TO SOMEONE, read once the words before it hand the viewer a line: a
- * question in the first person ("Can we get the bigger one?"), a word of asking or thanks, or wanting
- * something ("I'll take the whole jar."). The host's own question to the viewer ("What's the worst
- * they can say?") and the host's own advice ("Nobody minds being asked twice.") have none of these:
- * after "speak up" they are still the host's. */
-const SAID_TO_SOMEONE = /\b(?:i|i'm|i'd|i'll|i've|me|my|we|we're|we'd|we'll|us|our)\b.*\?$|\b(?:please|thanks|thank you|excuse me|pardon me)\b|^(?:i|we)(?:'d| would|'ll| will)? (?:like|love|take|have|want|need|prefer)\b/;
+ * question in the first person ("Can we get the bigger one?"), a word of asking (`asksPolitely`) or
+ * thanks, or wanting something ("I'll take the whole jar.", `WANTS_SOMETHING`). The host's own question
+ * to the viewer ("What's the worst they can say?") and the host's own advice ("Nobody minds being asked
+ * twice.") have none of these: after "speak up" they are still the host's. */
+const SAID_TO_SOMEONE = /\b(?:i|i'm|i'd|i'll|i've|me|my|we|we're|we'd|we'll|us|our)\b.*\?$|\b(?:thanks|thank you|excuse me|pardon me)\b/;
 
 /**
  * Why a Quote's line is NOT the host's own statement — words the narration hands the viewer to say
@@ -350,9 +361,10 @@ const SAID_TO_SOMEONE = /\b(?:i|i'm|i'd|i'll|i've|me|my|we|we're|we'd|we'll|us|o
 export function notTheHostsWords(quote: string, before = "", quoted = false): string | undefined {
   const norm = (s: string) => s.trim().toLowerCase().replace(/[’‘]/g, "'").replace(/[“”]/g, '"').replace(/\s+/g, " ");
   const q = norm(quote).replace(/^"+|"+$/g, "").trim();
-  if (A_REQUEST.test(q)) return "it is a request to someone, not a saying of the host's";
+  const polite = asksPolitely(q);
+  if (A_REQUEST.test(q) || (polite && (/\?$/.test(q) || WANTS_SOMETHING.test(q)))) return "it is a request to someone, not a saying of the host's";
   const lead = norm(before).replace(/[\s"'.,;:!?…-]+$/, "");
-  if (HANDS_A_LINE.test(lead) && (quoted || /^"/.test(norm(quote)) || SAID_TO_SOMEONE.test(q))) {
+  if (HANDS_A_LINE.test(lead) && (quoted || /^"/.test(norm(quote)) || polite || WANTS_SOMETHING.test(q) || SAID_TO_SOMEONE.test(q))) {
     const tail = lead.split(" ").slice(-3).join(" ");
     return `the narrator hands it to the viewer to say ("…${tail}")`;
   }
