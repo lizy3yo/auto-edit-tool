@@ -10347,6 +10347,33 @@ describe("a host picture that drew the face is drawn again turned away (round 11
     expect(chin.hostTurnedAway).toBeUndefined();
   });
 
+  it("a picture of a piece worn at the neck is drawn again as it was: from behind, the piece would be gone", async () => {
+    const { HOST_FRAMING_CLAUSE, HOST_TURNED_AWAY_CLAUSE } = await import("./longformVideo");
+    const [a, b] = await Promise.all([pngOf("#f11"), pngOf("#f22")]);
+    hostSays({ same: true, face: true, what: "face on, smiling" }, { same: true, face: false });
+    // Job 362 scene 9: the pearl strand at the collarbone is what the picture is about.
+    const pearls = {
+      ...reader(),
+      index: 9,
+      scriptText: "It scatters it, and soft even light is the kindest thing you can put near mature skin.",
+      showSubject:
+        "a woman in a plain navy crewneck sweater with a cream pearl strand at her collarbone, walking down a bright grocery aisle carrying a basket",
+      visualPrompt:
+        "A person in a plain navy crewneck sweater wearing a cream pearl strand at the collarbone and flat brown loafers, walking past bright grocery store shelves with a basket.",
+      brollHostLook: "a woman over sixty with short silver hair",
+    };
+    const genImage = drawsOf(a, b);
+    const out = await generateValidatedStill(pearls, 4, undefined, genImage);
+    expect(genImage).toHaveBeenCalledTimes(2);
+    const [p1, p2] = genImage.mock.calls.map(c => c[0].prompt as string);
+    expect(p1).toContain(HOST_FRAMING_CLAUSE);
+    expect(p1).not.toContain(HOST_TURNED_AWAY_CLAUSE);
+    expect(p2).toBe(p1);
+    expect(pearls.hostTurnedAway).toBeUndefined();
+    expect(pearls.pictureChecks.map((c: any) => c.flags)).toEqual([["face shown"], []]);
+    expect(out.buffer.equals(b)).toBe(true);
+  });
+
   it("a stranger's face is both on the record, and turned away on the redraw", async () => {
     const { HOST_TURNED_AWAY_CLAUSE } = await import("./longformVideo");
     const [a, b] = await Promise.all([pngOf("#e11"), pngOf("#e22")]);

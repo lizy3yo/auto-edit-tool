@@ -112,7 +112,8 @@ export const HOST_IDENTITY_REDRAWS = 2;
  * own face (`hostFaceShown`), the face is not shown. Job 401 scene 20 (the host reading at a desk,
  * face on), job 406 scene 14 (smiling into the lens, phone at the ear) and job 407 scene 27 (a
  * full-body axe swing, the face in three-quarter view) all shipped as "the same person". A miss is
- * drawn again — a drawn face from behind or the side (`turnAway`, `turnHostAway`) — and counts with
+ * drawn again — a drawn face from behind or the side (`turnAway`, `turnHostAway`) unless its framing
+ * is settled otherwise (`mayTurnHostAway`: a chin line, a piece worn at the neck) — and counts with
  * the identity misses: past `HOST_IDENTITY_REDRAWS`, or on the last attempt, the picture is drawn with
  * nobody in it, which always gets its turn — a face or a stranger never ships, and the scene never
  * fails for it. Pure.
@@ -466,6 +467,7 @@ import {
   hostTurnedAway,
   looksCutOff,
   markHostBroll,
+  mayTurnHostAway,
   REAL_HOLDER,
   onTheBody,
   showsSomeoneElse,
@@ -10263,8 +10265,10 @@ async function drawValidatedStill(
               ? `Still image shows the host's face (${who.what})`
               : `Still image shows someone other than the host (${who.what})`;
           // The face is never asked for again — on this redraw or a later Regenerate. A chin line
-          // keeps its lips cut: the chin is what its line is about (`hostTurnedAway`).
-          if (move.turnAway && !hostLipsCut(scene)) {
+          // keeps its lips cut (the chin is what its line is about) and a piece worn at the neck
+          // keeps the front it sits on (`mayTurnHostAway`): each is drawn again as it was.
+          const turn = move.turnAway && mayTurnHostAway(scene);
+          if (turn) {
             scene.hostTurnedAway = true;
             prompt = turnHostAway(prompt);
           }
@@ -10282,7 +10286,7 @@ async function drawValidatedStill(
             `[Longform] scene ${scene.index} shows ${move.why === "face" ? "the host's face" : "someone other than the host"} (${who.what}) → ` +
               (personFree
                 ? "drawing it with nobody in it"
-                : move.turnAway
+                : turn
                   ? "drawing them again from behind or the side"
                   : "drawing them again from the host photo")
           );

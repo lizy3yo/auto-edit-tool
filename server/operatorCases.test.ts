@@ -3650,3 +3650,108 @@ describe("the host's face is never drawn in a host picture (round 11's review, j
     expect(thing.hostTurnedAway).toBeUndefined();
   });
 });
+
+describe("a pose turns the host away only when it is one: a screen, a ladder and a worn piece are not (round 11's review of the face check)", () => {
+  // The turn-away words read on every host picture of the local films (345 jobs, 1,459 host pictures)
+  // turned 21 of them; 14 were not poses at all — a phone used as a SCREEN, a stepladder's feet, a
+  // pearl strand or a long chain the picture is about. Each would have been told to show the body
+  // from behind: a hands-at-the-glass close-up drawn with the head in it, the necklace hidden.
+  const LOOK = "A woman over sixty with fair skin, short silver hair, wearing a plain navy crewneck sweater";
+  const hostPic = (index: number, scriptText: string, showSubject: string, visualPrompt: string) =>
+    pic(index, scriptText, showSubject, {
+      visualPrompt,
+      humanPresent: true,
+      brollHostLook: LOOK,
+      brollHostRef: "https://x/host.png",
+    });
+
+  it("a phone in use as a screen is not a call; a person on it, or a phone at the ear, is", async () => {
+    const { turnAwayPose } = await import("./hostLook");
+    for (const screen of [
+      // job 376 scene 36
+      "hands typing on a phone beside a removed round white smoke alarm lying face down on a table",
+      // job 306 scene 26
+      "a finger tapping an ad picture of the cutting board on a web page on a phone",
+      // job 306 scene 27
+      "A finger switching off a toggle on a white shop settings screen on a phone with orange accents.",
+      // job 349 scene 6
+      "Bare hands holding a phone with a blue header bar. Screen displays a marketplace listing page with a photo of a warm walnut bookcase, grey text bars below. Hands already in frame, fingers visible on the phone.",
+      // job 372 scene 8
+      "Phone resting flat on a wooden workbench showing a buy-and-sell app screen, bare weathered hands visible at forearms only, fingers positioned on the phone as if scrolling or tapping.",
+      "the photo of the quilt on the phone screen",
+    ])
+      expect(turnAwayPose(screen), screen).toBe(false);
+    for (const call of [
+      "the host on a phone call beside the garage workbench", // job 406 scene 14
+      // job 352 scene 70
+      "A phone held in bare weathered hands, pressed to the ear making a call. Rough lumber racks and stacked boards visible beside and behind.",
+      "the host on the phone beside the workbench",
+      "the host talking quietly on the phone by the kitchen window",
+      "she is on the phone at the counter",
+      "the handset tucked against her ear while she writes",
+    ])
+      expect(turnAwayPose(call), call).toBe(true);
+  });
+
+  it("a stepladder's feet are not a stance; a person's planted feet or boots are", async () => {
+    const { turnAwayPose } = await import("./hostLook");
+    for (const ladder of [
+      // job 276 scene 17
+      "Bare weathered hands gripping a round white plastic smoke alarm mounted on a pale ceiling, fingers positioned to unscrew or twist it free, stepladder visible below with its aluminum frame and black rubber feet planted on beige hallway carpet.",
+      // job 367 scene 16
+      "Bare hands in frame positioning an aluminum stepladder with three rungs beneath a hallway ceiling at night, feet planted on pale flooring.",
+      "a camera tripod with spread legs on the lawn",
+    ])
+      expect(turnAwayPose(ladder), ladder).toBe(false);
+    for (const stance of [
+      "Bare feet in work boots planted well back from a wide flat-headed broadaxe held at rest beside a felled poplar log in a clearing.", // job 407 scene 27
+      "the host at the bench, her feet planted shoulder-width apart",
+      "the host with planted boots at the edge of the woodpile",
+    ])
+      expect(turnAwayPose(stance), stance).toBe(true);
+  });
+
+  it("a picture of a piece worn at the neck faces the camera, whatever the pose; any other host pose turns away", async () => {
+    const { hostTurnedAway, mayTurnHostAway } = await import("./hostLook");
+    // Job 362 scene 9: the pearls are what the picture is about, and they sit on the front.
+    const pearls = hostPic(
+      9,
+      "It scatters it, and soft even light is the kindest thing you can put near mature skin.",
+      "a woman in a plain navy crewneck sweater with a cream pearl strand at her collarbone, walking down a bright grocery aisle carrying a basket",
+      "A person in a plain navy crewneck sweater wearing a cream pearl strand at the collarbone and flat brown loafers, walking past bright grocery store shelves with a basket."
+    );
+    // Job 378 scene 17: the long chain down the front of the body.
+    const chain = hostPic(
+      17,
+      "Number three is the long chain, twenty-eight to thirty-two inches. A long unbroken vertical line makes a body look longer.",
+      "full-length view of a woman with a long gold chain hanging past her chest in an unbroken vertical line",
+      "Bare hands adjusting a long thin gold chain down the front of a neutral turtleneck sweater in a bright dressing room, the chain hanging in an unbroken vertical line past the chest."
+    );
+    for (const s of [pearls, chain]) {
+      expect(mayTurnHostAway(s), s.showSubject).toBe(false);
+      expect(hostTurnedAway(s), s.showSubject).toBe(false);
+      // Not even after a drawing showed the face: the redraw keeps the front the piece sits on.
+      expect(hostTurnedAway({ ...s, hostTurnedAway: true }), s.showSubject).toBe(false);
+      const prompt = buildStillPrompt(s);
+      expect(prompt, s.showSubject).toContain(HOST_FRAMING_CLAUSE);
+    }
+    // The same walk with no piece worn at the neck turns away (job 373 scene 17's coat in an aisle).
+    const coat = hostPic(
+      17,
+      "and a good coat does the rest.",
+      "a dark wool knee-length coat worn by someone walking down a softly lit grocery aisle past steel shelving and produce",
+      "A dark wool knee-length coat moving down a softly lit grocery aisle past steel shelving with plain boxes and produce."
+    );
+    expect(mayTurnHostAway(coat)).toBe(true);
+    expect(hostTurnedAway(coat)).toBe(true);
+    // A phone used as a screen keeps the two framings (job 376 scene 36).
+    const typing = hostPic(
+      36,
+      "Then you write the date down.",
+      "hands typing on a phone beside a removed round white smoke alarm lying face down on a table",
+      "Bare hands typing on a smartphone beside a round white smoke alarm lying face down on a table."
+    );
+    expect(hostTurnedAway(typing)).toBe(false);
+    expect(buildStillPrompt(typing)).toContain(HOST_FRAMING_CLAUSE);
+  });
+});

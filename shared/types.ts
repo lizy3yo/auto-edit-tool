@@ -629,8 +629,8 @@ export interface StoryboardScene {
    * A drawing of this host picture showed the face (`scanSameHost`'s `face`), so every later drawing
    * of it — the redraw, and a Regenerate — is framed from behind or the side only
    * (`HOST_TURNED_AWAY_CLAUSE`, `hostTurnedAway` in server/hostLook.ts), never the "either" framing
-   * the model ignored. Never acted on for a chin line's lips-cut picture or a step on the host's own
-   * face.
+   * the model ignored. Never set or acted on for a chin line's lips-cut picture, a step on the host's
+   * own face, or a picture of a piece worn at the neck (`mayTurnHostAway`).
    */
   hostTurnedAway?: true;
   /**
