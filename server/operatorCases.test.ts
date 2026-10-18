@@ -2351,25 +2351,25 @@ describe("the bridge into a list is a group picture only when one photograph can
   });
 });
 
-describe("job 400: the style bible keeps its world when one sentence names the essay as a thing", async () => {
+describe("job 400: the style bible keeps its world when it mentions books", async () => {
   const { bibleWithoutPrintedMatter, brollDepictsBook } = await import("./longformVideo");
-  it("the Rome places stay in the bible, only the printed-matter prop sentence goes", () => {
+  it("the home base and the Rome places stay in the bible, only the clause about books goes", () => {
     // The film's warning was "Style bible depicted printed matter — dropped": the whole world went,
-    // and the Rome pictures came back as glossy costume-drama stills. The bible's shape, not its
-    // stored words (it was never stored).
+    // and the Rome pictures came back as glossy costume-drama stills. This is its real bible, as
+    // the server logged it on the rehearsal run (the job never stored it).
     const bible =
-      "Home base: a quiet modern kitchen table at night in a small town, where a man past sixty sits with coffee. " +
-      "The script travels to: a doctor's waiting room, a church pew, and first-century Rome — a senator's marble villa, " +
-      "grain warehouses at the port. Recurring props: a worn paperback of the essay, a wall calendar. " +
-      "The tone is unhurried and reflective.";
+      "Home base: a quiet home office or study in a temperate climate during autumn or early winter, where a man in his sixties sits with books and notes about Stoic philosophy. " +
+      "The video travels to: a pharmacy greeting card aisle on a Tuesday morning, a parking lot, a kitchen table at two in the morning, a Roman senator's study two thousand years ago (imagined through period objects and spaces), and a weekend or evening moment where a phone is held toward a screen corner. " +
+      "Recurring materials: sympathy cards, birthday cards,";
     const r = bibleWithoutPrintedMatter(bible);
-    expect(r.bible).toBe(
-      "Home base: a quiet modern kitchen table at night in a small town, where a man past sixty sits with coffee. " +
-        "The script travels to: a doctor's waiting room, a church pew, and first-century Rome — a senator's marble villa, " +
-        "grain warehouses at the port. The tone is unhurried and reflective."
-    );
+    expect(r.bible).toMatch(/^Home base: a quiet home office or study in a temperate climate during autumn or early winter\. /);
+    expect(r.bible).toContain("a Roman senator's study two thousand years ago (imagined through period objects and spaces)");
+    expect(r.bible).not.toMatch(/books|Stoic/);
     expect(brollDepictsBook(r.bible!)).toBe(false);
-    expect(r.warning).toMatch(/^Style bible: 1 sentence depicting printed matter left out, the rest kept \(Recurring props:/);
+    expect(r.warning).toBe(
+      "Style bible: printed matter left out, the rest kept " +
+        "(where a man in his sixties sits with books and notes about Stoic philosophy)"
+    );
     // A bible with no printed matter (job 399's flight cabin) is untouched and says nothing.
     const cabin =
       "Home base: the interior cabin of a commercial aircraft in flight. Time of year is unspecified; the flight crosses U.S. airspace mid-continent.";

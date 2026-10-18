@@ -7744,17 +7744,71 @@ export function brollDepictsBook(text: string): boolean {
 const DIRECTION_SENTENCE_BREAK = /(?<=[.!?]["'”’)\]]?)\s+(?=["'“‘(\[]?[A-Z0-9])/;
 
 /**
- * Direction text (a style bible or a beat) with only its PRINTED-MATTER sentences taken out — the
- * ones the book guard (`brollDepictsBook`) reads as a book, cover, page or a writer's work as an
- * object. The guard used to drop the WHOLE bible on any such mention: job 400 was about an essay a
- * Roman wrote, its bible was thrown away ("Style bible depicted printed matter — dropped"), and
- * with no shared world the Rome pictures came back as glossy costume-drama stills beside a film of
- * plain phone snapshots. One prop sentence naming the essay as a thing must not cost the home base,
- * the places the script travels to and the tone. Text with nothing to drop comes back as it was,
- * byte for byte; what is kept is re-checked whole, and anything still reading as print is dropped
- * entirely (never trust the split). Pure — unit-tested.
+ * One sentence's comma- and semicolon-separated parts, each with the separator before it ("" for
+ * the first). Only a mark FOLLOWED BY A SPACE separates, so "$10,000" stays whole, and nothing
+ * inside brackets does, so "(imagined through period objects, and spaces)" stays one part.
  */
-export function withoutPrintedMatterSentences(text: string): {
+function directionParts(sentence: string): { sep: string; text: string }[] {
+  const parts: { sep: string; text: string }[] = [];
+  let depth = 0;
+  let start = 0;
+  let sep = "";
+  for (let i = 0; i < sentence.length; i++) {
+    const c = sentence[i];
+    if (c === "(" || c === "[") depth++;
+    else if ((c === ")" || c === "]") && depth > 0) depth--;
+    else if (depth === 0 && (c === "," || c === ";") && sentence[i + 1] === " ") {
+      parts.push({ sep, text: sentence.slice(start, i) });
+      sep = `${c} `;
+      start = i + 2;
+      i++;
+    }
+  }
+  parts.push({ sep, text: sentence.slice(start) });
+  return parts;
+}
+
+/**
+ * A printed-matter sentence with only its printed-matter PARTS taken out, or null when it must go
+ * whole. Job 400's real bible opened "Home base: a quiet home office or study in a temperate
+ * climate during autumn or early winter, where a man in his sixties sits with books and notes
+ * about Stoic philosophy." — the books ride in a trailing ", where …" clause, the shape every
+ * stored bible's home base has (jobs 397-399), so dropping the whole sentence cost the film its
+ * home base for one clause. The FIRST part carries what the sentence is about (its label and
+ * subject): when that is the print, the sentence goes whole, so nothing is left as a dangling
+ * modifier ("Home base: under a window."). A later part naming print goes on its own — a trailing
+ * clause, or a list item ("Recurring props: sympathy cards, a clock, a book, a phone." keeps the
+ * cards, the clock and the phone). What is kept is re-checked.
+ */
+function withoutPrintedParts(
+  sentence: string
+): { kept: string; dropped: string[] } | null {
+  const body = sentence.replace(/[.!?]+$/, "");
+  const end = sentence.slice(body.length);
+  const parts = directionParts(body);
+  if (parts.length < 2 || brollDepictsBook(parts[0].text)) return null;
+  const keep = parts.filter((p, i) => i === 0 || !brollDepictsBook(p.text));
+  if (keep.length === parts.length) return null; // the print spans parts — no part to single out
+  const kept =
+    keep.map((p, i) => (i === 0 ? p.text : p.sep + p.text)).join("").trim() + end;
+  if (brollDepictsBook(kept)) return null;
+  const dropped = parts.filter(p => !keep.includes(p)).map(p => p.text.trim());
+  return { kept, dropped };
+}
+
+/**
+ * Direction text (a style bible or a beat) with only its PRINTED MATTER taken out — the sentences,
+ * or the parts of one (`withoutPrintedParts`), that the book guard (`brollDepictsBook`) reads as a
+ * book, cover, page or a writer's work as an object. The guard used to drop the WHOLE bible on any
+ * such mention: job 400 was about an essay a Roman wrote, its bible was thrown away ("Style bible
+ * depicted printed matter — dropped"), and with no shared world the Rome pictures came back as
+ * glossy costume-drama stills beside a film of plain phone snapshots. A mention of books must not
+ * cost the home base, the places the script travels to and the tone. Text with nothing to drop
+ * comes back as it was, byte for byte; what is kept is re-checked whole, and anything still
+ * reading as print is dropped entirely (never trust the split) — so this never returns text the
+ * guard flags, which is what the old whole-drop promised. Pure — unit-tested.
+ */
+export function withoutPrintedMatter(text: string): {
   kept: string;
   dropped: string[];
 } {
@@ -7767,12 +7821,21 @@ export function withoutPrintedMatterSentences(text: string): {
     .filter(Boolean);
   const kept: string[] = [];
   const dropped: string[] = [];
-  for (const s of sentences) (brollDepictsBook(s) ? dropped : kept).push(s);
-  if (!dropped.length) return { kept: src, dropped };
+  for (const s of sentences) {
+    if (!brollDepictsBook(s)) {
+      kept.push(s);
+      continue;
+    }
+    const partly = withoutPrintedParts(s);
+    if (partly) {
+      kept.push(partly.kept);
+      dropped.push(...partly.dropped);
+    } else dropped.push(s);
+  }
+  const all = { kept: "", dropped: sentences.length ? sentences : [src] };
+  if (!dropped.length) return brollDepictsBook(src) ? all : { kept: src, dropped };
   const rest = kept.join(" ");
-  return brollDepictsBook(rest)
-    ? { kept: "", dropped: sentences }
-    : { kept: rest, dropped };
+  return brollDepictsBook(rest) ? all : { kept: rest, dropped };
 }
 
 /** What a style bible with nothing left after the printed-matter sentences says on the job. */
@@ -7780,25 +7843,22 @@ export const BIBLE_ALL_PRINT_WARNING =
   "Style bible depicted printed matter — dropped; b-roll world consistency degraded";
 
 /**
- * A derived style bible made safe for the prompts: its printed-matter sentences left out and the
- * rest kept, with the job warning that says so — the left-out words in a parenthesis, which the
- * card moves behind "Details" when long (`groupJobWarnings`). A bible that is nothing but print is
- * dropped with the old warning. Shared by both derivations (before the storyboard, and the late
- * fallback in the enhance stage) so they cannot disagree. Pure — unit-tested.
+ * A derived style bible made safe for the prompts: its printed matter left out and the rest kept,
+ * with the job warning that says so — the left-out words in a parenthesis, which the card moves
+ * behind "Details" when long (`groupJobWarnings`). A bible that is nothing but print is dropped
+ * with the old warning. Shared by both derivations (before the storyboard, and the late fallback
+ * in the enhance stage) so they cannot disagree. Pure — unit-tested.
  */
 export function bibleWithoutPrintedMatter(bible: string): {
   bible?: string;
   warning?: string;
 } {
-  const { kept, dropped } = withoutPrintedMatterSentences(bible);
+  const { kept, dropped } = withoutPrintedMatter(bible);
   if (!dropped.length) return { bible };
   if (!kept.trim()) return { warning: BIBLE_ALL_PRINT_WARNING };
-  const n = dropped.length;
   return {
     bible: kept,
-    warning:
-      `Style bible: ${n} sentence${n === 1 ? "" : "s"} depicting printed matter left out, ` +
-      `the rest kept (${dropped.join(" ")})`,
+    warning: `Style bible: printed matter left out, the rest kept (${dropped.join(" / ")})`,
   };
 }
 
@@ -15731,9 +15791,10 @@ async function runUnifiedPipeline(
   // The one physical WORLD the whole video lives in (channel persona + full script), derived HERE —
   // before storyboarding — so the same world seeds every scene instead of only re-converging them
   // at the enhancer. Guard preserves an operator's persisted/hand-edited bible on regenerate (same
-  // intent as the beats pass below). The book guard stays at this call site (import cycle), so a
-  // book-mentioning SENTENCE never reaches the seeds — only that sentence: job 400 lost its whole
-  // bible to one, and its Rome pictures lost their look with it (`bibleWithoutPrintedMatter`).
+  // intent as the beats pass below). The book guard stays at this call site (import cycle), so
+  // printed matter never reaches the seeds — only the words that name it go: job 400 lost its
+  // whole bible to one clause about books, and its Rome pictures lost their look with it
+  // (`bibleWithoutPrintedMatter`).
   if (!params.visualStyleBible) {
     const bible = await deriveStyleBible(params, spokenScript);
     if (bible) {
@@ -16635,8 +16696,8 @@ async function runUnifiedPipeline(
     // brollDepictsBook can't move into visualDirection.ts (import cycle), so the sweep is here.
     // Only adopt this pass's bible when the pre-storyboard pass produced none — never clobber the
     // world the scenes were already seeded with (or an operator's hand-edited one).
-    // Sentence by sentence, as before the storyboard: a printed-matter sentence goes, the rest of
-    // the bible and of each beat stays (job 400).
+    // As before the storyboard: the printed matter goes, the rest of the bible and of each beat
+    // stays (job 400).
     if (!params.visualStyleBible) {
       const safe = bibleWithoutPrintedMatter(direction.styleBible);
       if (safe.warning) console.warn(`[Longform ${jobId}] ${safe.warning}`);
@@ -16644,7 +16705,7 @@ async function runUnifiedPipeline(
     }
     for (const s of scenes) {
       const beat = direction.beats[s.index];
-      const kept = beat ? withoutPrintedMatterSentences(beat).kept : "";
+      const kept = beat ? withoutPrintedMatter(beat).kept : "";
       if (kept.trim()) s.visualBeat = kept;
     }
   }

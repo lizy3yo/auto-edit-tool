@@ -11767,38 +11767,77 @@ describe("blurred print swaps the no-writing rule for unreadable printing", asyn
   });
 });
 
-describe("a style bible loses only its printed-matter sentences (job 400)", async () => {
-  const { withoutPrintedMatterSentences, bibleWithoutPrintedMatter, BIBLE_ALL_PRINT_WARNING, brollDepictsBook } =
+describe("a style bible loses only its printed matter (job 400)", async () => {
+  const { withoutPrintedMatter, bibleWithoutPrintedMatter, BIBLE_ALL_PRINT_WARNING, brollDepictsBook } =
     await import("./longformVideo");
   const { groupJobWarnings } = await import("../shared/jobWarnings");
-  // Job 400's bible was never stored (it was dropped whole); this is its shape — a home base, the
-  // places the script travels to (first-century Rome among them), and one prop sentence naming
-  // the essay the film is about as a thing on the table.
-  const ESSAY_BIBLE =
-    "Home base: a quiet modern kitchen table at night in a small town, where a man past sixty sits with coffee. " +
-    "The script travels to: a pharmacy card aisle and its parking lot, a doctor's waiting room, a church pew, " +
-    "and first-century Rome — a senator's marble villa, grain warehouses at the port, a crowded street below the palace. " +
-    "Late autumn. Recurring props: a worn paperback of the essay with a cracked spine, a wall calendar, a wristwatch. " +
-    "The tone is unhurried and reflective.";
+  // Job 400's two real bibles, as the server logged them on the rehearsal run (the job stored
+  // neither: both were dropped whole, "Style bible depicted printed matter — dropped").
+  const JOB_400_BIBLE =
+    "Home base: a quiet home office or study in a temperate climate during autumn or early winter, where a man in his sixties sits with books and notes about Stoic philosophy. " +
+    "The video travels to: a pharmacy greeting card aisle on a Tuesday morning, a parking lot, a kitchen table at two in the morning, a Roman senator's study two thousand years ago (imagined through period objects and spaces), and a weekend or evening moment where a phone is held toward a screen corner. " +
+    "Recurring materials: sympathy cards, birthday cards,";
+  const JOB_400_LATE_BIBLE =
+    "Home base: a quiet study or reading room where an older man sits with books and papers. " +
+    "The video travels to a pharmacy on a Tuesday morning, a parking lot, ordinary waiting rooms, a church pew, a kitchen table at night, and ancient Rome. " +
+    "Late spring through early summer. Recurring props: sympathy cards, a clock, a book, a phone. " +
+    "The tone is unhurried, meditative, and deeply personal.";
 
-  it("keeps the home base, the Rome places and the tone; leaves out the essay-as-a-thing sentence", () => {
-    expect(brollDepictsBook(ESSAY_BIBLE)).toBe(true); // what dropped the whole bible before
-    const r = bibleWithoutPrintedMatter(ESSAY_BIBLE);
-    expect(r.bible).toContain("first-century Rome — a senator's marble villa");
-    expect(r.bible).toContain("Home base: a quiet modern kitchen table");
-    expect(r.bible).toContain("Late autumn.");
-    expect(r.bible).toContain("The tone is unhurried and reflective.");
-    expect(r.bible).not.toMatch(/paperback|essay/);
+  it("job 400: keeps the home base and the Rome places, leaves out only the clause about books", () => {
+    expect(brollDepictsBook(JOB_400_BIBLE)).toBe(true); // what dropped the whole bible before
+    const r = bibleWithoutPrintedMatter(JOB_400_BIBLE);
+    expect(r.bible).toBe(
+      "Home base: a quiet home office or study in a temperate climate during autumn or early winter. " +
+        "The video travels to: a pharmacy greeting card aisle on a Tuesday morning, a parking lot, a kitchen table at two in the morning, a Roman senator's study two thousand years ago (imagined through period objects and spaces), and a weekend or evening moment where a phone is held toward a screen corner. " +
+        "Recurring materials: sympathy cards, birthday cards,"
+    );
     expect(brollDepictsBook(r.bible!)).toBe(false);
     expect(r.warning).toBe(
-      "Style bible: 1 sentence depicting printed matter left out, the rest kept " +
-        "(Recurring props: a worn paperback of the essay with a cracked spine, a wall calendar, a wristwatch.)"
+      "Style bible: printed matter left out, the rest kept " +
+        "(where a man in his sixties sits with books and notes about Stoic philosophy)"
     );
-    expect(r.warning).not.toBe(BIBLE_ALL_PRINT_WARNING);
     // On the card the left-out words go behind "Details", the sentence stays short.
     const [row] = groupJobWarnings([r.warning!]);
-    expect(row.text).toBe("Style bible: 1 sentence depicting printed matter left out, the rest kept");
-    expect(row.details[0]).toMatch(/^Recurring props: a worn paperback/);
+    expect(row.text).toBe("Style bible: printed matter left out, the rest kept");
+    expect(row.details).toEqual(["where a man in his sixties sits with books and notes about Stoic philosophy"]);
+  });
+
+  it("job 400's late bible: a home base that IS the books goes whole, a book in a props list goes alone", () => {
+    const r = bibleWithoutPrintedMatter(JOB_400_LATE_BIBLE);
+    expect(r.bible).toBe(
+      "The video travels to a pharmacy on a Tuesday morning, a parking lot, ordinary waiting rooms, a church pew, a kitchen table at night, and ancient Rome. " +
+        "Late spring through early summer. Recurring props: sympathy cards, a clock, a phone. " +
+        "The tone is unhurried, meditative, and deeply personal."
+    );
+    expect(r.warning).toBe(
+      "Style bible: printed matter left out, the rest kept " +
+        "(Home base: a quiet study or reading room where an older man sits with books and papers. / a book)"
+    );
+  });
+
+  it("a sentence whose FIRST part is the print goes whole — never a dangling 'Home base: under a window.'", () => {
+    const r = withoutPrintedMatter(
+      "Home base: a reading nook lined with old books, under a window. " +
+        "Recurring props: a worn paperback of the essay with a cracked spine, a wall calendar, a wristwatch. " +
+        "The tone is unhurried and reflective."
+    );
+    expect(r.kept).toBe("The tone is unhurried and reflective.");
+    expect(r.dropped).toEqual([
+      "Home base: a reading nook lined with old books, under a window.",
+      "Recurring props: a worn paperback of the essay with a cracked spine, a wall calendar, a wristwatch.",
+    ]);
+  });
+
+  it("never splits a number or a bracket, and keeps the sentence's own full stop", () => {
+    const r = withoutPrintedMatter(
+      "Recurring materials: price tags (under $10,000 a year, all by hand), a stack of old magazines, a cash box."
+    );
+    expect(r.kept).toBe("Recurring materials: price tags (under $10,000 a year, all by hand), a cash box.");
+    expect(r.dropped).toEqual(["a stack of old magazines"]);
+    // The print as the LAST part: the full stop moves onto what is kept.
+    expect(withoutPrintedMatter("A workbench with a clamp, a mallet, and an open manual.").kept).toBe(
+      "A workbench with a clamp, a mallet."
+    );
   });
 
   it("leaves a bible with no printed matter exactly as it was — jobs 397, 398 and 399, no warning", () => {
@@ -11809,7 +11848,7 @@ describe("a style bible loses only its printed-matter sentences (job 400)", asyn
     ];
     for (const b of bibles) {
       expect(bibleWithoutPrintedMatter(b)).toEqual({ bible: b });
-      expect(withoutPrintedMatterSentences(b)).toEqual({ kept: b, dropped: [] });
+      expect(withoutPrintedMatter(b)).toEqual({ kept: b, dropped: [] });
     }
   });
 
@@ -11817,7 +11856,7 @@ describe("a style bible loses only its printed-matter sentences (job 400)", asyn
     const b =
       "Home base: the cabin of a commercial aircraft in flight. Time of year is unspecified; the flight crosses U.S. airspace mid-continent. " +
       "Recurring materials: an airline magazine in every seat pocket, plastic cups with ice.";
-    const r = withoutPrintedMatterSentences(b);
+    const r = withoutPrintedMatter(b);
     expect(r.dropped).toEqual(["Recurring materials: an airline magazine in every seat pocket, plastic cups with ice."]);
     expect(r.kept).toBe(
       "Home base: the cabin of a commercial aircraft in flight. Time of year is unspecified; the flight crosses U.S. airspace mid-continent."
@@ -11829,14 +11868,21 @@ describe("a style bible loses only its printed-matter sentences (job 400)", asyn
     expect(bibleWithoutPrintedMatter(b)).toEqual({ warning: BIBLE_ALL_PRINT_WARNING });
   });
 
-  it("a beat keeps its sentences that are not print (job 400's historical beat)", () => {
-    const beat =
+  it("job 400's real beats pass untouched; only a printed-matter sentence added to one goes", () => {
+    // Real beats of job 400 (stored): naming the essay or a chapter is not printed matter to the
+    // guard, so none of them changes.
+    for (const beat of [
+      "Historical context: Seneca's life as a wealthy, powerful man in Rome, buried under obligations, later ordered to die by the emperor he served.",
+      "The host names the channel's audience and purpose, then introduces Seneca and the essay as the frame for understanding time as theft, not shortage.",
+      "The host places Seneca's thinking into a larger digital work, naming Chapter Twelve as the direct application to time and legacy in the remaining years.",
+    ]) {
+      expect(withoutPrintedMatter(beat)).toEqual({ kept: beat, dropped: [] });
+    }
+    const added =
       "Historical context: Seneca's life as a wealthy, powerful man in Rome, buried under obligations. He writes the essay in a leather notebook.";
-    expect(withoutPrintedMatterSentences(beat).kept).toBe(
+    expect(withoutPrintedMatter(added).kept).toBe(
       "Historical context: Seneca's life as a wealthy, powerful man in Rome, buried under obligations."
     );
-    const plain = "A man in a pharmacy buying sympathy cards, walking to a parking lot with an unspoken calculation of remaining summers.";
-    expect(withoutPrintedMatterSentences(plain).kept).toBe(plain);
-    expect(withoutPrintedMatterSentences("An open guidebook on the seat.").kept).toBe("");
+    expect(withoutPrintedMatter("An open guidebook on the seat.").kept).toBe("");
   });
 });
