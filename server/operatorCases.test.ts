@@ -2269,3 +2269,27 @@ describe("a list window is a list the narrator says, its rows in his own words (
     expect(restoreRowGrammar("Smalls → markets", "Smalls to the markets")).toBe("Smalls → markets");
   });
 });
+
+describe("QA never fails a card the resolver held to the cut through a pause (round 10 graphics review, 2026-10-18)", () => {
+  // 400 seven-thieves (1:35-1:41): the "7 thieves" card left on the cut at 100.63, in the silence after
+  // "…name all seven of the thieves.", and the film's QA said "still up after its words" — it kept its
+  // own, looser copy of the resolver's rules and measured from "seven" with a caption's 1.2 s.
+  it("400: the stored plan, its word times and cuts resolve the card where the film had it, and QA passes it", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { resolveCues, stillUpAfterWords } = await import("../graphics/src/cueResolve");
+    const { TEMPLATES } = await import("../graphics/src/registry");
+    const job = JSON.parse(readFileSync("graphics/src/plan/__fixtures__/job400-graphics.json", "utf8"));
+    const cues = resolveCues(job.plan, job.words, {
+      cuts: job.cutFrames.map((f: number) => f / 30),
+      fps: 30,
+      structural: new Set(TEMPLATES.filter(t => t.structural).map(t => t.id)),
+      cards: new Set(TEMPLATES.filter(t => t.kind === "card").map(t => t.id)),
+      fullFrame: new Set(TEMPLATES.filter(t => t.kind === "card" || t.underlay === "window").map(t => t.id)),
+    });
+    const card = cues.find(c => c.id === "seven-thieves")!;
+    expect([card.start, card.end, card.spokenEnd]).toEqual([95.3, 100.633, 100.905]);
+    expect(stillUpAfterWords(card, 30)).toBe(false);
+    // kept 2 s into the next sentence, it is still failed
+    expect(stillUpAfterWords({ ...card, end: 103 }, 30)).toBe(true);
+  });
+});

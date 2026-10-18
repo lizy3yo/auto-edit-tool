@@ -2,7 +2,7 @@
 // lab's composite. Pure: it reads frame-to-frame change measured off the RENDERED files (the
 // faults it catches — a one-frame flash, a graphic still up after its words — only exist in the
 // output), the resolved cues and the readability readings.
-import { CARD_HOLD_SILENT_MAX_SEC, CUT_SNAP_SEC, LINGER_SEC, MAX_LINGER_SEC, MIN_ON_SCREEN_SEC, MIN_SHOT_SEC, PAUSE_REACH_SEC, tooShortToRead, type ResolvedCue } from "../cueResolve";
+import { CUT_SNAP_SEC, MIN_ON_SCREEN_SEC, MIN_SHOT_SEC, stillUpAfterWords, tooShortToRead, type ResolvedCue } from "../cueResolve";
 import { templateById } from "../registry";
 import { appearFrame } from "../timing";
 import type { RuleProblem } from "./rules";
@@ -89,14 +89,11 @@ export function judgeFilm(q: QaInput): QaResult {
   const onCut = rows.filter(r => r.onCut && Math.abs(r.offsetMs) > 100);
 
   const structural = (c: ResolvedCue) => !!templateById(c.template).structural;
-  const lingering = cues.filter(
-    c =>
-      !structural(c) &&
-      c.contentEnd !== undefined &&
-      c.end - (c.spokenEnd ?? c.contentEnd) >
-        (c.conformed.held ? CARD_HOLD_SILENT_MAX_SEC : c.leftInPause ? LINGER_SEC + PAUSE_REACH_SEC + 0.15 : MAX_LINGER_SEC) &&
-      c.end - c.start > (c.readSec ?? 0) + PAUSE_REACH_SEC + 0.15
-  );
+  // Still up after its words: asked by the resolver's own rules (`stillUpAfterWords`), on what it
+  // recorded from the same words — a hold to the cut through the pause, a pause it left in, its
+  // reading time. QA kept its own copy of those rules, which drifted: it failed job 400's
+  // "7 thieves" card, which left on the cut in the silence after its own sentence (1:41).
+  const lingering = cues.filter(c => !structural(c) && stillUpAfterWords(c, fps));
   // A blink of footage (under MIN_SHOT_SEC) between a picture-replacing graphic and the next or
   // previous shot change: card → b-roll for 0.8 s → host reads as a glitch.
   const replaces = (c: ResolvedCue) => templateById(c.template).kind === "card" || templateById(c.template).underlay === "window";
