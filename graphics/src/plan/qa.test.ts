@@ -145,3 +145,31 @@ describe("the hold to the cut is one test, with the resolver's limits (holdToCut
     expect(holdToCut(own, own.find(w => w.text === "face")!.end, own.find(w => w.text === "face")!.end + 0.3, 189).spoken).toBe(own.at(-1)!.end);
   });
 });
+
+describe("QA counts a blink of footage beside a quote over the blurred picture (Sawdust Sam, job 407 at 2:45)", () => {
+  // The film's cuts as a frame-change trace: a jump into each new shot, nothing else moving.
+  const film = (cutFrames: number[], length = 5300) => {
+    const d = new Array(length).fill(0.5);
+    for (const k of cutFrames) d[k] = 60;
+    return d;
+  };
+  const judgeOn = (cues: ResolvedCue[], cutFrames: number[]) => {
+    const d = film(cutFrames);
+    return judgeFilm({ fps: FPS, cues, filmDiffs: d, reelDiffs: d, rules: [], readability: [] });
+  };
+  // As shipped: the Quote 4814-4957, the cut to the host at 4973 — 16 frames of the sharp picture,
+  // and QA said "Blinks of footage beside a card: 0".
+  it("the shipped quote fails as a blink; the same frames as a darkening caption do not (the picture stayed in view)", () => {
+    const qa = judgeOn([placed("boots-clear-quote", "Quote", 4814, 4957)], [4814, 4973]);
+    expect(qa.lines).toContain("Blinks of footage beside a card: 1");
+    expect(qa.failures).toContain("a blink of footage beside boots-clear-quote");
+    expect(judgeOn([placed("boots-clear-line", "DimCaption", 4814, 4957)], [4814, 4973]).lines).toContain("Blinks of footage beside a card: 0");
+  });
+  it("held to the cut, as the resolver now places it, it passes", () => {
+    const qa = judgeOn([placed("boots-clear-quote", "Quote", 4814, 4973)], [4814, 4973]);
+    expect(qa.lines).toContain("Blinks of footage beside a card: 0");
+  });
+  it("cards and windows are still counted: job 404's Versus left 0.80 s of the shot (2640 → cut 2664)", () => {
+    expect(judgeOn([placed("versus-january-robin", "Versus", 2492, 2640)], [2411, 2664]).failures).toContain("a blink of footage beside versus-january-robin");
+  });
+});

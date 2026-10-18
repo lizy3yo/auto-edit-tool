@@ -411,7 +411,7 @@ export interface StoryboardScene {
    * in `parseStoryboard` and honored by every later pass: opener scenes are never demoted
    * (`rebalanceHostScreenTime`, `enforceVisualAdjacency`), never forced into a split-frame
    * (`enforceHostSplitMix`), never split (`splitOverlongScenes`) or merged
-   * (`coalesceShortScenes`), and are the scenes the host name card rides on
+   * (`coalesceShortScenes`), and carry the host name card when the film has no self-introduction
    * (`nameCardSceneIndices`). Their chunks are packed to the host floor (`HOST_MIN_HOLD_SEC`)
    * at segmentation, ending on a sentence boundary.
    */
@@ -420,7 +420,8 @@ export interface StoryboardScene {
    * The line where the host introduces themself ("I'm Hank Hardwood", "my name is…") —
    * `markHostIntroductions`. Always the host, full frame, speaking the whole sentence: a
    * self-introduction over b-roll reads as a stranger's voice. Protected like the cold open —
-   * an anchor in the host budget, never demoted by a balancer, never split.
+   * an anchor in the host budget, never demoted by a balancer, never split. The host name card
+   * goes on it (`nameCardSceneIndices`).
    */
   hostIntro?: true;
   /**
@@ -1405,8 +1406,8 @@ export interface LongformInputParams {
   droppedHostPhotos?: number;
   /**
    * The host's on-screen identity, resolved from the channel config. Rendered as a lower-third
-   * card over the SECOND host shot of the film (see `nameCardSceneIndex` / `renderNameCardPng`).
-   * All three unset → no card.
+   * card over the host's self-introduction take, else the first host take that can hold it (see
+   * `nameCardSceneIndices` / `renderNameCardPng`). All three unset → no card.
    */
   hostName?: string;
   hostTitle?: string;

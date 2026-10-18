@@ -1,6 +1,6 @@
 import sharp from "sharp";
 import { getInterFontsBase64 } from "./fontData";
-import { ensureFontConfig } from "./fontConfig";
+import { interFontReady } from "./fontConfig";
 
 export function escapeXml(s: string): string {
   return s
@@ -81,8 +81,9 @@ export async function compositeTextOnCover(
   subtitle: string,
   authorName: string
 ): Promise<Buffer> {
-  // Ensure librsvg can resolve Inter via fontconfig (prod has no system fonts).
-  ensureFontConfig();
+  // Ensure librsvg can resolve Inter (prod has no system fonts; on Windows fontconfig never reads
+  // our config) — `interFontReady`.
+  await interFontReady();
 
   const { bold, regular } = getInterFontsBase64();
   const meta = await sharp(bgBuffer).metadata();

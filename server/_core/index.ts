@@ -1,9 +1,14 @@
 import "dotenv/config";
-import { ensureFontConfig } from "../fontConfig";
+import { ensureFontConfig, interFontReady } from "../fontConfig";
 import { resolveFFmpegPath } from "../ffmpegPath";
 
-// Register bundled Inter with fontconfig before sharp renders any cover text.
+// Register bundled Inter with fontconfig before sharp renders any cover text, and say at boot
+// whether librsvg really draws it — on Windows the config alone never took (jobs 405, 407 shipped a
+// serif name card with nothing in the log). A miss is logged by `interFontReady` itself.
 ensureFontConfig();
+void interFontReady().then(ok => {
+  if (ok) console.log("[Fonts] Inter registered — name cards, captions and covers draw in Inter");
+});
 
 // Probe FFmpeg at startup so logs immediately show which binary was selected
 // and whether drawtext (video text overlays) is available.

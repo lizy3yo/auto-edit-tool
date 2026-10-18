@@ -18,6 +18,7 @@ vi.mock("./finish", () => ({
     writeFileSync(input.outPath, "film with graphics");
     return record;
   }),
+  themeOf: vi.fn(async () => ({ accent: "#3FA36B", bg: "#0B1A12" })),
 }));
 
 const { withGraphics, plannerForJob, readabilityForJob, MAX_KEPT_PER_ROUND, filmLayoutOf, splitHostPanel } = await import("./apply");
@@ -184,5 +185,36 @@ describe("the film's layout carries each split's host panel (job 400's caption r
       expect(s.split).toBe(false);
       expect(s.hostPanel).toBeUndefined();
     }
+  });
+});
+
+/**
+ * The host name card moved to the self-introduction take (job 406: "…I'm Gary," closes scene 8,
+ * 18.8-29.2 s, after a 2.56 s cold open that could not hold it). The graphics' rules are told where
+ * it was drawn, and the card is drawn in the graphics' own accent.
+ */
+describe("the name card, as the graphics see it", () => {
+  const R2 = "https://pub-x.r2.dev/longform/406";
+  const host = (index: number, a: number, b: number, over: Partial<StoryboardScene> = {}) =>
+    ({ index, narrationStartSec: a, narrationEndSec: b, hostPresent: true, clipUrls: [`${R2}/clip-${index}-0.mp4`], ...over }) as unknown as StoryboardScene;
+  const still = (index: number, a: number, b: number) =>
+    ({ index, narrationStartSec: a, narrationEndSec: b, clipUrls: [`${R2}/still-${index}-0.mp4`] }) as unknown as StoryboardScene;
+  const gary = [host(1, 0, 2.56, { hostOpener: true }), still(2, 2.56, 5.21), host(8, 18.8, 29.24, { hostIntro: true })];
+
+  it("406: the layout names the scenes the card was drawn on", () => {
+    expect(filmLayoutOf(gary, [8]).nameCardScenes).toEqual([8]);
+    // A film with no card says so; a caller that does not know leaves it unset.
+    expect(filmLayoutOf(gary, []).nameCardScenes).toEqual([]);
+    expect("nameCardScenes" in filmLayoutOf(gary)).toBe(false);
+  });
+
+  it("the card takes the accent the last graphics run saved, else the host photo's", async () => {
+    const { graphicsAccent } = await import("./apply");
+    const saved = { graphics: { theme: { accent: "#E8A13A", bg: "#14100B" } }, faceImageUrl: `${R2}/host.jpg` } as unknown as LongformInputParams;
+    expect(await graphicsAccent(saved)).toBe("#E8A13A");
+    expect(vi.mocked(finish.themeOf)).not.toHaveBeenCalled();
+    const fresh = { faceImageUrl: `${R2}/host.jpg` } as unknown as LongformInputParams;
+    expect(await graphicsAccent(fresh)).toBe("#3FA36B");
+    expect(vi.mocked(finish.themeOf)).toHaveBeenCalledWith(`${R2}/host.jpg`);
   });
 });

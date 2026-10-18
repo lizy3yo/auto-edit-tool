@@ -212,13 +212,31 @@ export const HOST_INTRO_TRIM_SEC = 1.0;
 /**
  * Host name-card edge animation, seconds: the card waits `DELAY` into the FIRST scene of its run,
  * ramps up over `FADE`, sits still across every internal cut, and ramps back down over the last
- * `FADE` of the LAST scene — hitting zero exactly on the cut out of the cold open.
+ * `FADE` of the LAST scene — hitting zero exactly on the cut out of its run.
  * `MIN_WINDOW` is the shortest fully-on hold worth rendering; below it the card would flash, so
  * that scene gets none.
  */
 export const NAME_CARD_DELAY_SEC = 0.5;
 export const NAME_CARD_FADE_SEC = 0.5;
 export const NAME_CARD_MIN_WINDOW_SEC = 1.5;
+
+/**
+ * When the name card is fully on in one scene of its run, seconds into the scene — or undefined
+ * when that hold is under `NAME_CARD_MIN_WINDOW_SEC` and the scene draws no card. `fadeIn` on the
+ * run's first scene, `fadeOut` on its last (both on a run of one: a lone scene needs 3 s). The ONE
+ * rule: `buildSceneMuxArgs` draws by it and `nameCardSceneIndices` picks the scenes by it, so the
+ * card is never put on a take too short to show it (jobs 403 and 406: a lone 2.3-2.6 s cold open
+ * took the card and drew none). Pure.
+ */
+export function nameCardOnWindow(
+  durationSec: number,
+  fadeIn?: boolean,
+  fadeOut?: boolean
+): { on: number; off: number } | undefined {
+  const on = fadeIn ? NAME_CARD_DELAY_SEC + NAME_CARD_FADE_SEC : 0;
+  const off = fadeOut ? durationSec - NAME_CARD_FADE_SEC : durationSec;
+  return off - on >= NAME_CARD_MIN_WINDOW_SEC ? { on, off } : undefined;
+}
 
 /**
  * Output pixel dimensions for a given aspect ratio (1080p class).
@@ -1332,7 +1350,7 @@ export function buildSceneMuxArgs(opts: {
    * Added as another `-loop 1 -i` input AFTER the QR, so the two can coexist.
    *
    * Default is STATIC — on in frame 0, unchanged throughout, gone on the cut — which is what
-   * every scene INSIDE the cold-open run wants: nothing moves at the seams, so the run reads as
+   * every scene INSIDE the card's run wants: nothing moves at the seams, so the run reads as
    * one continuous card. `fadeIn` is set only on the FIRST scene of the run (card waits
    * `NAME_CARD_DELAY_SEC`, then ramps up over `NAME_CARD_FADE_SEC`) and `fadeOut` only on the
    * LAST (ramps down over the final `NAME_CARD_FADE_SEC`, zero exactly on the cut).
@@ -1357,14 +1375,15 @@ export function buildSceneMuxArgs(opts: {
 
   // Name-card timing: when is it fully on? Drop it entirely if that hold is too brief to read —
   // a flash is worse than no card.
-  // ponytail: the guard is per scene, so a first scene too short to hold the card just means the
-  // card starts hard-on at the next cut instead of fading in. Only reachable under ~2.5s.
+  // ponytail: the guard is per scene, so in a run of two or more a first scene too short to hold
+  // the card just means the card starts hard-on at the next cut instead of fading in. A run that
+  // cannot show it at all is never given the card (`nameCardSceneIndices` asks the same rule).
   const nc = opts.nameCard;
-  const ncOnStart = nc?.fadeIn ? NAME_CARD_DELAY_SEC + NAME_CARD_FADE_SEC : 0;
-  const ncOnEnd = nc?.fadeOut
-    ? opts.durationSec - NAME_CARD_FADE_SEC
-    : opts.durationSec;
-  const ncOn = !!nc && ncOnEnd - ncOnStart >= NAME_CARD_MIN_WINDOW_SEC;
+  const ncWindow = nc
+    ? nameCardOnWindow(opts.durationSec, nc.fadeIn, nc.fadeOut)
+    : undefined;
+  const ncOn = !!nc && !!ncWindow;
+  const ncOnEnd = ncWindow?.off ?? opts.durationSec;
 
   // Inputs: video=0, audio=1, then whichever overlays are present, in this order.
   const qrIdx = 2;
@@ -3228,9 +3247,9 @@ export async function assemblePerSceneFilm(opts: {
   musicBedUrls?: string[];
   /**
    * Optional host lower-third: a full-frame transparent PNG (`renderNameCardPng`) overlaid on a
-   * CONTIGUOUS run of scenes (`nameCardSceneIndices` — the locked cold open). The run fades in at
-   * its head and out at its tail and is static across every cut between, so it reads as one card
-   * that arrives once and leaves once. Each entry is a position in the `scenes` array above, not a
+   * CONTIGUOUS run of scenes (`nameCardSceneIndices` — the self-introduction take, else the first
+   * host take). The run fades in at its head and out at its tail and is static across every cut
+   * between, so it reads as one card that arrives once and leaves once. Each entry is a position in the `scenes` array above, not a
    * `StoryboardScene.index`. Non-fatal: if the PNG can't be staged, the film renders without it.
    */
   nameCard?: { png: Buffer; sceneIndices: number[] };

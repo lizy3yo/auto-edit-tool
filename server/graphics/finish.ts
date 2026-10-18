@@ -25,12 +25,12 @@ import { invokeClaude } from "../claude";
 import { presignOwnBucketUrl } from "../storage";
 import { transcribeWordsFromBuffer } from "../_core/voiceTranscription";
 import { CueError, endWithFilm, resolveCues, type CueSpec, type ResolvedCue, type Word } from "../../graphics/src/cueResolve";
-import { TEMPLATES, templateById } from "../../graphics/src/registry";
+import { resolveSets, templateById } from "../../graphics/src/registry";
 import { FPS, type Theme } from "../../graphics/src/theme";
 import { themeFromPixels } from "../../graphics/src/palette";
 import { WINDOW } from "../../graphics/src/more";
 import { NOTO_PNG, planGraphics, type PlanMessage, type PlanRound } from "../../graphics/src/plan/planner";
-import { checkRules, hostPanelFor, type FilmLayout } from "../../graphics/src/plan/rules";
+import { checkRules, placementFor, type FilmLayout } from "../../graphics/src/plan/rules";
 import { detectCuts, judgeFilm, type QaResult, type Readability } from "../../graphics/src/plan/qa";
 import { getMediaDuration } from "../mediaProbe";
 import { ffmpeg, frameDiffs, levelsOf, narrationOf } from "./media";
@@ -81,10 +81,10 @@ export type AddGraphicsInput = {
 
 /** Templates whose decorations (not words) carry the theme's colours: measured without them. */
 const MEASURE_WITHOUT_DECORATION = new Set(["CrossedList"]);
-const structural = new Set(TEMPLATES.filter(t => t.structural).map(t => t.id));
-const cards = new Set(TEMPLATES.filter(t => t.kind === "card").map(t => t.id));
-/** Graphics that replace the picture (cards, framed windows): held to the cut, never a blink of footage. */
-const fullFrame = new Set(TEMPLATES.filter(t => t.kind === "card" || t.underlay === "window").map(t => t.id));
+/** The resolver's template sets — graphics that replace the picture (cards, framed windows, a quote
+ * over the blurred picture) are held to the cut, never a blink of footage — from the one definition
+ * the planner and QA use (`resolveSets`). */
+const { structural, cards, fullFrame, windows } = resolveSets();
 const sha = (x: Buffer | string) => createHash("sha1").update(x).digest("hex");
 
 function ensureDir(d: string): string {
@@ -147,7 +147,7 @@ async function healDrift(filmPath: string, words: Word[], levels: number[]): Pro
 }
 
 /** The video's colours, from its host photo; none (the default navy) when it cannot be read. */
-async function themeOf(photoUrl: string | undefined): Promise<Theme | undefined> {
+export async function themeOf(photoUrl: string | undefined): Promise<Theme | undefined> {
   if (!photoUrl) return undefined;
   try {
     // Our own photo read over the storage endpoint, never the public r2.dev address: that one is
@@ -226,7 +226,7 @@ async function plan(input: AddGraphicsInput, words: Word[], cuts: number[]): Pro
 /** Resolve a plan cue by cue (film order), leaving out any that no longer resolve or break a
  * placement rule — a saved plan on a film that was edited since must not bring a broken graphic. */
 function resolveKeeping(specs: CueSpec[], words: Word[], cuts: number[], film: FilmLayout, dropped: GraphicsRecord["dropped"]): { specs: CueSpec[]; cues: ResolvedCue[] } {
-  const opts = { cuts, fps: FPS, structural, cards, fullFrame };
+  const opts = { cuts, fps: FPS, structural, cards, fullFrame, windows };
   const kept: CueSpec[] = [];
   let resolved: ResolvedCue[] = [];
   for (const spec of specs) {
@@ -320,11 +320,12 @@ export async function addGraphics(input: AddGraphicsInput): Promise<GraphicsReco
     try {
       const def = templateById(c.template);
       if (theme) c.props.theme = theme;
-      // On a split the caption stays in the host's panel (job 400 at 2:18 ran across the seam onto
-      // the picture). Set BEFORE the first drawing, so every readability measure — the measuring
-      // copy and each fix — reads the words where they ship, and the render cache keys the panel.
-      const panel = def.panel ? hostPanelFor(c, input.film) : undefined;
-      if (panel) c.props.panel = panel;
+      // Where it goes on this film's frame (`placementFor`): on a split the caption stays in the
+      // host's panel (job 400 at 2:18 ran across the seam onto the picture), and over a host take a
+      // chapter label goes below the chin (job 407's crossed the host's beard). Set BEFORE the first
+      // drawing, so every readability measure — the measuring copy and each fix — reads the words
+      // where they ship, and the render cache keys the placement.
+      Object.assign(c.props, placementFor(c.template, c, input.film));
       await inlineIcons(c.props);
       if (c.template === "ArrowCaption" && !c.props.target) {
         const s = await subjectOf(input.filmPath, (c.start + c.end) / 2);

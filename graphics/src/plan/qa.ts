@@ -2,8 +2,8 @@
 // lab's composite. Pure: it reads frame-to-frame change measured off the RENDERED files (the
 // faults it catches — a one-frame flash, a graphic still up after its words — only exist in the
 // output), the resolved cues and the readability readings.
-import { CUT_SNAP_SEC, MIN_ON_SCREEN_SEC, MIN_SHOT_SEC, stillUpAfterWords, tooShortToRead, type ResolvedCue } from "../cueResolve";
-import { templateById } from "../registry";
+import { CUT_SNAP_SEC, MIN_ON_SCREEN_SEC, blinkBeside, stillUpAfterWords, tooShortToRead, type ResolvedCue } from "../cueResolve";
+import { replacesPicture, templateById } from "../registry";
 import { appearFrame } from "../timing";
 import type { RuleProblem } from "./rules";
 
@@ -94,16 +94,11 @@ export function judgeFilm(q: QaInput): QaResult {
   // reading time. QA kept its own copy of those rules, which drifted: it failed job 400's
   // "7 thieves" card, which left on the cut in the silence after its own sentence (1:41).
   const lingering = cues.filter(c => !structural(c) && stillUpAfterWords(c, fps));
-  // A blink of footage (under MIN_SHOT_SEC) between a picture-replacing graphic and the next or
-  // previous shot change: card → b-roll for 0.8 s → host reads as a glitch.
-  const replaces = (c: ResolvedCue) => templateById(c.template).kind === "card" || templateById(c.template).underlay === "window";
-  const minShot = Math.round(MIN_SHOT_SEC * fps);
-  const blinks = cues.filter(c => {
-    if (!replaces(c)) return false;
-    const after = filmCuts.find(k => k >= c.endFrame);
-    const before = [...filmCuts].reverse().find(k => k <= c.startFrame);
-    return (after !== undefined && after > c.endFrame && after - c.endFrame < minShot) || (before !== undefined && before < c.startFrame && c.startFrame - before < minShot);
-  });
+  // A blink of footage (under MIN_SHOT_SEC) between a graphic that hides the picture and the next or
+  // previous shot change: card → b-roll for 0.8 s → host reads as a glitch. The planner refuses a new
+  // graphic by the same test (`blinkBeside`), and a quote over the blurred picture is one of them
+  // (`replacesPicture`): job 407's ended 0.54 s before the cut to the host and this line said 0.
+  const blinks = cues.filter(c => replacesPicture(templateById(c.template)) && !!blinkBeside(c, filmCuts, fps));
   // A graphic carrying a tail of less than a second onto the next shot (one that ENDS on a cut
   // covers its last shot whole, which is not a spill).
   const spills = cues.filter(c => !c.conformed.end && filmCuts.some(k => k > c.startFrame + 3 && k < c.endFrame && c.endFrame - k < fps));

@@ -18,7 +18,7 @@ import type { CueSpec } from "../../graphics/src/cueResolve";
 const FILM_SEC = 150;
 const h = vi.hoisted(() => ({
   drawn: [] as { id: string; props: Record<string, unknown>; output: string }[],
-  measured: [] as { id: string; file: string; panel: unknown }[],
+  measured: [] as { id: string; file: string; panel: unknown; low?: unknown }[],
 }));
 
 vi.mock("../db", () => ({ getChannelConfig: vi.fn(async () => undefined) }));
@@ -49,7 +49,7 @@ vi.mock("./render", async () => {
 vi.mock("./readable", async importOriginal => ({
   ...(await importOriginal<typeof import("./readable")>()),
   measureCue: vi.fn(async (_film: string, file: string, cue: { id: string; props: Record<string, unknown> }) => {
-    h.measured.push({ id: cue.id, file, panel: cue.props.panel });
+    h.measured.push({ id: cue.id, file, panel: cue.props.panel, low: cue.props.low });
     return { pass: true, white: 9 };
   }),
 }));
@@ -112,11 +112,11 @@ const scenes = (layout?: StoryboardScene["splitLayout"]) =>
     { index: 28, narrationStartSec: 144.12, narrationEndSec: FILM_SEC, clipUrls: [`${R2}/still-28-0.mp4`] },
   ] as unknown as StoryboardScene[];
 
-const run = (layout?: StoryboardScene["splitLayout"]) => {
+const run = (layout?: StoryboardScene["splitLayout"], savedPlan: CueSpec[] = plan) => {
   const dir = mkdtempSync(path.join(cacheDir, "film-"));
   const filmPath = path.join(dir, "film.mp4");
   writeFileSync(filmPath, "film");
-  return addGraphics({ jobId: 400, filmPath, outPath: path.join(dir, "out.mp4"), film: filmLayoutOf(scenes(layout)), savedPlan: plan });
+  return addGraphics({ jobId: 400, filmPath, outPath: path.join(dir, "out.mp4"), film: filmLayoutOf(scenes(layout)), savedPlan });
 };
 const CHAIR = "When a man like that sits down to write about time, I pull my chair in closer.";
 
@@ -150,5 +150,42 @@ describe("a caption over a split is drawn and measured inside the host's panel",
   it("a Reassemble after the operator turned the split round reuses the plan and moves the caption to the host's side", async () => {
     await run({ hostSide: "right" });
     expect(h.drawn.find(d => d.id === CHAIR)!.props.panel).toEqual({ x: 1080, w: 840 });
+  });
+});
+
+/**
+ * A chapter label over a host take is drawn below the host's chin, and measured there. Job 407's
+ * "Number two squared the walls…" (host scene 21) was drawn where it sits over b-roll and its band
+ * cut across the host's beard for 3 s; job 402's on a split also crossed the seam onto the picture.
+ * Here on job 400's film: one label over the full-frame host take (scene 3), one over the split
+ * (scene 27), one over b-roll (scene 28).
+ */
+describe("a chapter label over a host take is drawn and measured below the chin", () => {
+  const chapter = (id: string, start: string, number: number, title: string) =>
+    ({ id, template: "ChapterLabel", start, durationSec: 2.5, props: { kicker: `Parts · ${number} of 3`, number, title } }) as unknown as CueSpec;
+  const chapters = [
+    chapter("chapter-host", "He is counting backward.", 1, "The count"),
+    chapter("chapter-split", "When a man like that sits", 2, "The essay"),
+    chapter("chapter-broll", "The essay is called On the Shortness of Life", 3, "The title"),
+  ];
+  const drawnAs = (title: string) => h.drawn.filter(d => d.props.title === title).map(d => d.props);
+
+  it("over the full-frame host take: low, and every readability measure is of the low drawing", async () => {
+    const r = await run(undefined, chapters);
+    expect(r.placed.map(p => p.id)).toEqual(["chapter-host", "chapter-split", "chapter-broll"]);
+    expect(drawnAs("The count").length).toBeGreaterThan(0);
+    expect(drawnAs("The count").every(p => p.low === true && p.panel === undefined && p.side === undefined)).toBe(true);
+    const measures = h.measured.filter(m => m.id === "chapter-host");
+    expect(measures.length).toBeGreaterThan(0);
+    expect(measures.every(m => m.low === true)).toBe(true);
+  });
+
+  it("over the split: inside the host's panel, low; over b-roll: as designed; none of it saved in the plan", async () => {
+    const r = await run(undefined, chapters);
+    expect(drawnAs("The essay").length).toBeGreaterThan(0);
+    expect(drawnAs("The essay").every(p => p.low === true && JSON.stringify(p.panel) === JSON.stringify({ x: 0, w: 840 }))).toBe(true);
+    expect(drawnAs("The title").length).toBeGreaterThan(0);
+    expect(drawnAs("The title").every(p => p.low === undefined && p.panel === undefined)).toBe(true);
+    expect(JSON.stringify(r.plan)).not.toMatch(/"low"|"panel"|"side"/);
   });
 });

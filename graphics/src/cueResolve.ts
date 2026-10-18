@@ -412,8 +412,10 @@ export function endWithFilm(cues: ResolvedCue[], lastFrame: number, fps: number)
  */
 export const HANDOFF_GAP_SEC = 1.0;
 
-/** The most a graphic may stay after its own last word, even to leave with a picture cut: past it
- * the graphic reads as stale. An end snaps FORWARD onto a cut only within this. */
+/** The most a graphic may stay after its own words, even to leave with a picture cut: past it the
+ * graphic reads as stale. Measured from where its own sentence finished, as said (`ownSentenceEnd`) —
+ * the rest of a sentence it stayed up for is not lingering — so an end snaps FORWARD onto a cut only
+ * within this of that point, and QA (`stillUpAfterWords`) counts from the same point. */
 export const MAX_LINGER_SEC = 1.2;
 
 /**
@@ -467,6 +469,45 @@ const WHOLE_SENTENCE: Record<string, string[]> = {
   ArrowCaption: ["phrase"],
 };
 const ENDS_SENTENCE = new RegExp("[.?!][\"”')]*$");
+
+/**
+ * A PAIR GETS "vs" ONLY WHEN IT IS COMPARED (round 11 review). NumberLabel drew "vs" between its two
+ * values whatever joined them: Gary's job 406 (1:22) read "A KNIFE $5 to $10 vs A MOWER BLADE $10 to
+ * $20" for "$5 to $10 a knife and $10 to $20 a mower blade" — a price for each of two services, not
+ * a contest — and Dale's job 397 (1:04) "FROM $150 vs UP TO $600" for "And furniture, $150 to $600.",
+ * a range. The separator is drawn only when the pair is compared (`compare`, set by the resolver on
+ * each template in SEPARATED_PAIRS): the plan marks it, and the words the narrator says BETWEEN the
+ * two VALUES — after the first one's spoken words (`a.at`), up to the second value's number (an "at"
+ * may lead with words of its own: "@took 6.", "@to $600") — settle it where they can. A range (only
+ * "to", "up to" or "through" between) or a list or a choice (the join ENDS on "and", "or" or "plus",
+ * the second value said right after it) never does, marked or not — that is how THESE two are joined,
+ * so it is read first; a contrast names its side between the "and" and the value ("…and now 3",
+ * "…and his 81"). A comparing word ("versus", "compared to", "instead of"…) compares them, marked or
+ * not — "against" only right before the second value ("$15 against $40"), never "sanded against the
+ * grain" or "leaned against the wall" said on the way. Anything else is the plan's call (Gideon's job
+ * 401, "He is 64. His father made it to 81."). A "vs" left out still reads (the labels name both
+ * values); a "vs" put in says the wrong thing — so an unclear pair goes without.
+ */
+const SEPARATED_PAIRS = new Set(["NumberLabel"]);
+const COMPARING_WORD = /\b(?:versus|vs|compared (?:to|with)|instead of|rather than|unlike|whereas|as opposed to)\b/;
+const AGAINST_THE_VALUE = /\bagainst(?: (?:the|a|an|his|her|its|their|my|your|our))?$/;
+const RANGE_JOIN = /^(?:(?:and|or) )?(?:all the way )?(?:up )?(?:to|through|thru)$/;
+const LIST_JOIN = /\b(?:and|or|plus)$/;
+
+/** Is a pair compared? `planned` is the plan's `compare`; `said` is what the narrator says between the
+ * two elements' spoken words (`join`) and the second element's own spoken words (`second`), when both
+ * are timed to words. Pure. */
+export function pairCompared(planned: unknown, said?: { join: string; second: string }): boolean {
+  if (said) {
+    const second = tokens(said.second);
+    // Where the second VALUE is said: the first number among its own words ("took 6", "to $600").
+    const value = second.findIndex((t, i) => /^\d/.test(t) || parseSpokenNumber(second, i) !== null);
+    const join = [...tokens(said.join), ...second.slice(0, Math.max(0, value))].join(" ");
+    if (value >= 0 && (RANGE_JOIN.test(join) || LIST_JOIN.test(join))) return false;
+    if (COMPARING_WORD.test(join) || AGAINST_THE_VALUE.test(join)) return true;
+  }
+  return planned === true;
+}
 
 /** How many words (and numbers) a graphic SHOWS, for its reading time. */
 function shownWordCount(props: unknown): number {
@@ -549,6 +590,27 @@ export function stillUpAfterWords(c: ResolvedCue, fps: number): boolean {
   return past > (c.leftInPause ? LINGER_SEC + PAUSE_REACH_SEC + 0.15 : MAX_LINGER_SEC) + slack;
 }
 
+/**
+ * A BLINK OF FOOTAGE beside a graphic that replaces the picture: the shot it leaves behind before
+ * the next picture cut — or the one it opens after, past the cut before it — shows for less than
+ * MIN_SHOT_SEC, and card → a flash of the picture → a new picture reads as a glitch. Measured on
+ * FRAMES, the film's cuts as the composite and QA see them. The ONE test the planner refuses a new
+ * graphic by and QA fails a film by: QA alone saw job 404's Versus card leave 0.80 s of its shot
+ * before the next one (1:28) and job 403's "The toilet is fine." leave 1.22 s (2:06), and both films
+ * shipped with it. Whether a graphic replaces the picture is the caller's to
+ * say (registry `replacesPicture`). Returns the side, the cut and how long the sliver is, or
+ * undefined. `cutFrames` ascending.
+ */
+export function blinkBeside(c: { startFrame: number; endFrame: number }, cutFrames: number[], fps: number): { side: "after" | "before"; cutFrame: number; sec: number } | undefined {
+  const minShot = Math.round(MIN_SHOT_SEC * fps);
+  const after = cutFrames.find(k => k >= c.endFrame);
+  if (after !== undefined && after > c.endFrame && after - c.endFrame < minShot) return { side: "after", cutFrame: after, sec: (after - c.endFrame) / fps };
+  let before: number | undefined;
+  for (const k of cutFrames) if (k <= c.startFrame) before = k;
+  if (before !== undefined && before < c.startFrame && c.startFrame - before < minShot) return { side: "before", cutFrame: before, sec: (c.startFrame - before) / fps };
+  return undefined;
+}
+
 export type ResolveOptions = {
   /** The film's real picture cuts, in seconds (the first frame of each new shot). */
   cuts?: number[];
@@ -557,9 +619,14 @@ export type ResolveOptions = {
   structural?: Set<string>;
   /** Full-screen CARDS (they replace the picture), held to CARD_MAX_WAIT_SEC. */
   cards?: Set<string>;
-  /** Every template that replaces the picture (cards and framed windows): held to the cut so no
-   * sliver of footage under MIN_SHOT_SEC is left beside it. Defaults to `cards`. */
+  /** Every template that replaces the picture (cards, framed windows, an overlay over the blurred
+   * picture): held to the cut so no sliver of footage under MIN_SHOT_SEC is left beside it. Defaults
+   * to `cards`. */
   fullFrame?: Set<string>;
+  /** Framed WINDOWS (their items land with their pictures; one ends with its last item's picture).
+   * Defaults to `fullFrame` minus `cards` — pass it when `fullFrame` holds a blurred overlay, which
+   * replaces the picture but is no window (registry `resolveSets`). */
+  windows?: Set<string>;
 };
 
 /** The cut nearest `t` within `CUT_SNAP_SEC`, or undefined. */
@@ -584,7 +651,7 @@ export function resolveCues(specs: CueSpec[], words: Word[], opts: ResolveOption
   const structural = opts.structural ?? new Set<string>();
   const cards = opts.cards ?? new Set<string>();
   const fullFrame = opts.fullFrame ?? cards;
-  const windows = new Set(Array.from(fullFrame).filter(id => !cards.has(id)));
+  const windows = opts.windows ?? new Set(Array.from(fullFrame).filter(id => !cards.has(id)));
   // Every edge lands on a frame boundary: an edit between frames does not exist.
   const onFrame = (t: number) => Math.round(t * fps) / fps;
   let cursor = 0;
@@ -598,6 +665,8 @@ export function resolveCues(specs: CueSpec[], words: Word[], opts: ResolveOption
     let startCut = nearestCut(cuts, rawStart);
     let t0 = onFrame(startCut ?? rawStart);
     const sync: ResolvedCue["sync"] = [];
+    /** Each element's "at" words, as word positions (first, last), by the element's path ("a", "b"). */
+    const atWords = new Map<string, { first: number; last: number }>();
     const searchFrom = startHits[0];
     let contentEnd: number | undefined;
     /** When the graphic's LAST element appears (its number lands, its last word shows). */
@@ -664,6 +733,7 @@ export function resolveCues(specs: CueSpec[], words: Word[], opts: ResolveOption
           // In a framed window, an item lands WITH its picture when that changes just before it.
           const cut = windows.has(spec.template) ? cuts.filter(c => c <= w.start + 1e-6 && w.start - c <= CUT_SNAP_SEC).pop() : undefined;
           sync.push({ element: `${pathName}.at "${x.slice(1)}"`, word: w.text, wordStart: w.start, ...(cut !== undefined ? { onCut: true } : {}) });
+          atWords.set(pathName, { first: index[hits[0]].word, last: index[hits[hits.length - 1]].word });
           said(words[index[hits[hits.length - 1]].word].end);
           lastShown = Math.max(lastShown, w.start);
           // A number is said once its UNIT is said: Hank's "6" + "hours" (job 390, 0:20).
@@ -688,6 +758,14 @@ export function resolveCues(specs: CueSpec[], words: Word[], opts: ResolveOption
       return out;
     };
     let props = walk(spec.props, "") as Record<string, unknown>;
+    // A pair's "vs" only when the pair is compared (`pairCompared`): read off what is said between
+    // its two values, else the plan's mark. Decided here, where every graphic is resolved — a new
+    // plan, a saved one, the lab — so a saved plan that predates `compare` is drawn the same way.
+    if (SEPARATED_PAIRS.has(spec.template)) {
+      const a = atWords.get("a"), b = atWords.get("b");
+      const text = (from: number, to: number) => words.slice(from, to).map(w => w.text.trim()).join(" ");
+      props.compare = pairCompared(spec.props?.compare, a && b && a.last < b.first ? { join: text(a.last + 1, b.first), second: text(b.first, b.last + 1) } : undefined);
+    }
     // A comparison with a winner gives its verdict after its last side is said, and holds it.
     if ((spec.props?.winner === "left" || spec.props?.winner === "right") && contentEnd !== undefined) said(contentEnd + VERDICT_SEC);
     const readSec = readingSec(spec.props);
@@ -796,8 +874,15 @@ export function resolveCues(specs: CueSpec[], words: Word[], opts: ResolveOption
 
     // 4. The end, conformed to the edit.
     let endCut = nearestCut(cuts, rawEnd);
-    // Never stay stale to leave with a picture: a forward snap past MAX_LINGER_SEC is refused.
-    if (endCut !== undefined && endCut > rawEnd && contentEnd !== undefined && !structural.has(spec.template) && endCut - contentEnd > MAX_LINGER_SEC)
+    // Never stay stale to leave with a picture: a forward snap more than MAX_LINGER_SEC past where its
+    // own sentence finished, as said before that cut, is refused — the point QA measures lingering
+    // from (`spokenEnd`, `stillUpAfterWords`). It was measured from the graphic's own last word, so a
+    // graphic its reading time had carried through the rest of its sentence could not take a snap of
+    // two frames, and faded out into the cut instead: the fade lifts the old shot in its last frames,
+    // a flicker right before the cut. Job 404's opening title "The song at first light goes quiet"
+    // ("quiet" 7.88, "…in the mornings," to 10.24) ended at 10.33 for the cut at 10.40, and its "7
+    // things" at 42.57 for 42.63 — QA's "flicker before a cut at 10.40 s, 42.63 s".
+    if (endCut !== undefined && endCut > rawEnd && contentEnd !== undefined && !structural.has(spec.template) && endCut - ownSentenceEnd(words, contentEnd, endCut).spoken > MAX_LINGER_SEC)
       endCut = undefined;
     if (endCut === undefined) {
       const spill = cuts.filter(c => c < rawEnd && c > rawEnd - TAIL_SPILL_SEC && c - t0 >= MIN_AFTER_TRIM_SEC && c - (lastShown - (spec.startPad ?? 0)) >= MIN_READ_SEC);

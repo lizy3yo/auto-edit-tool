@@ -23,10 +23,16 @@ export type LayoutScene = {
    * the operator dragged, or the host on the right, included. Unset on a split ⇒ the default
    * layout (`DEFAULT_SPLIT_HOST_PANEL`). */
   hostPanel?: HostPanel;
-  /** The locked cold open: the host's name tag (lower third) is up over its leading run. */
+  /** The locked cold open. Where the name tag goes when the film does not say (`nameTagRange`). */
   hostOpener?: boolean;
 };
-export type FilmLayout = { scenes: LayoutScene[] };
+export type FilmLayout = {
+  scenes: LayoutScene[];
+  /** The scenes (`index`) the app drew the host's name tag on — its self-introduction take, else
+   * the first host take that can hold it (`nameCardSceneIndices`). `[]` = the film has no tag.
+   * Unset (the lab, an old caller) ⇒ the tag is assumed on the cold open. */
+  nameCardScenes?: number[];
+};
 
 /** The default split: the picture in a full-height square on the right, the host in the rest on
  * the left (assembly's `splitPanelWidths` — 840 px on 1920×1080). */
@@ -68,9 +74,15 @@ export type RuleProblem = { cue: string; problem: string };
 /** Breathing room between two graphics, so one never reads as the tail of the other. */
 export const MIN_GAP_SEC = 1.0;
 
-/** Where the host's name tag is up — the app's `nameCardSceneIndices`: the leading run of
- * `hostOpener` host scenes, else the first host scene. */
+/** Where the host's name tag is up: the scenes the app says it drew it on (`nameCardScenes`) — the
+ * self-introduction take since jobs 401 and 406, which a rule guessing "the cold open" would have
+ * left open to a host caption under the card — else the leading run of `hostOpener` host scenes,
+ * else the first host scene. */
 export function nameTagRange(film: FilmLayout): [number, number] | undefined {
+  if (film.nameCardScenes) {
+    const tagged = film.scenes.filter(s => film.nameCardScenes!.includes(s.index));
+    return tagged.length ? [tagged[0].narrationStartSec, tagged[tagged.length - 1].narrationEndSec] : undefined;
+  }
   const run: LayoutScene[] = [];
   for (const s of film.scenes) {
     if (!s.hostOpener) break;
@@ -78,6 +90,49 @@ export function nameTagRange(film: FilmLayout): [number, number] | undefined {
   }
   const scenes = run.length ? run : film.scenes.filter(s => s.hostPresent).slice(0, 1);
   return scenes.length ? [scenes[0].narrationStartSec, scenes[scenes.length - 1].narrationEndSec] : undefined;
+}
+
+/** Whether a graphic is up, by more than a frame, while the name tag is (a frame of tolerance: an
+ * edge snapped onto the tag's cut touches it, not overlaps). */
+const overlapsTag = (cue: { start: number; end: number }, tag: [number, number] | undefined): boolean =>
+  !!tag && cue.start < tag[1] - 1 / FPS && cue.end > tag[0] + 1 / FPS;
+
+/** Whether a graphic is up while the host's name tag is (`nameTagRange`). Pure. */
+export const underNameTag = (cue: { start: number; end: number }, film: FilmLayout): boolean => overlapsTag(cue, nameTagRange(film));
+
+/** Whether a graphic is over a host take — full frame or a split — for more than an edge snapped
+ * onto the cut into or out of it (`PANEL_MIN_OVERLAP_SEC`). Pure. */
+export function overHostTake(cue: { start: number; end: number }, film: FilmLayout): boolean {
+  return film.scenes.some(s => s.hostPresent && Math.min(cue.end, s.narrationEndSec) - Math.max(cue.start, s.narrationStartSec) >= PANEL_MIN_OVERLAP_SEC);
+}
+
+/** Where a graphic's drawing goes on this film, as props for its template: the host's panel on a
+ * split (`TemplateDef.panel`), and below the host's chin over a host take (`TemplateDef.belowChin`),
+ * on the right while the name tag holds the bottom-left. */
+export type Placement = { panel?: HostPanel; low?: true; side?: "right" };
+
+/**
+ * The props that put a graphic where it belongs on THIS film's frame — set by the finishing step (and
+ * the lab's composite) before the first drawing, so every readability measure reads it where it
+ * ships, and decided again at every assembly from the film as it is (never saved in the plan).
+ *
+ * Job 407, "Number two squared the walls with a broadaxe." (115.33-118.33 s over host scene 21): the
+ * chapter label was drawn where it sits over b-roll, a band from y 660 to 925, and its top edge cut
+ * across the centred host's beard for 3 s. Over a host take it now goes low, below the chin; on a
+ * split also inside the host's panel (job 402's, on scene 14, crossed the seam onto the picture).
+ * While the name tag is up the bottom-left is the tag's, so a low label takes the right (a panel
+ * keeps its own side). One drawing that only partly covers a host take is low for all of it. Pure.
+ */
+export function placementFor(template: string, cue: { start: number; end: number }, film: FilmLayout): Placement {
+  const def = templateById(template);
+  const out: Placement = {};
+  const panel = def.panel ? hostPanelFor(cue, film) : undefined;
+  if (panel) out.panel = panel;
+  if (def.belowChin && overHostTake(cue, film)) {
+    out.low = true;
+    if (!panel && underNameTag(cue, film)) out.side = "right";
+  }
+  return out;
 }
 
 export function checkRules(cues: ResolvedCue[], film: FilmLayout, opts: { gap?: number } = {}): RuleProblem[] {
@@ -108,11 +163,11 @@ export function checkRules(cues: ResolvedCue[], film: FilmLayout, opts: { gap?: 
         .filter(s => s.hostPresent)
         .reduce((sum, s) => sum + Math.max(0, Math.min(c.end, s.narrationEndSec) - Math.max(c.start, s.narrationStartSec)), 0);
       if (covered < c.end - c.start - 0.1) add("shows the host, but the host is not on screen for all of it");
-      if (nameTag && c.start < nameTag[1] - tol && c.end > nameTag[0] + tol) add("shows the host while the name tag is up");
+      if (overlapsTag(c, nameTag)) add("shows the host while the name tag is up");
     }
     if (c.template === "HostCaption") {
       if (!host.length) add("host caption with no host on screen");
-      if (nameTag && c.start < nameTag[1] - tol && c.end > nameTag[0] + tol) add("host caption while the name tag is up");
+      if (overlapsTag(c, nameTag)) add("host caption while the name tag is up");
     }
   }
   return out;

@@ -367,7 +367,7 @@ import {
   type Silence,
   type RippleEdge,
 } from "./sceneTiming";
-import { sceneHoldPlan } from "../shared/filmTimeline";
+import { planMasterOverlayScenes, sceneHoldPlan } from "../shared/filmTimeline";
 import {
   apimartAccountOf,
   heygenAccountOf,
@@ -455,6 +455,7 @@ import {
   detectSilencesFromBuffer,
   runFfmpeg,
   HOST_INTRO_TRIM_SEC,
+  nameCardOnWindow,
   type SilenceInterval,
 } from "./videoAssembly";
 import { renderNameCardPng } from "./nameCard";
@@ -527,7 +528,7 @@ import {
 } from "./tracking";
 import { stripHostNames } from "../shared/constants";
 import type { VideoSubmitResult } from "./providers/base";
-import { withGraphics } from "./graphics/apply";
+import { graphicsAccent, withGraphics } from "./graphics/apply";
 
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
@@ -8506,29 +8507,131 @@ export function ctaAssemblyScene(
   return s;
 }
 
+/** The hold estimate the card's scenes are picked by and the encoded length assembly draws it on can
+ * differ by a frame or two: a run is only picked when it shows the card this much longer. */
+const NAME_CARD_FIT_MARGIN_SEC = 0.1;
+
 /**
- * Which scenes carry the host's lower third: the LOCKED cold open (`hostOpener`) — scene 1, plus
- * scene 2 when the channel has an alt host photo — so the card introduces the host across the whole
- * two-angle opening the way a broadcast lower third does, held continuously over the cut rather
- * than blinking out and back in. Falls back to the first host shot when no opener survived, and
- * `[]` when there are no host shots at all (no card).
+ * Each assembled scene's on-screen length, seconds, worked out the way `assemblePerSceneFilm` will
+ * encode it — what `nameCardSceneIndices` judges "can this take hold the card" on. On the master
+ * track (every scene carries its slice) it is the master-overlay plan's frame-locked length; off it,
+ * the scene's own voiced length plus its holds; unknown when neither is known.
+ *
+ * NOT the entries' `audioDurationSec`: `sceneHoldPlan` no longer emits a hold, so that is unset on
+ * every scene, every unknown length counted as long enough, and a lone 2.3-2.6 s cold open (jobs
+ * 403 and 406) would still have been picked over a take that can show the card. Pure.
+ */
+export function assembledSceneSecs(
+  scenes: {
+    sliceStartSec?: number;
+    sliceEndSec?: number;
+    audioDurationSec?: number;
+    minHoldSec?: number;
+    tailHoldSec?: number;
+    headHoldSec?: number;
+    /** The scene's own voiced length (`StoryboardScene.audioDuration`), for the per-scene path. */
+    audioDuration?: number;
+  }[]
+): (number | undefined)[] {
+  const overlay =
+    scenes.length > 0 &&
+    scenes.every(
+      s => Number.isFinite(s.sliceStartSec as number) && Number.isFinite(s.sliceEndSec as number)
+    );
+  if (overlay)
+    return planMasterOverlayScenes({
+      scenes: scenes.map(s => ({
+        sliceStartSec: s.sliceStartSec as number,
+        sliceEndSec: s.sliceEndSec as number,
+        holdSec: s.audioDurationSec,
+        minHoldSec: s.minHoldSec,
+        tailHoldSec: s.tailHoldSec,
+        headHoldSec: s.headHoldSec,
+      })),
+    }).scenes.map(p => p.muxDurationSec);
+  return scenes.map(s => {
+    const voiced = Math.max(s.audioDuration ?? 0, s.audioDurationSec ?? 0);
+    return voiced > 0 ? voiced + (s.tailHoldSec ?? 0) + (s.headHoldSec ?? 0) : undefined;
+  });
+}
+
+/** True when a contiguous run shows the name card in at least one of its scenes, by the rule
+ * assembly draws it with (`nameCardOnWindow`). A scene of unknown length counts as long enough. */
+function runShowsNameCard(secs: (number | undefined)[]): boolean {
+  return secs.some(
+    (sec, k) =>
+      sec == null ||
+      !!nameCardOnWindow(sec - NAME_CARD_FIT_MARGIN_SEC, k === 0, k === secs.length - 1)
+  );
+}
+
+/**
+ * Which scenes carry the host's lower third, in this order:
+ *  1. the SELF-INTRODUCTION take (`hostIntro`, "My name is …", "I'm …") — where a viewer learns who
+ *     is talking, so the name belongs there. Gideon's job 401 showed "Gideon Grant" on the opening
+ *     line, more than a minute before "My name is Gideon Grant…", and nothing on that line;
+ *  2. the LOCKED cold open (`hostOpener`, the leading run — two scenes on a two-angle opening, held
+ *     across the cut rather than blinking out and back in) when the film has no introduction, or
+ *     its introduction take cannot hold the card;
+ *  3. then every other full-frame host take in order, one at a time (never a split, where the host
+ *     sits in a panel, nor a CTA beat, whose corner the QR card owns).
+ * The first of these that can SHOW the card (`nameCardOnWindow`, given each scene's on-screen
+ * length in `onScreenSec`) wins: a lone 2.3-2.6 s cold open (jobs 403 and 406, one host photo so no
+ * second opener angle) was given the card, drew none because the hold was under its minimum, and
+ * the film shipped with no name at all. `[]` only when no host take can hold it (no card).
  *
  * Takes positions in the ASSEMBLED scene list (the filtered `ready` array), not
  * `StoryboardScene.index` — a scene dropped for a missing clip therefore shifts the card onto the
  * next surviving host shot instead of onto nothing, and a dropped opener shortens the run rather
- * than splitting it. Pure — unit-tested.
+ * than splitting it. `onScreenSec[i]` is position i's length (`assembledSceneSecs`); unknown
+ * lengths count as long enough. Pure — unit-tested.
  */
 export function nameCardSceneIndices(
-  scenes: Pick<StoryboardScene, "hostPresent" | "hostOpener">[]
+  scenes: Pick<
+    StoryboardScene,
+    | "hostPresent"
+    | "hostOpener"
+    | "hostIntro"
+    | "splitVisual"
+    | "splitRightUrl"
+    | "cta"
+    | "qrHero"
+    | "qrCorner"
+    | "coverHero"
+    | "assetImageUrl"
+  >[],
+  onScreenSec: readonly (number | undefined)[] = []
 ): number[] {
-  // Only a LEADING run counts: a gap would mean the card pops back on after an unrelated cutaway.
-  const run: number[] = [];
-  for (let i = 0; i < scenes.length && scenes[i].hostOpener; i++) {
-    if (scenes[i].hostPresent) run.push(i);
+  const candidates: number[][] = [];
+  const intro = scenes.findIndex(s => s.hostPresent && s.hostIntro);
+  if (intro >= 0) {
+    // An introduction spread over consecutive host takes (or said across the two-angle cold open)
+    // keeps one card across them.
+    const run = [intro];
+    for (
+      let j = intro + 1;
+      j < scenes.length &&
+      scenes[j].hostPresent &&
+      (scenes[j].hostIntro || (scenes[intro].hostOpener && scenes[j].hostOpener));
+      j++
+    )
+      run.push(j);
+    candidates.push(run);
   }
-  if (run.length > 0) return run;
-  const first = scenes.findIndex(s => s.hostPresent);
-  return first >= 0 ? [first] : [];
+  // Only a LEADING run counts: a gap would mean the card pops back on after an unrelated cutaway.
+  const opener: number[] = [];
+  for (let i = 0; i < scenes.length && scenes[i].hostOpener; i++) {
+    if (scenes[i].hostPresent) opener.push(i);
+  }
+  if (opener.length > 0) candidates.push(opener);
+  scenes.forEach((s, i) => {
+    if (!s.hostPresent || s.splitVisual || s.splitRightUrl) return;
+    if (s.cta || s.qrHero || s.qrCorner || s.coverHero || s.assetImageUrl) return;
+    candidates.push([i]);
+  });
+  return (
+    candidates.find(run => runShowsNameCard(run.map(i => onScreenSec[i]))) ?? []
+  );
 }
 
 /**
@@ -18191,17 +18294,35 @@ async function assembleAndFinalizeCore(
     };
   });
 
-  // Host lower third ("Riley Danvers" / "Gardener" / "Fresno, CA"), held continuously across the
-  // locked cold open. Entirely non-fatal: a render failure — or no host identity on the channel,
-  // or no host shot at all — just means the film ships without a card.
+  // Host lower third ("Riley Danvers" / "Gardener" / "Fresno, CA") on the self-introduction take,
+  // else the first host take that can hold it (`nameCardSceneIndices`, judged on each scene's
+  // on-screen length), in the graphics' accent. Entirely non-fatal: a render failure — or no host
+  // identity on the channel, or no host take long enough — just means the film ships without a card.
   let nameCard: { png: Buffer; sceneIndices: number[] } | undefined;
-  const nameCardScenes = nameCardSceneIndices(readyScenes);
+  const hasHostIdentity = [params.hostName, params.hostTitle, params.hostLocation].some(v =>
+    v?.trim()
+  );
+  const nameCardScenes = hasHostIdentity
+    ? nameCardSceneIndices(
+        readyScenes,
+        // Each scene's real on-screen length — `audioDurationSec` is unset on every scene now.
+        assembledSceneSecs(
+          ready.map((r, i) => ({ ...r, audioDuration: readyScenes[i].audioDuration }))
+        )
+      )
+    : [];
+  if (hasHostIdentity && nameCardScenes.length === 0 && readyScenes.some(s => s.hostPresent)) {
+    console.warn(
+      `[Longform ${jobId}] no host take is long enough to hold the name card — the film has none`
+    );
+  }
   if (nameCardScenes.length > 0) {
     try {
       const png = await renderNameCardPng({
         name: params.hostName,
         title: params.hostTitle,
         location: params.hostLocation,
+        accent: await graphicsAccent(params),
         ...dimensionsFor(TALKING_HEAD_ASPECT_RATIO),
       });
       if (png) nameCard = { png, sceneIndices: nameCardScenes };
@@ -18268,11 +18389,19 @@ async function assembleAndFinalizeCore(
   // uploaded — so the saved film carries its graphics. Never fails the film: on any error, or with
   // graphics off (GRAPHICS=0 or the channel's switch), the film ships as assembled.
   const hadGraphics = JSON.stringify(params.graphics ?? null);
-  const filmBuffer = await withGraphics(jobId, buffer, readyScenes, params, {
-    phase: (label, pct) => setJobPhase(jobId, { title: "Adding graphics", label, pct }),
-    warn: m => appendJobWarning(jobId, m),
-    log: m => console.log(`[Longform ${jobId}] ${m}`),
-  });
+  const filmBuffer = await withGraphics(
+    jobId,
+    buffer,
+    readyScenes,
+    params,
+    {
+      phase: (label, pct) => setJobPhase(jobId, { title: "Adding graphics", label, pct }),
+      warn: m => appendJobWarning(jobId, m),
+      log: m => console.log(`[Longform ${jobId}] ${m}`),
+    },
+    // Where the card was actually drawn, so no host graphic is planned under it.
+    (nameCard?.sceneIndices ?? []).map(i => readyScenes[i].index)
+  );
   const graphicsChanged = JSON.stringify(params.graphics ?? null) !== hadGraphics;
   if (passStopped(jobId)) throw new AssemblyStoppedError();
 

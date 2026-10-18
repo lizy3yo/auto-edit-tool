@@ -12,10 +12,22 @@ import { HEIGHT, WIDTH } from "../../graphics/src/theme";
 import { splitPanelMissing } from "@shared/splitPanel";
 import { getChannelConfig } from "../db";
 import { resolveSplitLayout } from "../videoAssembly";
-import { addGraphics, type GraphicsRecord } from "./finish";
+import { addGraphics, themeOf, type GraphicsRecord } from "./finish";
 
 /** App-wide off switch: GRAPHICS=0. */
 export const graphicsEnabled = () => process.env.GRAPHICS !== "0";
+
+/**
+ * The accent the film's graphics are drawn in, for the host name card: the one the last graphics run
+ * saved on the job, else read off the same host photo the same way (`themeOf`). Jobs 405 and 407
+ * opened on a grey card while every graphic after it carried the channel's colour. Undefined (the
+ * theme's default) when neither can be had; never throws.
+ */
+export async function graphicsAccent(
+  params: Pick<LongformInputParams, "graphics" | "faceImageUrl">
+): Promise<string | undefined> {
+  return params.graphics?.theme?.accent ?? (await themeOf(params.faceImageUrl))?.accent;
+}
 
 /** At most this many problems (and offered sentences) per round, and readability fixes, are kept on
  * the job — it rides inputParams on every save; the render log still prints them all. */
@@ -85,9 +97,16 @@ const playsSplit = (s: StoryboardScene) => !!s.splitRightUrl && !splitPanelMissi
 export const splitHostPanel = (s: StoryboardScene): HostPanel =>
   (({ hostX, hostW }) => ({ x: hostX, w: hostW }))(resolveSplitLayout(WIDTH, HEIGHT, s.splitLayout));
 
-/** The film's layout for the rules: each scene's span on the film, and what is on screen. */
-export function filmLayoutOf(scenes: StoryboardScene[]): FilmLayout {
+/**
+ * The film's layout for the rules: each scene's span on the film, and what is on screen.
+ * `nameCardScenes` are the `StoryboardScene.index` values assembly drew the host name card on
+ * (`nameCardSceneIndices`; `[]` when the film has none): the rules then keep host graphics off
+ * exactly those scenes, wherever the card went — the self-introduction take now, not always the
+ * cold open. Unset ⇒ the rules' own guess (`nameTagRange`).
+ */
+export function filmLayoutOf(scenes: StoryboardScene[], nameCardScenes?: number[]): FilmLayout {
   return {
+    ...(nameCardScenes ? { nameCardScenes } : {}),
     scenes: scenes
       .filter(s => typeof s.narrationStartSec === "number" && typeof s.narrationEndSec === "number")
       .map(s => {
@@ -117,9 +136,17 @@ export type GraphicsHooks = {
 
 /**
  * The assembled film WITH its graphics (or as it was, when they are off or fail). Updates
- * `params.graphics` in place; the caller saves `params` with the film.
+ * `params.graphics` in place; the caller saves `params` with the film. `nameCardScenes`: the
+ * scenes assembly drew the host name card on (`filmLayoutOf`).
  */
-export async function withGraphics(jobId: number, film: Buffer, scenes: StoryboardScene[], params: LongformInputParams, hooks: GraphicsHooks): Promise<Buffer> {
+export async function withGraphics(
+  jobId: number,
+  film: Buffer,
+  scenes: StoryboardScene[],
+  params: LongformInputParams,
+  hooks: GraphicsHooks,
+  nameCardScenes?: number[]
+): Promise<Buffer> {
   const prior: JobGraphics = params.graphics ?? {};
   const skip = (why: string): Buffer => {
     params.graphics = { ...prior, skipped: why, replan: false };
@@ -141,7 +168,7 @@ export async function withGraphics(jobId: number, film: Buffer, scenes: Storyboa
       jobId,
       filmPath,
       outPath,
-      film: filmLayoutOf(scenes),
+      film: filmLayoutOf(scenes, nameCardScenes),
       hostPhotoUrl: params.faceImageUrl,
       savedPlan: (prior.plan as CueSpec[] | undefined) ?? undefined,
       replan: !!prior.replan,

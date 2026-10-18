@@ -55,6 +55,10 @@ export type TemplateDef = {
    * finishing step sets it for every cue over a split, so the words stay beside the host and never
    * run across the seam onto the picture. */
   panel?: boolean;
+  /** Its plate is drawn BELOW THE HOST'S CHIN over a host take (`props.low`, and `props.side`
+   * "right" while the name card holds the bottom-left — src/plan/rules.ts `placementFor`): drawn
+   * where it sits over b-roll, it crossed the face (job 407, the chapter label on scene 21). */
+  belowChin?: boolean;
   /** Darkens or blurs the whole frame: held to b-roll like a card, never over a host take. */
   dims?: boolean;
   /** A TITLE, not a caption (a chapter label): keeps its planned length instead of leaving when
@@ -152,6 +156,10 @@ export const TEMPLATES: TemplateDef[] = [
     id: "ChapterLabel",
     kind: "overlay",
     structural: true,
+    // Over a host take: below the chin, and inside the host's panel on a split (job 402's crossed the
+    // seam onto the picture).
+    panel: true,
+    belowChin: true,
     component: ChapterLabel,
     defaultProps: { durationSec: 5, kicker: "On the label · 1 of 3", number: 1, title: "The type" },
   },
@@ -258,7 +266,7 @@ TEMPLATES.push(
     kind: "overlay",
     on: "broll",
     component: NumberLabel,
-    defaultProps: { durationSec: 5, kicker: "Time to escape", a: { label: "Then", value: "17 min", at: 0.3 }, b: { label: "Now", value: "3 min", at: 1.6 } },
+    defaultProps: { durationSec: 5, kicker: "Time to escape", a: { label: "Then", value: "17 min", at: 0.3 }, b: { label: "Now", value: "3 min", at: 1.6 }, compare: true },
   },
   {
     id: "BarChart",
@@ -388,3 +396,29 @@ export const templateById = (id: string): TemplateDef => {
   if (!t) throw new Error(`Unknown template "${id}"`);
   return t;
 };
+
+/**
+ * Whether a graphic HIDES THE PICTURE while it is up: a full-screen card, a framed window, or an
+ * overlay laid over the footage blurred (`underlay: "blur"`, the Quote). The blurred one was left
+ * out, so it was neither held to the cut nor counted by QA's blink check: job 407's quote (2:45)
+ * ended 0.54 s before the cut to the host, and the sharp picture it had hidden — a drawn face —
+ * blinked up for 16 frames while QA said "Blinks: 0".
+ * A darkening alone (`dims`) leaves the picture in view and is not one of these.
+ */
+export const replacesPicture = (t: TemplateDef): boolean => t.kind === "card" || t.underlay === "window" || t.underlay === "blur";
+
+/**
+ * The template sets the cue resolver reads (`ResolveOptions` in cueResolve.ts), from this one list:
+ * the planner, the finishing step, the lab's composite and the tests all take them from here, so a
+ * template cannot be held to the cut in one place and not in another. `windows` is named on its own:
+ * a blurred overlay replaces the picture like a window but has no items landing on their pictures.
+ */
+export function resolveSets(): { structural: Set<string>; cards: Set<string>; fullFrame: Set<string>; windows: Set<string> } {
+  const ids = (keep: (t: TemplateDef) => boolean) => new Set(TEMPLATES.filter(keep).map(t => t.id));
+  return {
+    structural: ids(t => !!t.structural),
+    cards: ids(t => t.kind === "card"),
+    fullFrame: ids(replacesPicture),
+    windows: ids(t => t.underlay === "window"),
+  };
+}

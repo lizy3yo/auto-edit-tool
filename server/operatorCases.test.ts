@@ -3476,3 +3476,229 @@ describe("a pearl strand on a dresser is a necklace, not the host (round 9's rev
     expect(scenes[2].showSubject).toMatch(/worn at the host's own neck/);
   });
 });
+
+describe("a graphic that hides the picture leaves no blink of footage, and none fades out into a cut (round 11 graphics review, 2026-10-18)", () => {
+  const heard = (s: string) =>
+    s.split(" ").map(t => {
+      const [text, range] = t.split("@");
+      const [start, end] = range.split("-").map(Number);
+      return { text, start, end };
+    });
+  const scene = (index: number, a: number, b: number, hostPresent = false) => ({ index, narrationStartSec: a, narrationEndSec: b, scriptText: "", hostPresent, cta: false, split: false, hostOpener: false });
+  const frames = (f: number[]) => f.map(x => x / 30);
+
+  // 404 versus-january-robin (1:23-1:28): the Versus card left 0.80 s of the robin before the next shot,
+  // "And if you live…" starting a new sentence in that sliver; the film's QA reported the blink and the
+  // film shipped. The planner now asks QA's own test and sends the card back.
+  it("404: the planner refuses the Versus card that leaves 0.80 s of the shot, and says why", async () => {
+    const { planGraphics } = await import("../graphics/src/plan/planner");
+    const words = heard(
+      "so@80.80-81.00 the@81.14-81.24 robin@81.28-81.56 you@81.60-81.74 see@81.78-81.92 in@81.96-82.04 January@82.12-82.80 could@82.94-83.14 be@83.20-83.32 a@83.36-83.40 traveler@83.48-83.92 from@83.96-84.12 up@84.20-84.28 north@84.36-84.70 instead@84.98-85.38 of@85.40-85.46 the@85.50-85.58 one@85.68-85.78 that@85.80-85.92 raised@85.96-86.22 a@86.28-86.32 family@86.36-86.74 on@86.84-86.90 your@86.94-87.08 porch@87.14-87.42 light.@87.484-87.684 And@88.33-88.41 if@88.45-88.51 you@88.55-88.67 live@88.71-88.85 along@88.91-89.15"
+    );
+    const versus = {
+      id: "versus-january-robin",
+      template: "Versus",
+      start: "so the robin you see in January",
+      startPad: -0.15,
+      end: "family on your porch light",
+      endPad: 0.3,
+      props: {
+        kicker: "Your January robin",
+        left: { at: "@a traveler from up north", say: "a traveler from up north", sub: "A traveler from up north", title: "Northern traveler" },
+        right: { at: "@the one that raised a family", say: "the one that raised a family on your porch light", sub: "Raised a family here", title: "Your porch robin" },
+        winner: "none",
+      },
+    };
+    const out = await planGraphics({ words, cuts: frames([2411, 2664]), film: { scenes: [scene(14, 80.3578, 88.803), scene(15, 88.803, 97.8576)] }, ask: async () => JSON.stringify({ cues: [versus] }), ensureIcon: async () => true });
+    expect(out.cues).toEqual([]);
+    expect(out.rounds[0].problems[0].problem).toMatch(/^Versus hides the picture, and it leaves 0\.80 s of the shot alone .*"And if you live…" starts a new sentence first/);
+  });
+
+  // 407 boots-clear-quote (2:40-2:45): the Quote blurs the whole picture, but only cards and windows
+  // were held to the cut and counted by QA — it ended 0.54 s before the cut to the host, the sharp
+  // picture (a drawn face) blinked up, and QA said "Blinks: 0".
+  it("407: the Quote over the blurred picture is held to the cut, and QA would have failed the shipped one", async () => {
+    const { resolveCues } = await import("../graphics/src/cueResolve");
+    const { resolveSets } = await import("../graphics/src/registry");
+    const { judgeFilm } = await import("../graphics/src/plan/qa");
+    const words = heard("year.@159.04-159.34 Keep@160.58-160.78 your@160.82-160.98 boots@161.02-161.30 clear@161.40-161.64 of@161.68-161.74 the@161.78-161.88 swing@161.96-162.42 and@162.90-163.00 stop@163.14-163.58 when@163.72-163.86 your@163.88-164.08 arms@164.24-164.48 tire.@164.58-164.94 The@165.88-166.00 logs@166.08-166.50");
+    const quote = { id: "boots-clear-quote", template: "Quote", start: "Keep your boots clear of", startPad: -0.15, end: "when your arms tire", endPad: 0.3, props: { quote: { text: "Keep your boots clear of the swing, and stop when your arms tire.", words: true }, author: "Sam", emphasis: ["boots"] } };
+    const [q] = resolveCues([quote], words, { cuts: frames([4814, 4973]), fps: 30, ...resolveSets() });
+    expect([q.startFrame, q.endFrame]).toEqual([4814, 4973]);
+    const d = new Array(5100).fill(0.5);
+    d[4814] = d[4973] = 60;
+    const shipped = { ...q, endFrame: 4957, end: 4957 / 30 };
+    expect(judgeFilm({ fps: 30, cues: [shipped], filmDiffs: d, reelDiffs: d, rules: [], readability: [] }).failures).toContain("a blink of footage beside boots-clear-quote");
+  });
+
+  // 404 title-song-goes-quiet and seven-things: each ended 2 frames before its cut (10.33 for 10.40,
+  // 42.57 for 42.63) because the snap onto the cut was measured from its own last word, not from where
+  // its sentence finished; its darkening faded out over those frames — QA's "flicker before a cut".
+  it("404: the opening title leaves on its cut with no fade", async () => {
+    const { resolveCues } = await import("../graphics/src/cueResolve");
+    const { resolveSets } = await import("../graphics/src/registry");
+    const words = heard(
+      "Florida.@4.62-5.12 The@5.82-5.92 song@5.98-6.30 at@6.36-6.44 first@6.50-6.76 light@6.84-7.08 goes@7.12-7.36 quiet,@7.46-7.88 the@8.34-8.44 grass@8.48-8.84 sits@8.88-9.12 empty@9.28-9.58 in@9.62-9.68 the@9.72-9.78 mornings,@9.84-10.24 and@10.66-10.78 nobody@10.90-11.28"
+    );
+    const title = { id: "title-song-goes-quiet", template: "TitleOverFootage", start: "The song at first light goes", startPad: -0.15, end: "at first light goes quiet", endPad: 0.3, props: { kicker: "Winter robins", phrase: { text: "The song at first light goes quiet", words: true }, emphasis: ["quiet"] } };
+    const [t] = resolveCues([title], words, { cuts: frames([171, 312]), fps: 30, ...resolveSets() });
+    expect([t.startFrame, t.endFrame, t.props.exit]).toEqual([171, 312, "cut"]);
+  });
+});
+
+describe("the host name card: on the self-introduction, in Inter, in the graphics' look (round 11 review, 2026-10-18)", () => {
+  // Each film's host takes at their real positions and lengths (seconds on screen); every other
+  // scene a 3 s picture. Real script text where the introduction is found from it.
+  const filmOf = (n: number, hosts: ({ at: number; sec: number } & Partial<StoryboardScene>)[]) => {
+    const scenes: StoryboardScene[] = Array.from({ length: n }, (_, i) => ({ index: i + 1, scriptText: "" }) as StoryboardScene);
+    const secs: number[] = Array.from({ length: n }, () => 3);
+    for (const { at, sec, ...over } of hosts) {
+      scenes[at] = { ...scenes[at], hostPresent: true, ...over } as StoryboardScene;
+      secs[at] = sec;
+    }
+    return { scenes, secs };
+  };
+
+  // 406 (Gary): the 2.56 s cold open could not hold the card, so it drew none, and "…I'm Gary," at
+  // 28.5 s closed a 10.4 s take with no name on screen. The whole film had no card.
+  it("406: the card goes on the take that ends '…I'm Gary,'", async () => {
+    const { markHostIntroductions, nameCardSceneIndices } = await import("./longformVideo");
+    const { scenes, secs } = filmOf(34, [
+      { at: 0, sec: 2.56, hostOpener: true, scriptText: "Somewhere along the line, everybody agreed" },
+      {
+        at: 7,
+        sec: 10.44,
+        scriptText:
+          "Tonight we’re taking it apart: seventeen real businesses that start for under five hundred dollars, most of them with gear you already own. I’m Gary,",
+      },
+      { at: 15, sec: 7.56, splitRightUrl: "https://r2.example/406-16.jpg" },
+    ]);
+    markHostIntroductions(scenes, "Gary", true);
+    expect(scenes[7].hostIntro).toBe(true);
+    expect(nameCardSceneIndices(scenes, secs)).toEqual([7]);
+  });
+
+  // 401 (Gideon Grant): the card showed on the opening line, more than a minute before "My name is
+  // Gideon Grant…", and the introduction itself had none.
+  it("401: the card goes on 'My name is Gideon Grant…', not the opening line", async () => {
+    const { markHostIntroductions, nameCardSceneIndices } = await import("./longformVideo");
+    const { scenes, secs } = filmOf(37, [
+      { at: 0, sec: 3.03, hostOpener: true, scriptText: "There is a man standing in the greeting card aisle of" },
+      { at: 13, sec: 6.51, scriptText: "My name is Gideon Grant, and this channel is for men and women in their fifties, sixties, and beyond —" },
+    ]);
+    markHostIntroductions(scenes, "Gideon Grant", true);
+    expect(nameCardSceneIndices(scenes, secs)).toEqual([13]);
+  });
+
+  // 403 (Werner): the same short cold open (2.33 s) — and "I am Werner Finkbeiner." opens a 4.8 s take.
+  it("403: the card goes on 'I am Werner Finkbeiner.'", async () => {
+    const { markHostIntroductions, nameCardSceneIndices } = await import("./longformVideo");
+    const { scenes, secs } = filmOf(27, [
+      { at: 0, sec: 2.33, hostOpener: true, scriptText: "Look at the floor beside your toilet." },
+      { at: 8, sec: 4.82, scriptText: "I am Werner Finkbeiner. This channel is for people in older houses and apartments" },
+    ]);
+    markHostIntroductions(scenes, "Werner Finkbeiner", true);
+    expect(nameCardSceneIndices(scenes, secs)).toEqual([8]);
+  });
+
+  // 405 ("Luca Marino / Cat Trainer") and 407 ("Sawdust Sam"): the card was a Times-style serif in a
+  // grey box, the only serif in the film — librsvg on the Windows machine never found Inter.
+  it("405, 407: the card is drawn in Inter, with the role as the graphics' accent kicker", async () => {
+    const { renderNameCardPng } = await import("./nameCard");
+    const { interFontReady } = await import("./fontConfig");
+    const png = await renderNameCardPng({ name: "Luca Marino", title: "Cat Trainer", accent: "#E8A13A", width: 1920, height: 1080 });
+    expect(png).not.toBeNull();
+    expect(await interFontReady()).toBe(true);
+  });
+});
+
+describe("the host name card is judged on the take's real length (round 11 review, 2026-10-18)", () => {
+  // Assembly handed the card's placement `audioDurationSec`, which `sceneHoldPlan` leaves unset on
+  // every scene — so every take read as long enough to hold the card, and a take that could not show
+  // it still took it. Scarlett's job 387: "I'm Scarlett Sterling, and this channel is for" is 2.98 s
+  // on screen, too short for the card, and the film would have had no name at all.
+  it("387: the 2.98 s introduction gives the card to the 7.1 s cold open, which can show it", async () => {
+    const { assembledSceneSecs, nameCardSceneIndices } = await import("./longformVideo");
+    const rows: [number, number, Partial<StoryboardScene>][] = [
+      [0, 7.14569, { hostPresent: true, hostOpener: true }],
+      [7.14569, 11.3309, {}],
+      [11.3309, 16.597, { hostPresent: true, splitRightUrl: "https://r2.example/387-3.jpg" }],
+      [16.597, 27.1868, {}],
+      [27.1868, 30.216, { hostPresent: true, hostIntro: true }],
+      [30.216, 35.54, {}],
+    ];
+    const scenes = rows.map(([, , f]) => f as StoryboardScene);
+    // As assembly builds its entries: the slice set, `audioDurationSec` unset.
+    const secs = assembledSceneSecs(rows.map(([a, b]) => ({ sliceStartSec: a, sliceEndSec: b, audioDurationSec: undefined })));
+    expect(nameCardSceneIndices(scenes, secs)).toEqual([0]);
+  });
+});
+
+describe("a chapter label over the host sits clear of the face (round 11 review, 2026-10-18)", () => {
+  // 407 chapter-walls ("Number two squared the walls with a broadaxe.", 115.33-118.33 s over host
+  // scene 21, full frame): the label was drawn where it sits over b-roll, a band from y 660 to 925,
+  // and its top edge cut across the centred host's lower beard (it ends at ~690 px) for 3 s.
+  const R2 = "https://pub-x.r2.dev/longform/407";
+  const sam = [
+    { index: 20, narrationStartSec: 98.7739, narrationEndSec: 115.328, clipUrls: [`${R2}/still-20-0.mp4`] },
+    { index: 21, narrationStartSec: 115.328, narrationEndSec: 119.416, hostPresent: true, clipUrls: [`${R2}/clip-21-0.mp4`] },
+    { index: 22, narrationStartSec: 119.416, narrationEndSec: 127.451, clipUrls: [`${R2}/still-22-0.mp4`] },
+  ] as unknown as StoryboardScene[];
+
+  it("407 chapter-walls: drawn low over the host take, its plate starting 100 px below the beard", async () => {
+    const { filmLayoutOf } = await import("./graphics/apply");
+    const { placementFor } = await import("../graphics/src/plan/rules");
+    const { chapterBox } = await import("../graphics/src/overlays");
+    const placed = placementFor("ChapterLabel", { start: 115.333, end: 118.333 }, filmLayoutOf(sam, []));
+    expect(placed).toEqual({ low: true });
+    expect(chapterBox({}).top).toBeLessThan(690);
+    expect(chapterBox(placed).top).toBeGreaterThanOrEqual(790);
+  });
+
+  // 407 chapter-roof (67.87-72.37 s) is over b-roll: it keeps the designed place (what it covered
+  // there is the picture's subject — a separate matter, not the host).
+  it("407 chapter-roof over b-roll keeps the designed place", async () => {
+    const { placementFor } = await import("../graphics/src/plan/rules");
+    const layout = { scenes: [{ index: 14, narrationStartSec: 67.8766, narrationEndSec: 78.065 }], nameCardScenes: [] };
+    expect(placementFor("ChapterLabel", { start: 67.867, end: 72.367 }, layout)).toEqual({});
+  });
+});
+
+describe("two values get 'vs' only when they are compared (round 11 review, 2026-10-18)", () => {
+  /** Words as the transcriber timed them: "text@start-end …". */
+  const heard = (s: string) =>
+    s.split(" ").map(t => {
+      const [text, range] = t.split("@");
+      const [start, end] = range.split("-").map(Number);
+      return { text, start, end };
+    });
+  const drawnCompare = async (props: Record<string, unknown>, start: string, end: string, words: { text: string; start: number; end: number }[]) => {
+    const { resolveCues } = await import("../graphics/src/cueResolve");
+    return resolveCues([{ id: "pair", template: "NumberLabel", start, startPad: -0.15, end, endPad: 0.3, props }], words)[0].props.compare;
+  };
+
+  // 406 sharpening-prices (1:22): "A KNIFE $5 to $10 vs A MOWER BLADE $10 to $20" for a price for
+  // each of two services — "vs" made it a contest. Joined by "and": no "vs", even if the plan marks it.
+  it("406: '$5 to $10 a knife and $10 to $20 a mower blade' is drawn without 'vs'", async () => {
+    const words = heard(
+      "You@82.138-82.278 charge@82.318-82.618 $5@82.718-82.978 to@83.138-83.318 $10@83.358-83.659 a@83.699-83.719 knife@83.779-84.059 and@84.239-84.359 $10@84.459-84.679 to@84.719-84.799 $20@84.859-85.179 a@85.239-85.279 mower@85.319-85.579 blade,@85.599-85.899 and@86.28-86.36"
+    );
+    const props = { kicker: "You charge", a: { label: "A knife", value: "$5 to $10", at: "@$5 to $10 a knife" }, b: { label: "A mower blade", value: "$10 to $20", at: "@$10 to $20 a mower" }, compare: true };
+    expect(await drawnCompare(props, "You charge $5 to $10", "a mower blade,", words)).toBe(false);
+  });
+
+  // 397 furniture-price-range (1:04): "FROM $150 vs UP TO $600" for a range.
+  it("397: 'And furniture, $150 to $600.' is drawn without 'vs'", async () => {
+    const words = heard("And@64.628-64.788 furniture,@64.928-65.408 $150@65.849-66.229 to@66.449-66.989 $600.@67.41-68.23 Once@68.891-69.091");
+    const props = { kicker: "Furniture", a: { label: "From", value: "$150", at: "@$150" }, b: { label: "Up to", value: "$600", at: "@$600." }, compare: true };
+    expect(await drawnCompare(props, "And furniture, $150 to $600.", "$150 to $600.", words)).toBe(false);
+  });
+
+  // 401 age-vs-father (0:15): a real comparison keeps its "vs" when the plan marks it — and the "vs"
+  // now enters with "81" instead of standing alone beside "HIS AGE 64" for 3.5 s.
+  it("401: 'He is 64. His father made it to 81.' keeps 'vs' when marked compared", async () => {
+    const words = heard("He@15.427-15.528 is@15.608-15.688 64.@15.868-16.528 His@17.428-17.569 father@17.649-18.049 made@18.289-18.489 it@18.529-18.589 to@18.629-19.049 81.@19.289-19.409");
+    const props = { kicker: "Counting backward", a: { label: "His age", value: "64", at: "@sixty-four" }, b: { label: "His father", value: "81", at: "@eighty-one" }, compare: true };
+    expect(await drawnCompare(props, "He is 64.", "made it to 81.", words)).toBe(true);
+  });
+});

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { TEMPLATES } from "../registry";
-import { DEFAULT_SPLIT_HOST_PANEL, hostPanelFor, type FilmLayout, type LayoutScene } from "./rules";
+import type { ResolvedCue } from "../cueResolve";
+import { DEFAULT_SPLIT_HOST_PANEL, checkRules, hostPanelFor, nameTagRange, overHostTake, placementFor, underNameTag, type FilmLayout, type LayoutScene } from "./rules";
 
 /**
  * A caption on a split stays in the host's panel. Gideon's job 400 at 2:18 (scene 27, host left, a
@@ -100,5 +101,122 @@ describe("the planner is told which side the host is on", () => {
     const right = userPrompt({ scenes: [scene(27, 138.19, 144.12, { hostPresent: true, split: true, hostPanel: { x: 1080, w: 840 }, scriptText: "I pull my chair in closer." })] }, []);
     expect(right).toContain("#27 2:18.2-2:24.1 SPLIT (host right, picture left)");
     expect(userPrompt(film, [])).toContain("#27 2:18.2-2:24.1 SPLIT (host left, picture right)");
+  });
+});
+
+/**
+ * The name tag is where the app drew it. Gideon's job 401 now carries it on "My name is Gideon
+ * Grant…" (scene 14, 67.54-74.05 s), not the cold open; a rule still guessing "the cold open" would
+ * let a host caption sit under the card on the introduction and keep one off the opening for nothing.
+ */
+describe("nameTagRange — the scenes the app drew the name card on", () => {
+  const gideon = (nameCardScenes?: number[]): FilmLayout => ({
+    scenes: [
+      scene(1, 0, 3.03, { hostPresent: true, hostOpener: true }),
+      scene(2, 3.03, 8.1),
+      scene(13, 61.86, 67.54),
+      scene(14, 67.54, 74.05, { hostPresent: true }),
+      scene(15, 74.05, 80.2),
+    ],
+    ...(nameCardScenes ? { nameCardScenes } : {}),
+  });
+  const caption = (start: number, end: number) =>
+    ({ id: "cap", template: "HostCaption", start, end, props: { durationSec: end - start }, sync: [], conformed: { start: false, end: false }, startFrame: Math.round(start * 30), endFrame: Math.round(end * 30) }) as ResolvedCue;
+
+  it("401: the introduction take, as the app says", () => {
+    expect(nameTagRange(gideon([14]))).toEqual([67.54, 74.05]);
+    expect(checkRules([caption(68, 72)], gideon([14])).map(p => p.problem)).toContain("host caption while the name tag is up");
+    expect(checkRules([caption(0.2, 2.8)], gideon([14]))).toEqual([]);
+  });
+
+  it("a film the app drew no card on has no tag at all", () => {
+    expect(nameTagRange(gideon([]))).toBeUndefined();
+    expect(checkRules([caption(0.2, 2.8)], gideon([]))).toEqual([]);
+  });
+
+  it("unset (the lab, an old caller): the cold open, as before", () => {
+    expect(nameTagRange(gideon())).toEqual([0, 3.03]);
+  });
+
+  it("the planner is told the tag is up on the introduction, not on the opening", async () => {
+    const { userPrompt } = await import("./planner");
+    const told = userPrompt(gideon([14]), []);
+    expect(told).toMatch(/#14 [^\n]*\[NAME TAG UP\]/);
+    expect(told).not.toMatch(/#1 [^\n]*\[NAME TAG UP\]/);
+  });
+});
+
+/**
+ * A chapter label over a host take sits clear of the host's face. Job 407, "Number two squared the
+ * walls with a broadaxe." (115.33-118.33 s, host scene 21, full frame): drawn where it sits over
+ * b-roll, its band (y 660-925) cut across the centred host's beard for 3 s. Job 402's "The whole can"
+ * (55.90-60.40 s, split scene 14) also ran across the seam onto the picture beside the host.
+ */
+describe("placementFor — where a graphic's drawing goes on this film", () => {
+  // Job 407's scenes around its two chapter labels (seconds on the film, as stored).
+  const sam: FilmLayout = {
+    scenes: [
+      scene(1, 0, 7.154, { hostPresent: true, hostOpener: true }),
+      scene(2, 7.154, 11.7938),
+      scene(13, 61.576, 67.8766, { hostPresent: true, split: true, hostPanel: { x: 0, w: 840 } }),
+      scene(14, 67.8766, 78.065),
+      scene(20, 98.7739, 115.328),
+      scene(21, 115.328, 119.416, { hostPresent: true }),
+      scene(22, 119.416, 127.451),
+    ],
+  };
+
+  it("407 chapter-walls over full-frame host scene 21: low, below the chin — no panel, the left side", () => {
+    expect(overHostTake({ start: 115.333, end: 118.333 }, sam)).toBe(true);
+    expect(placementFor("ChapterLabel", { start: 115.333, end: 118.333 }, sam)).toEqual({ low: true });
+  });
+
+  it("407 chapter-roof over b-roll scene 14 stays as designed: it only touches the split before it by 0.01 s", () => {
+    expect(overHostTake({ start: 67.867, end: 72.367 }, sam)).toBe(false);
+    expect(placementFor("ChapterLabel", { start: 67.867, end: 72.367 }, sam)).toEqual({});
+  });
+
+  it("402 chapter-whole-can over split scene 14, running on over the b-roll after it: the host's panel, low", () => {
+    const helena: FilmLayout = {
+      scenes: [
+        scene(13, 47.2874, 55.9074),
+        scene(14, 55.9074, 59.3458, { hostPresent: true, split: true, hostPanel: { x: 0, w: 840 } }),
+        scene(15, 59.3458, 66.154),
+      ],
+    };
+    expect(placementFor("ChapterLabel", { start: 55.9, end: 60.4 }, helena)).toEqual({ panel: { x: 0, w: 840 }, low: true });
+  });
+
+  it("389 chapter-4-fairs over full-frame host scene 30 is low too; a host on the right of a split keeps its panel's side", () => {
+    const dale: FilmLayout = { scenes: [scene(1, 0, 2.212, { hostPresent: true, hostOpener: true }), scene(29, 154.505, 164.337), scene(30, 164.337, 169.345, { hostPresent: true }), scene(31, 169.345, 181.689)] };
+    expect(placementFor("ChapterLabel", { start: 164.333, end: 168.333 }, dale)).toEqual({ low: true });
+    const right: FilmLayout = { scenes: [scene(30, 164.337, 169.345, { hostPresent: true, split: true, hostPanel: { x: 1080, w: 840 } })], nameCardScenes: [] };
+    expect(placementFor("ChapterLabel", { start: 164.4, end: 168.3 }, right)).toEqual({ panel: { x: 1080, w: 840 }, low: true });
+  });
+
+  it("over the take the name tag is on, a low label takes the right (the tag holds the bottom-left)", () => {
+    // 407 with the tag where the app drew it (the cold open) — a part counted on that take.
+    const tagged: FilmLayout = { ...sam, nameCardScenes: [1] };
+    expect(underNameTag({ start: 2, end: 6 }, tagged)).toBe(true);
+    expect(placementFor("ChapterLabel", { start: 2, end: 6 }, tagged)).toEqual({ low: true, side: "right" });
+    // scene 21 has no tag: the left, as everywhere else
+    expect(placementFor("ChapterLabel", { start: 115.333, end: 118.333 }, tagged)).toEqual({ low: true });
+    // a film the app drew no tag on
+    expect(placementFor("ChapterLabel", { start: 2, end: 6 }, { ...sam, nameCardScenes: [] })).toEqual({ low: true });
+  });
+
+  it("only a chapter label is moved below the chin; a host caption keeps its own place (its panel on a split, as before)", () => {
+    expect(placementFor("HostCaption", { start: 138.2, end: 143.133 }, film)).toEqual({ panel: { x: 0, w: 840 } });
+    expect(placementFor("HostCaption", { start: 15.267, end: 17.333 }, film)).toEqual({});
+    expect(placementFor("StepLabels", { start: 115.333, end: 118.333 }, sam)).toEqual({});
+  });
+
+  it("the templates that go below the chin are overlays allowed over a host take", () => {
+    const low = TEMPLATES.filter(t => t.belowChin);
+    expect(low.map(t => t.id)).toContain("ChapterLabel");
+    for (const t of low) {
+      expect(t.kind).toBe("overlay");
+      expect(t.dims || t.on === "broll" || t.underlay).toBeFalsy();
+    }
   });
 });

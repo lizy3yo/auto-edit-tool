@@ -8,10 +8,10 @@ import { createHash } from "node:crypto";
 import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import sharp from "sharp";
 import { CUT_SNAP_SEC, resolveCues, stillUpAfterWords, type CueSpec, type Word } from "../../graphics/src/cueResolve.ts";
-import { TEMPLATES, templateById } from "../../graphics/src/registry.ts";
+import { resolveSets, templateById } from "../../graphics/src/registry.ts";
 import { FPS } from "../../graphics/src/theme.ts";
 import { loadJob } from "./job.mts";
-import { checkRules, hostPanelFor } from "./rules.mts";
+import { checkRules, placementFor } from "./rules.mts";
 import { GRAPHICS_SRC, ffmpegPath, outDir, renderGraphic, run } from "./lib.mts";
 import { appearFrame } from "../../graphics/src/timing.ts";
 import { detectCuts, flashes, frameDiffs, preCutPumps } from "./qa-lib.mts";
@@ -41,15 +41,15 @@ writeFileSync(path.join(jobDir, "cuts.json"), JSON.stringify(filmCutFrames.map(f
 
 // 2. Words → exact cue times, every edge near a cut conformed onto it.
 const words = JSON.parse(readFileSync(path.join(jobDir, "words.json"), "utf8")) as Word[];
-const structural = new Set(TEMPLATES.filter(t => t.structural).map(t => t.id));
-const cards = new Set(TEMPLATES.filter(t => t.kind === "card").map(t => t.id));
-const cues = resolveCues(sheet.cues, words, { cuts: filmCutFrames.map(f => f / FPS), fps: FPS, structural, cards, fullFrame: new Set(TEMPLATES.filter(t => t.kind === "card" || t.underlay === "window").map(t => t.id)) });
-// A caption on a split scene stays in the host panel — the app's finishing step decides it the
-// same way (graphics/src/plan/rules.ts `hostPanelFor`; the lab's jobs carry the default layout).
-for (const c of cues) {
-  const panel = templateById(c.template).panel ? hostPanelFor(c, job) : undefined;
-  if (panel) c.props.panel = panel;
-}
+// The resolver's template sets from the one definition the app uses (a quote over the blurred
+// picture is held to the cut like a card).
+const sets = resolveSets();
+const { structural } = sets;
+const cues = resolveCues(sheet.cues, words, { cuts: filmCutFrames.map(f => f / FPS), fps: FPS, ...sets });
+// A caption on a split scene stays in the host panel, and a chapter label over a host take goes
+// below the chin — the app's finishing step decides it the same way (graphics/src/plan/rules.ts
+// `placementFor`; the lab's jobs carry the default layout).
+for (const c of cues) Object.assign(c.props, placementFor(c.template, c, job));
 // The video's colours, from its own host photo (scripts/theme.mts). Carried in every cue's props,
 // so it is part of each graphic's cache key: a new photo re-renders, the same one is reused.
 const themeFile = path.join(jobDir, "theme.json");

@@ -114,7 +114,8 @@
      "label": "Took",
      "value": "6",
      "at": "@took 6."
-    }
+    },
+    "compare": true
    }
   }
  ]

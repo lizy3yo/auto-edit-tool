@@ -20,8 +20,8 @@
 //
 // Pure apart from the two things it is handed: `ask` (the model call — metered by the app) and
 // `ensureIcon` (makes an emoji's image available).
-import { CueError, MIN_ON_SCREEN_SEC, findPhrase, findVerbatim, indexWords, parseSpokenNumber, resolveCues, tokens, tooShortToRead, type CueSpec, type ResolvedCue, type Word } from "../cueResolve";
-import { TEMPLATES, templateById } from "../registry";
+import { CARD_HOLD_MAX_SEC, CueError, LINGER_SEC, MIN_ON_SCREEN_SEC, MIN_SHOT_SEC, NEW_LINE_GRACE_SEC, blinkBeside, findPhrase, findVerbatim, holdToCut, indexWords, ownSentenceEnd, parseSpokenNumber, resolveCues, tokens, tooShortToRead, type CueSpec, type ResolvedCue, type Word } from "../cueResolve";
+import { resolveSets, templateById } from "../registry";
 import { FPS } from "../theme";
 import { MIN_GAP_SEC, checkRules, nameTagRange, type FilmLayout, type LayoutScene } from "./rules";
 
@@ -166,7 +166,11 @@ On top of the footage:
 - IconCallout — makes one short point that one object says well, ONLY when one emoji IS that object (else a
   DimCaption) (over b-roll): {"icon" (required), "phrase": phrase (≤8 words), "emphasis"}
 - SmallLabel — names the thing in the picture when the line names it (over b-roll): {"text": "1-4 words as said", "at": "@words"}
-- NumberLabel — compares two values (over b-roll): {"kicker", "a": {"label","value","at"}, "b": {"label","value","at"}}
+- NumberLabel — says two values together: two compared, a range, or one for each of two things (over b-roll): {"kicker", "a": {"label","value","at"}, "b": {"label","value","at"}, "compare": true (optional)}
+  ("compare": true draws "vs" between the two, ONLY when the line weighs one value against the other — then
+  and now, what was planned and what it took, this one against that one. A range ("$20 to $50"), two values
+  listed with "and" or offered with "or" ("$3 a cup and $8 a bag"), or two different measures (a time and a
+  cost) are not compared: leave "compare" out, and the two stand side by side)
 - BarChart — says 2-4 numbers to compare (over b-roll): {"title", "bars": [{"label","value": number,"display": "as said","at": "@the number"}]}
 - BigNumberOverlay — says a number that matters while the picture matters too (over b-roll): same props as BigNumber
 - DimCaption — a striking line over b-roll: {"phrase": phrase (≤10 words), "emphasis"}
@@ -204,6 +208,10 @@ What every graphic must keep:
 - Where it may go: full-screen cards, window graphics and graphics about the picture go ONLY inside a
   b-roll stretch, with all their words inside that one stretch. Nothing in the call to action (CTA
   scenes). Nothing about the host's words under the name tag. ${MIN_GAP_SEC} s between graphics.
+- A graphic that HIDES the picture (a full-screen card, a window graphic, a Quote) leaves no blink of a
+  shot. Either it stays to the picture change — after its last word only the rest of its own sentence is
+  said, and the change comes within ${CARD_HOLD_MAX_SEC} s of that sentence's end — or the shot plays on ${MIN_SHOT_SEC} s or
+  more after it leaves (the change at least ${(LINGER_SEC + MIN_SHOT_SEC).toFixed(1)} s after its last word). Otherwise show that line over the footage.
 ${opts.kept ? `\nSOME GRAPHICS ARE ALREADY PLACED AND APPROVED (listed in the message). Keep them exactly; add every other\nmoment around them, never overlapping them.\n` : ""}
 Answer with JSON only: {"cues": [ ... ]} in film order, NEW graphics only. Each cue:
 {"id": "short-kebab-name", "template": "...", "start": "the exact spoken words it starts on (4-7 words, unique enough to find)",
@@ -796,6 +804,36 @@ export function malformedPhrase(spec: CueSpec): string | undefined {
 
 /* ───────────── The plan ───────────── */
 
+/**
+ * Why a graphic that hides the picture is sent back for a BLINK of footage beside it (`blinkBeside`),
+ * in words the repair round can act on: how long the shot is left alone, and why the graphic may not
+ * simply stay to the picture change — a new sentence starts first (`ownSentenceEnd`), or the change
+ * comes too long after its own sentence (`holdToCut`). The ways out: a line whose shot it can fill to
+ * the change, a template that plays over the footage, or nothing.
+ */
+export function blinkProblem(template: string, c: ResolvedCue, blink: { side: "after" | "before"; cutFrame: number; sec: number }, words: Word[]): string {
+  const cut = blink.cutFrame / FPS;
+  const glitch = `under ${MIN_SHOT_SEC} s, which reads as a glitch`;
+  const over = `use a template that plays over the footage and leaves the picture in view (DimCaption, BigNumberOverlay, SmallLabel), or drop it`;
+  if (blink.side === "before")
+    return `${template} hides the picture, and it opens ${blink.sec.toFixed(2)} s after the shot changes at ${mmss(cut)}: a blink of the new picture before it, ${glitch}. Put it on words said as that shot begins — its first shown words within about a second of the change — or ${over}`;
+  const from = c.contentEnd ?? c.end;
+  const { newLineAt } = ownSentenceEnd(words, from, cut);
+  const hold = holdToCut(words, from, c.end, cut);
+  // A new sentence said in the sliver is the reason to name. One that starts within NEW_LINE_GRACE_SEC
+  // of the change does not stop a hold (`holdToCut`), so there the reason is how long after its own
+  // sentence the change comes — to two places, as "2.0 s … (at most 2 s)" names no reason at all.
+  const opener = newLineAt === undefined || newLineAt >= cut - NEW_LINE_GRACE_SEC ? [] : words.filter(w => w.start >= newLineAt - 1e-6 && w.start < cut).slice(0, 4);
+  const why = opener.length
+    ? `It may not stay to the change: "${opener.map(w => w.text.trim()).join(" ")}…" starts a new sentence first.`
+    : `It may not stay to the change: that comes ${(cut - hold.spoken).toFixed(2)} s after its own sentence ends (at most ${hold.max} s).`;
+  return (
+    `${template} hides the picture, and it leaves ${blink.sec.toFixed(2)} s of the shot alone before the picture changes at ${mmss(cut)}: ` +
+    `a blink of footage between it and the next shot, ${glitch}. ${why} Put it on a line whose shot it can fill to the picture ` +
+    `change (only the rest of its own sentence may be said under it), or ${over}`
+  );
+}
+
 export type PlanMessage = { role: "user" | "assistant"; content: string };
 export type PlanProblem = { cue: string; problem: string };
 
@@ -869,10 +907,16 @@ export async function planGraphics(input: PlanInput): Promise<PlanResult> {
   const kept0 = input.kept ?? [];
   const keptIds = new Set(kept0.map(c => c.id));
   const index = indexWords(words);
-  const structural = new Set(TEMPLATES.filter(t => t.structural).map(t => t.id));
-  const cards = new Set(TEMPLATES.filter(t => t.kind === "card").map(t => t.id));
-  const fullFrame = new Set(TEMPLATES.filter(t => t.kind === "card" || t.underlay === "window").map(t => t.id));
-  const opts = { cuts, fps: FPS, structural, cards, fullFrame };
+  const { structural, cards, fullFrame, windows } = resolveSets();
+  const opts = { cuts, fps: FPS, structural, cards, fullFrame, windows };
+  /** The film's picture cuts as frames, as QA sees them (finish.ts hands the frames it measured / FPS). */
+  const cutFrames = (cuts ?? []).map(c => Math.round(c * FPS)).sort((a, b) => a - b);
+  /** The graphics that hide the picture and leave a blink of footage beside them (QA's test). */
+  const blinksIn = (cues: ResolvedCue[]) =>
+    new Map(cues.flatMap(c => {
+      const b = fullFrame.has(c.template) ? blinkBeside(c, cutFrames, FPS) : undefined;
+      return b ? [[c.id, b] as const] : [];
+    }));
 
   /** Converts every `icon` in a cue's props to its Noto code in place. An icon left empty (`noIcon`)
    * is taken off; so is one Noto has no image for, which is also named in `missing`. Taken off, not
@@ -1141,6 +1185,19 @@ export async function planGraphics(input: PlanInput): Promise<PlanResult> {
       if (!structural.has(spec.template) && tooShortToRead(mine, FPS)) {
         undo();
         bad(`on screen ${((mine.endFrame - mine.startFrame) / FPS).toFixed(2)} s — too short to read (at least ${MIN_ON_SCREEN_SEC} s); join it to the next sentence or drop it`);
+        continue;
+      }
+      // NO BLINK OF FOOTAGE beside a graphic that hides the picture — QA's own test (`blinkBeside`),
+      // asked here, where the repair round can still put it somewhere else. QA only REPORTED it, and
+      // the films shipped with it: job 404's Versus card left 0.80 s of its shot before the next one
+      // because "And if you live…" starts a new sentence in that sliver, so it may not hold to the cut
+      // (1:28); job 403's "The toilet is fine." left 1.22 s under "There is a stick in it." (2:06). A blink this graphic causes BESIDE ANOTHER (by moving where it ends)
+      // is refused the same way; one already there is not this graphic's.
+      const blinkedBefore = blinksIn(resolved);
+      const blink = Array.from(blinksIn(next)).find(([id]) => !blinkedBefore.has(id));
+      if (blink) {
+        undo();
+        bad(blink[0] === spec.id ? blinkProblem(spec.template, mine, blink[1], words) : `would leave a blink of footage beside ${blink[0]} (${blink[1].sec.toFixed(2)} s of a shot alone) — move it or drop it`);
         continue;
       }
       const unsaid = shownNumbers(spec).filter(n => !saidNear(n, mine.start, mine.end));
