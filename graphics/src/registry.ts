@@ -266,7 +266,7 @@ TEMPLATES.push(
     kind: "overlay",
     on: "broll",
     component: NumberLabel,
-    defaultProps: { durationSec: 5, kicker: "Time to escape", a: { label: "Then", value: "17 min", at: 0.3 }, b: { label: "Now", value: "3 min", at: 1.6 } },
+    defaultProps: { durationSec: 5, kicker: "Time to escape", a: { label: "Then", value: "17 min", at: 0.3 }, b: { label: "Now", value: "3 min", at: 1.6 }, compare: true },
   },
   {
     id: "BarChart",

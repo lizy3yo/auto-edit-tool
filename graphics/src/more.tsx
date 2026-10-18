@@ -97,12 +97,17 @@ export const BigNumberOverlay: React.FC<BigNumberProps> = props => {
   );
 };
 
-/* ───────────────────────── Number label (two values compared) ───────────────────────── */
+/* ───────────────────────── Number label (two values side by side) ───────────────────────── */
 
 export type NumberLabelProps = BaseProps & {
   kicker?: string;
   a: { label: string; value: string; at: number };
   b: { label: string; value: string; at: number };
+  /** The two are COMPARED: "vs" between them. Set by the resolver (cueResolve `pairCompared`) from
+   * the plan's mark and the words said between the values — a range ("$150 to $600", job 397) or a
+   * price for each of two things ("$5 to $10 a knife and $10 to $20 a mower blade", job 406) is not
+   * a comparison, and "vs" there said the wrong thing. Without it the two sit side by side. */
+  compare?: boolean;
 };
 
 const ValuePill: React.FC<{ label: string; value: string; at: number; strong: boolean }> = ({ label, value, at: atSec, strong }) => {
@@ -117,9 +122,15 @@ const ValuePill: React.FC<{ label: string; value: string; at: number; strong: bo
   );
 };
 
-/** Two values side by side on the footage ("Dog 39 °C / You 37 °C"). */
-export const NumberLabel: React.FC<NumberLabelProps> = ({ kicker, a, b }) => {
+/** Two values side by side on the footage ("Dog 39 °C / You 37 °C"), with "vs" between them only when
+ * they are compared (`compare`). The "vs" enters WITH the second value: drawn from the first frame,
+ * it stood alone beside the kicker before either value, then pointed at empty space until the second
+ * was said (job 406: alone 82.03-82.7 s, then beside one value for 1.7 s; job 401: "HIS AGE 64 vs"
+ * for 3.5 s before "81"). */
+export const NumberLabel: React.FC<NumberLabelProps> = ({ kicker, a, b, compare }) => {
   const t = useTheme();
+  const at = useAt();
+  const versus = useEnter(at(b.at), 14);
   return (
     <Leave>
       <div style={{ position: "absolute", left: LAYOUT.actionSafeX + 24, bottom: 120, display: "flex", flexDirection: "column", gap: 16 }}>
@@ -130,7 +141,9 @@ export const NumberLabel: React.FC<NumberLabelProps> = ({ kicker, a, b }) => {
         )}
         <div style={{ display: "flex", alignItems: "stretch", gap: 18 }}>
           <ValuePill {...a} strong />
-          <div style={{ alignSelf: "center", fontFamily: t.font, fontWeight: 800, fontSize: 34, color: "rgba(255,255,255,0.8)", textShadow: TEXT_SHADOW }}>vs</div>
+          {compare === true && (
+            <div style={{ ...versus, alignSelf: "center", fontFamily: t.font, fontWeight: 800, fontSize: 34, color: "rgba(255,255,255,0.8)", textShadow: TEXT_SHADOW }}>vs</div>
+          )}
           <ValuePill {...b} strong={false} />
         </div>
       </div>

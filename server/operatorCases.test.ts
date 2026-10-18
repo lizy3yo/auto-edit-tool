@@ -3663,3 +3663,42 @@ describe("a chapter label over the host sits clear of the face (round 11 review,
     expect(placementFor("ChapterLabel", { start: 67.867, end: 72.367 }, layout)).toEqual({});
   });
 });
+
+describe("two values get 'vs' only when they are compared (round 11 review, 2026-10-18)", () => {
+  /** Words as the transcriber timed them: "text@start-end …". */
+  const heard = (s: string) =>
+    s.split(" ").map(t => {
+      const [text, range] = t.split("@");
+      const [start, end] = range.split("-").map(Number);
+      return { text, start, end };
+    });
+  const drawnCompare = async (props: Record<string, unknown>, start: string, end: string, words: { text: string; start: number; end: number }[]) => {
+    const { resolveCues } = await import("../graphics/src/cueResolve");
+    return resolveCues([{ id: "pair", template: "NumberLabel", start, startPad: -0.15, end, endPad: 0.3, props }], words)[0].props.compare;
+  };
+
+  // 406 sharpening-prices (1:22): "A KNIFE $5 to $10 vs A MOWER BLADE $10 to $20" for a price for
+  // each of two services — "vs" made it a contest. Joined by "and": no "vs", even if the plan marks it.
+  it("406: '$5 to $10 a knife and $10 to $20 a mower blade' is drawn without 'vs'", async () => {
+    const words = heard(
+      "You@82.138-82.278 charge@82.318-82.618 $5@82.718-82.978 to@83.138-83.318 $10@83.358-83.659 a@83.699-83.719 knife@83.779-84.059 and@84.239-84.359 $10@84.459-84.679 to@84.719-84.799 $20@84.859-85.179 a@85.239-85.279 mower@85.319-85.579 blade,@85.599-85.899 and@86.28-86.36"
+    );
+    const props = { kicker: "You charge", a: { label: "A knife", value: "$5 to $10", at: "@$5 to $10 a knife" }, b: { label: "A mower blade", value: "$10 to $20", at: "@$10 to $20 a mower" }, compare: true };
+    expect(await drawnCompare(props, "You charge $5 to $10", "a mower blade,", words)).toBe(false);
+  });
+
+  // 397 furniture-price-range (1:04): "FROM $150 vs UP TO $600" for a range.
+  it("397: 'And furniture, $150 to $600.' is drawn without 'vs'", async () => {
+    const words = heard("And@64.628-64.788 furniture,@64.928-65.408 $150@65.849-66.229 to@66.449-66.989 $600.@67.41-68.23 Once@68.891-69.091");
+    const props = { kicker: "Furniture", a: { label: "From", value: "$150", at: "@$150" }, b: { label: "Up to", value: "$600", at: "@$600." }, compare: true };
+    expect(await drawnCompare(props, "And furniture, $150 to $600.", "$150 to $600.", words)).toBe(false);
+  });
+
+  // 401 age-vs-father (0:15): a real comparison keeps its "vs" when the plan marks it — and the "vs"
+  // now enters with "81" instead of standing alone beside "HIS AGE 64" for 3.5 s.
+  it("401: 'He is 64. His father made it to 81.' keeps 'vs' when marked compared", async () => {
+    const words = heard("He@15.427-15.528 is@15.608-15.688 64.@15.868-16.528 His@17.428-17.569 father@17.649-18.049 made@18.289-18.489 it@18.529-18.589 to@18.629-19.049 81.@19.289-19.409");
+    const props = { kicker: "Counting backward", a: { label: "His age", value: "64", at: "@sixty-four" }, b: { label: "His father", value: "81", at: "@eighty-one" }, compare: true };
+    expect(await drawnCompare(props, "He is 64.", "made it to 81.", words)).toBe(true);
+  });
+});

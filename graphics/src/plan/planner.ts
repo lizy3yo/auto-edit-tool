@@ -166,7 +166,11 @@ On top of the footage:
 - IconCallout — makes one short point that one object says well, ONLY when one emoji IS that object (else a
   DimCaption) (over b-roll): {"icon" (required), "phrase": phrase (≤8 words), "emphasis"}
 - SmallLabel — names the thing in the picture when the line names it (over b-roll): {"text": "1-4 words as said", "at": "@words"}
-- NumberLabel — compares two values (over b-roll): {"kicker", "a": {"label","value","at"}, "b": {"label","value","at"}}
+- NumberLabel — says two values together: two compared, a range, or one for each of two things (over b-roll): {"kicker", "a": {"label","value","at"}, "b": {"label","value","at"}, "compare": true (optional)}
+  ("compare": true draws "vs" between the two, ONLY when the line weighs one value against the other — then
+  and now, what was planned and what it took, this one against that one. A range ("$20 to $50"), two values
+  listed with "and" or offered with "or" ("$3 a cup and $8 a bag"), or two different measures (a time and a
+  cost) are not compared: leave "compare" out, and the two stand side by side)
 - BarChart — says 2-4 numbers to compare (over b-roll): {"title", "bars": [{"label","value": number,"display": "as said","at": "@the number"}]}
 - BigNumberOverlay — says a number that matters while the picture matters too (over b-roll): same props as BigNumber
 - DimCaption — a striking line over b-roll: {"phrase": phrase (≤10 words), "emphasis"}

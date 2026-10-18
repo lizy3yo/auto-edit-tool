@@ -470,6 +470,40 @@ const WHOLE_SENTENCE: Record<string, string[]> = {
 };
 const ENDS_SENTENCE = new RegExp("[.?!][\"”')]*$");
 
+/**
+ * A PAIR GETS "vs" ONLY WHEN IT IS COMPARED (round 11 review). NumberLabel drew "vs" between its two
+ * values whatever joined them: Gary's job 406 (1:22) read "A KNIFE $5 to $10 vs A MOWER BLADE $10 to
+ * $20" for "$5 to $10 a knife and $10 to $20 a mower blade" — a price for each of two services, not
+ * a contest — and Dale's job 397 (1:04) "FROM $150 vs UP TO $600" for "And furniture, $150 to $600.",
+ * a range. The separator is drawn only when the pair is compared (`compare`, set by the resolver on
+ * each template in SEPARATED_PAIRS): the plan marks it, and the words the narrator says BETWEEN the two values —
+ * after the first one's spoken words (`a.at`), before the second's (`b.at`) — settle it where they can:
+ * a comparing word ("versus", "against", "compared to", "instead of"…) compares them, marked or not;
+ * a range (only "to", "up to" or "through" between) or a list or a choice (the join ENDS on "and",
+ * "or" or "plus" with the second value said right after it) never does, marked or not — a contrast
+ * names its side between the "and" and the value ("…and now 3", "…and his 81"). Anything else is the
+ * plan's call (Gideon's job 401, "He is 64. His father made it to 81."). A "vs" left out still reads
+ * (the labels name both values); a "vs" put in says the wrong thing — so an unclear pair goes without.
+ */
+const SEPARATED_PAIRS = new Set(["NumberLabel"]);
+const COMPARING_WORD = /\b(?:versus|vs|compared (?:to|with)|against|instead of|rather than|unlike|whereas|as opposed to)\b/;
+const RANGE_JOIN = /^(?:(?:and|or) )?(?:all the way )?(?:up )?(?:to|through|thru)$/;
+const LIST_JOIN = /\b(?:and|or|plus)$/;
+
+/** Is a pair compared? `planned` is the plan's `compare`; `said` is what the narrator says between the
+ * two values (`join`) and the second value's own spoken words (`second`), when both are timed to
+ * words. Pure. */
+export function pairCompared(planned: unknown, said?: { join: string; second: string }): boolean {
+  if (said) {
+    const join = tokens(said.join).join(" ");
+    if (COMPARING_WORD.test(join)) return true;
+    const second = tokens(said.second);
+    const opensOnValue = second.length > 0 && (/^\d/.test(second[0]) || parseSpokenNumber(second, 0) !== null);
+    if (opensOnValue && (RANGE_JOIN.test(join) || LIST_JOIN.test(join))) return false;
+  }
+  return planned === true;
+}
+
 /** How many words (and numbers) a graphic SHOWS, for its reading time. */
 function shownWordCount(props: unknown): number {
   let n = 0;
@@ -626,6 +660,8 @@ export function resolveCues(specs: CueSpec[], words: Word[], opts: ResolveOption
     let startCut = nearestCut(cuts, rawStart);
     let t0 = onFrame(startCut ?? rawStart);
     const sync: ResolvedCue["sync"] = [];
+    /** Each element's "at" words, as word positions (first, last), by the element's path ("a", "b"). */
+    const atWords = new Map<string, { first: number; last: number }>();
     const searchFrom = startHits[0];
     let contentEnd: number | undefined;
     /** When the graphic's LAST element appears (its number lands, its last word shows). */
@@ -692,6 +728,7 @@ export function resolveCues(specs: CueSpec[], words: Word[], opts: ResolveOption
           // In a framed window, an item lands WITH its picture when that changes just before it.
           const cut = windows.has(spec.template) ? cuts.filter(c => c <= w.start + 1e-6 && w.start - c <= CUT_SNAP_SEC).pop() : undefined;
           sync.push({ element: `${pathName}.at "${x.slice(1)}"`, word: w.text, wordStart: w.start, ...(cut !== undefined ? { onCut: true } : {}) });
+          atWords.set(pathName, { first: index[hits[0]].word, last: index[hits[hits.length - 1]].word });
           said(words[index[hits[hits.length - 1]].word].end);
           lastShown = Math.max(lastShown, w.start);
           // A number is said once its UNIT is said: Hank's "6" + "hours" (job 390, 0:20).
@@ -716,6 +753,14 @@ export function resolveCues(specs: CueSpec[], words: Word[], opts: ResolveOption
       return out;
     };
     let props = walk(spec.props, "") as Record<string, unknown>;
+    // A pair's "vs" only when the pair is compared (`pairCompared`): read off what is said between
+    // its two values, else the plan's mark. Decided here, where every graphic is resolved — a new
+    // plan, a saved one, the lab — so a saved plan that predates `compare` is drawn the same way.
+    if (SEPARATED_PAIRS.has(spec.template)) {
+      const a = atWords.get("a"), b = atWords.get("b");
+      const text = (from: number, to: number) => words.slice(from, to).map(w => w.text.trim()).join(" ");
+      props.compare = pairCompared(spec.props?.compare, a && b && a.last < b.first ? { join: text(a.last + 1, b.first), second: text(b.first, b.last + 1) } : undefined);
+    }
     // A comparison with a winner gives its verdict after its last side is said, and holds it.
     if ((spec.props?.winner === "left" || spec.props?.winner === "right") && contentEnd !== undefined) said(contentEnd + VERDICT_SEC);
     const readSec = readingSec(spec.props);
