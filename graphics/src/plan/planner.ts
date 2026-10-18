@@ -71,6 +71,8 @@ Full-screen cards — replace the picture, so ONLY inside a b-roll stretch:
 - Versus — compares two kinds or options: {"kicker", "left": {"icon","title" (1-3 words),"sub" (≤6 words),"say","at"}, "right": {same}, "winner": "left"|"right"|"none"}
 - BigNumber — says a number that matters (a time, an amount, a count): {"kicker", "prefix": "$" (a currency sign, if any), "value": number, "unit": "1-2 words", "at": "@the spoken number", "line": phrase, "countSec": 0.6 for small numbers}. Start it on the sentence that holds the number, not sentences before.
 - StepCards — gives 2-4 steps the viewer should do: {"kicker", "steps": [{"text" (≤4 words), "icon", "at": "@words"}]}
+  (steps are done ONE AFTER ANOTHER: a choice the line offers — "…, or …", "alternatively" — is part of the
+  step before it, never a step of its own: "Call the office, or send an email" is ONE step, "Call or email")
 - BeforeAfter — an old way or state replaced by a new one: {"kicker", "before": {"icon","label","at"}, "after": {"icon","label","at"}}
 - TwoPoint — links two places or things ("the one in the basement sets off the one by your bed"): {"title": phrase, "a": {"label","sub","at"}, "b": {"label","sub","at"}}
 - FactCard — states a finding or a general fact ("most…", "studies show…", "the rule is…"): {"kicker": "Fact", "fact": ONE WHOLE SENTENCE (≤14 words), "emphasis", "source": "where it comes from, ONLY if the script says it", "icon"}
@@ -84,7 +86,8 @@ Graphics with the picture in a window — they replace the picture with the foot
 On top of the footage:
 - TitleOverFootage — the video's topic line in its opening, over its first b-roll: {"kicker" (optional), "phrase": phrase (≤10 words), "emphasis"}
 - ChapterLabel — the script counts its parts aloud ("first thing…", "second…"): label EVERY counted part (all or none): {"kicker": "Topic · 1 of 3", "number": 1, "title": "1-3 words"}, "durationSec": 4.5 instead of "end"
-- StepLabels — describes 2-4 actions in order: {"steps": [{"text" (≤4 words), "at": "@words"}]}
+- StepLabels — describes 2-4 actions in order: {"steps": [{"text" (≤4 words), "at": "@words"}]} (a choice
+  — "…, or …" — is part of the step before it, never the next step, as for StepCards)
 - Checklist — lists 2-4 signs or things to check (each ticked as said) (over b-roll): {"title": "2-4 words", "items": [{"text" (≤5 words), "at": "@words"}]}
 - CrossedList — dismisses 2-3 things ("not the bowl, not the house"), optionally then names the real one (over b-roll): {"items": [{"text" (≤3 words), "icon", "at": "@words", "keep": true only for the real one}]}
 - WarningLabel — names a danger or a mistake to avoid, in words that SAY it: read alone under its "WARNING"
@@ -402,6 +405,39 @@ export function quotedInScript(film: FilmLayout, from: number, to: number, line:
     if (at >= 0) return /(?:“|(?:^|[\s:(—-])")\s*$/.test(script.slice(Math.max(0, at - 4), at));
   }
   return false;
+}
+
+/**
+ * STEPS ARE DONE ONE AFTER ANOTHER. StepLabels and StepCards number every step and draw an arrow into
+ * it from the one before, so a step the line offers as a CHOICE reads as the next thing to do: Helena's
+ * job 399 (2:19) chained "1 Wait until served → 2 Catch an attendant → 3 Or step to galley → 4 Phrase
+ * it as offer" on "So wait until everyone's been served, then catch a flight attendant as they pass, or
+ * step back to the galley and phrase it as an offer." Stepping back to the galley is another way to
+ * reach the crew, and the arrows told the viewer to do both.
+ *
+ * A step after the first is a choice when its shown text or its spoken words ("at", "say") open on
+ * "or" / "or else" / "alternatively" (`OFFERS_A_CHOICE`), or the narrator says one of them right before
+ * its first word (`before(k)`: the words leading into step k, when it resolved). The first step never
+ * is: "Or look underneath this video, open the description, and tap the link" (the same film) offers
+ * the whole sequence as a choice, and its steps are still done in order. An "or" INSIDE a step ("Wait
+ * a minute or two") is part of it. Returns the steps that are choices, counted from 0. Pure.
+ */
+const OFFERS_A_CHOICE = /^(?:or|alternatively)\b/;
+export function choiceSteps(steps: unknown, before: (k: number) => string | undefined = () => undefined): number[] {
+  if (!Array.isArray(steps)) return [];
+  const opens = (v: unknown) => {
+    const s = typeof v === "string" ? v : (v as { text?: unknown } | null)?.text;
+    return typeof s === "string" && OFFERS_A_CHOICE.test(s.trim().replace(/^@/, "").replace(/^["“'‘(]+/, "").toLowerCase());
+  };
+  const out: number[] = [];
+  steps.forEach((step, k) => {
+    if (k === 0 || !step || typeof step !== "object") return;
+    const o = step as { text?: unknown; at?: unknown; say?: unknown };
+    const lead = (before(k) ?? "").toLowerCase().split(/[^a-z]+/).filter(Boolean);
+    const saidFirst = ["or", "alternatively"].includes(lead[lead.length - 1] ?? "") || lead.slice(-2).join(" ") === "or else";
+    if (opens(o.text) || opens(o.at) || opens(o.say) || saidFirst) out.push(k);
+  });
+  return out;
 }
 
 /** Keys whose strings are not shown words (or are checked by the resolver already). */
@@ -810,6 +846,27 @@ export async function planGraphics(input: PlanInput): Promise<PlanResult> {
           bad(
             `"${line}" is not the host's own words — ${why}. Signed with the host's name it reads as if the host said it. ` +
               `Show it as a caption with no name (DimCaption over b-roll), or drop it`
+          );
+          continue;
+        }
+      }
+      // STEPS are done one after another: a step the line offers as a CHOICE is not the next step
+      // (job 399's "3 Or step to galley", `choiceSteps`). Read where it resolved: the two words said
+      // right before each step's first word.
+      if (spec.template === "StepLabels" || spec.template === "StepCards") {
+        const steps = spec.props.steps;
+        const choices = choiceSteps(steps, k => {
+          const at = mine.sync.find(s => s.element.startsWith(`steps[${k}].at `));
+          const i = at ? words.findIndex(w => w.start === at.wordStart) : -1;
+          return i > 0 ? words.slice(Math.max(0, i - 2), i).map(w => w.text.trim()).join(" ") : undefined;
+        });
+        if (choices.length) {
+          undo();
+          const named = choices.map(k => `step ${k + 1} ("${String((steps as { text?: unknown }[])[k]?.text ?? "")}")`).join(" and ");
+          bad(
+            `${named} ${choices.length > 1 ? "are choices" : "is a choice"} instead of the step before, not the next step ("…, or …") — ` +
+              `numbered with an arrow into it, it tells the viewer to do both. Put the choice inside the step before it, as ONE step ` +
+              `("Call or email"), or drop it; or show the choice with Versus`
           );
           continue;
         }

@@ -2192,3 +2192,39 @@ describe("a quote the host introduces as her own saying stays a quote (round 10 
     expect(notTheHostsWords("Could I see the one in the window?", "So always ask:")).toBeDefined();
   });
 });
+
+describe("a step chain shows steps done in order; a choice is not the next step (round 10 graphics review, 2026-10-18)", () => {
+  // 399 snack-ask-steps (2:19.8-2:28.6, over scenes 25-26): "So wait until everyone's been served, then
+  // catch a flight attendant as they pass, or step back to the galley, and phrase it as an offer." The
+  // StepLabels chain read "1 Wait until served → 2 Catch an attendant → 3 Or step to galley → 4 Phrase it
+  // as offer"; the galley is another way to reach the crew, and the arrows told the viewer to do both.
+  it("399: the chain with the choice as step 3 is refused; the step chains placed before (385, 386, 397) pass", async () => {
+    const { choiceSteps } = await import("../graphics/src/plan/planner");
+    expect(
+      choiceSteps([
+        { at: "@wait until everyone's", text: "Wait until served" },
+        { at: "@then catch a flight attendant", text: "Catch an attendant" },
+        { at: "@or step back", text: "Or step to galley" },
+        { at: "@and phrase it", text: "Phrase it as offer" },
+      ])
+    ).toEqual([2]);
+    expect(choiceSteps([{ text: "Get a stepladder" }, { text: "Take one alarm down" }, { text: "Read the label" }], k => [undefined, "a stepladder,", "down, and"][k])).toEqual([]);
+    expect(choiceSteps([{ text: "Measurements first line" }, { text: "Piece to driveway" }], k => [undefined, "line, and"][k])).toEqual([]);
+    expect(choiceSteps([{ text: "Build it well" }, { text: "Price it honest" }, { text: "Find its lane" }], k => [undefined, "it well,", "honest, and"][k])).toEqual([]);
+  });
+
+  it("399: the spoken-list finder joins the choice to the step before it; the same film's 'Or look underneath…' steps stay", async () => {
+    const { parseSpokenLists } = await import("./spokenLists");
+    const steps = (sentence: string, items: string[]) => parseSpokenLists(JSON.stringify({ lists: [{ sentence: 0, kind: "steps", items }] }), [sentence]);
+    expect(
+      steps("So wait until everyone's been served, then catch a flight attendant as they pass, or step back to the galley, and phrase it as an offer.", [
+        "wait until everyone's been served",
+        "catch a flight attendant as they pass",
+        "step back to the galley",
+        "phrase it as an offer",
+      ])?.[0].items
+    ).toEqual(["wait until everyone's been served", "catch a flight attendant as they pass, or step back to the galley", "phrase it as an offer"]);
+    const scan = ["look underneath this video", "open the description", "tap the link at the top"];
+    expect(steps("Or look underneath this video, open the description, and tap the link at the top.", scan)?.[0].items).toEqual(scan);
+  });
+});

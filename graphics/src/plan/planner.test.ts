@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { resolveCues, type CueSpec, type ResolvedCue, type Word } from "../cueResolve";
 import { TEMPLATES } from "../registry";
 import { FPS } from "../theme";
-import { listsWhereGraphicsGo, malformedPhrase, missingListCues, namesTheDanger, normalizePhrases, notTheHostsWords, planGraphics, quotedInScript, systemPrompt, uncoveredMoments, userPrompt, wordsSaidOver, type PlanMessage } from "./planner";
+import { choiceSteps, listsWhereGraphicsGo, malformedPhrase, missingListCues, namesTheDanger, normalizePhrases, notTheHostsWords, planGraphics, quotedInScript, systemPrompt, uncoveredMoments, userPrompt, wordsSaidOver, type PlanMessage } from "./planner";
 
 const W = (s: string, start: number, step = 0.3): Word[] => s.split(" ").map((text, i) => ({ text, start: start + i * step, end: start + i * step + 0.26 }));
 const scene = (index: number, a: number, b: number, extra: Record<string, unknown> = {}) => ({ index, narrationStartSec: a, narrationEndSec: b, scriptText: "", hostPresent: false, cta: false, split: false, hostOpener: false, ...extra });
@@ -714,5 +714,138 @@ describe("a quote led in by the host's own 'I always say' is the host's; 'please
     const out = await planGraphics({ words, film, ask, ensureIcon: async () => true });
     expect(out.rounds[0].problems).toEqual([]);
     expect(out.cues.map(c => c.id)).toEqual(["measure-quote"]);
+  });
+});
+
+describe("steps are done one after another; a choice is not the next step (A6, Helena's job 399 'snack-ask-steps')", () => {
+  // Job 399, 2:19.8-2:28.6 as heard. The script (sentence 32): "So wait until everyone's been served,
+  // then catch a flight attendant as they pass, or step back to the galley, and phrase it as an offer."
+  // The StepLabels chain read "1 Wait until served → 2 Catch an attendant → 3 Or step to galley → 4
+  // Phrase it as offer": stepping back to the galley is another way to reach the crew, and the arrows
+  // told the viewer to do both.
+  const heard = T(
+    "short.@139.38-139.70 So@139.98-140.21 wait@140.38-140.59 until@140.63-140.88 everyone's@141.03-141.43 been@141.47-141.63 served,@141.69-142.11 then@142.51-142.73 catch@142.79-143.01 a@143.05-143.07 flight@143.11-143.35 attendant@143.37-143.75 as@143.83-143.89 they@143.93-144.07 pass,@144.11-145.23 " +
+      "or@145.25-145.29 step@145.43-145.67 back@145.71-145.85 to@145.91-145.99 the@146.01-146.09 galley@146.13-146.51 and@146.79-146.93 phrase@147.09-147.35 it@147.39-147.45 as@147.51-147.59 an@147.63-147.69 offer.@147.81-148.13 Two@148.77-148.97 asks@149.13-149.39 in,@149.57-149.71"
+  );
+  const film = {
+    scenes: [
+      scene(24, 133.11, 139.81, { scriptText: "Ask while the cart is still working its way back, and you're asking the crew to guess whether the last few rows will come up short." }),
+      scene(25, 139.81, 144.66, { hostPresent: true, scriptText: "So wait until everyone's been served, then catch a flight attendant as they pass," }),
+      scene(26, 144.66, 148.65, { scriptText: "or step back to the galley, and phrase it as an offer." }),
+      scene(27, 148.65, 162.65, { hostPresent: true, scriptText: "Two asks in, you might wonder how anyone keeps this straight." }),
+    ],
+  };
+  const cuts = [133.11, 139.81, 144.66, 148.65];
+  // The real cue, as the planner wrote it (job 399's graphics.plan[11]).
+  const snackAsk: CueSpec = {
+    id: "snack-ask-steps",
+    template: "StepLabels",
+    start: "So wait until everyone's been served",
+    startPad: -0.15,
+    end: "and phrase it as an offer",
+    endPad: 0.3,
+    props: {
+      steps: [
+        { at: "@wait until everyone's", text: "Wait until served" },
+        { at: "@then catch a flight attendant", text: "Catch an attendant" },
+        { at: "@or step back", text: "Or step to galley" },
+        { at: "@and phrase it", text: "Phrase it as offer" },
+      ],
+    },
+  };
+  const asking = (answers: CueSpec[][]) => {
+    const asked: string[] = [];
+    const ask = async (_system: string, messages: PlanMessage[]) => {
+      asked.push(messages[messages.length - 1].content);
+      return JSON.stringify({ cues: answers[asked.length - 1] ?? [] });
+    };
+    return { ask, asked };
+  };
+
+  it("job 399's third step opens on 'or': it is a choice, not the next step", () => {
+    expect(choiceSteps(snackAsk.props.steps)).toEqual([2]);
+    // …and so is a step the narrator leads into with "or", "or else" or "alternatively", whatever its own words
+    const quiet = [{ at: "@wait until everyone's", text: "Wait until served" }, { at: "@then catch a flight attendant", text: "Catch an attendant" }, { at: "@step back", text: "Step to galley" }];
+    expect(choiceSteps(quiet, k => [undefined, "been served,", "they pass, or"][k])).toEqual([2]);
+    expect(choiceSteps(quiet, k => [undefined, "been served,", "or else"][k])).toEqual([2]);
+    expect(choiceSteps(quiet, k => [undefined, "been served,", "pass. Alternatively,"][k])).toEqual([2]);
+    expect(choiceSteps([{ text: "Rinse it" }, { text: "Alternatively, soak it" }])).toEqual([1]);
+  });
+
+  it("every step graphic placed in earlier films still passes, with the words said before each step (jobs 385-397)", () => {
+    const placed: [string, string, string | undefined][][] = [
+      [["Get a stepladder", "@get a stepladder", "own. So"], ["Take one alarm down", "@take one alarm down", "a stepladder,"], ["Read the label", "@read the label", "down, and"]], // 385, 393, 396
+      [["Turn one over", "@turn one over", "up there,"], ["Look for the date", "@look for the date", "over and"]], // 385
+      [["Subscribe", "@Subscribe", "you're standing."], ["Turn one alarm over", "@turn one alarm over", "then go"], ["Put the year", "@put the year", "over and"]], // 385
+      [["Measurements first line", "@Put the measurements", "a truck."], ["Piece to driveway", "@move the piece out", "line, and"]], // 386, 389, 397
+      [["Match length to neckline", "@Match the length", "two things."], ["Hold by a window", "@hold the piece up", "neckline. And"]], // 387, 392 (StepCards)
+      [["Hold it by a window", "@hold the piece up", "neckline. And"], ["See what it returns", "@look at what it", "window, and"]], // 395 (StepCards)
+      [["Build it well", "@Build it well,", "you live."], ["Price it honest", "@price it honest,", "it well,"], ["Find its lane", "@let every piece find", "honest, and"]], // 397
+    ];
+    for (const steps of placed) expect(choiceSteps(steps.map(([text, at]) => ({ text, at })), k => steps[k][2])).toEqual([]);
+    // the first step is never a choice: "Or look underneath this video, open the description, and tap the
+    // link at the top." (the same film) is a sequence done in order, offered as a whole
+    expect(choiceSteps([{ text: "Look under the video", at: "@Or look underneath" }, { text: "Open the description", at: "@open the description" }], k => ["the code.", "video,"][k])).toEqual([]);
+    // an "or" inside a step is part of it; a word that only starts with the letters is not one
+    expect(choiceSteps([{ text: "Lift your phone" }, { text: "Hold it a second or two", at: "@hold it steady" }], k => [undefined, "square, and"][k])).toEqual([]);
+    expect(choiceSteps([{ text: "Measure it" }, { text: "Order the wood", at: "@order the wood" }])).toEqual([]);
+  });
+
+  it("the prompt's own example agrees with the check: the choice as a step is refused, as one step it passes", () => {
+    const prompt = systemPrompt({ kept: false });
+    expect(prompt).toContain('"Call the office, or send an email" is ONE step, "Call or email"');
+    expect(choiceSteps([{ text: "Call the office" }, { text: "Send an email", at: "@send an email" }], k => [undefined, "office, or"][k])).toEqual([1]);
+    expect(choiceSteps([{ text: "Call or email", at: "@Call the office" }, { text: "Wait a day", at: "@then wait a day" }], k => [undefined, "an email,"][k])).toEqual([]);
+  });
+
+  it("job 399's chain is refused, the repair is told to put the choice inside the step before it, and the merged chain is kept", async () => {
+    const merged: CueSpec = {
+      ...snackAsk,
+      props: {
+        steps: [
+          { at: "@wait until everyone's", text: "Wait until served" },
+          { at: "@then catch a flight attendant", text: "Catch attendant or galley" },
+          { at: "@and phrase it", text: "Phrase it as offer" },
+        ],
+      },
+    };
+    const { ask, asked } = asking([[snackAsk], [merged]]);
+    const out = await planGraphics({ words: heard, cuts, film, ask, ensureIcon: async () => true });
+    expect(out.rounds[0].problems).toEqual([
+      {
+        cue: "snack-ask-steps",
+        problem: expect.stringMatching(/^step 3 \("Or step to galley"\) is a choice instead of the step before, not the next step .*Put the choice inside the step before it, as ONE step \("Call or email"\), or drop it; or show the choice with Versus$/),
+      },
+    ]);
+    expect(asked[1]).toContain('snack-ask-steps: step 3 ("Or step to galley") is a choice');
+    expect(out.cues.map(c => c.id)).toEqual(["snack-ask-steps"]);
+    expect((out.cues[0].props.steps as { text: string }[]).map(s => s.text)).toEqual(["Wait until served", "Catch attendant or galley", "Phrase it as offer"]);
+  });
+
+  it("the same chain with the 'Or' left off the step is still refused: the narrator says it right before the step's words", async () => {
+    const quiet: CueSpec = {
+      ...snackAsk,
+      props: {
+        steps: [
+          { at: "@wait until everyone's", text: "Wait until served" },
+          { at: "@then catch a flight attendant", text: "Catch an attendant" },
+          { at: "@step back to", text: "Step back to galley" },
+          { at: "@and phrase it", text: "Phrase it as offer" },
+        ],
+      },
+    };
+    const { ask } = asking([[quiet]]);
+    const out = await planGraphics({ words: heard, cuts, film, ask, ensureIcon: async () => true });
+    expect(out.rounds[0].problems).toEqual([{ cue: "snack-ask-steps", problem: expect.stringMatching(/^step 3 \("Step back to galley"\) is a choice instead of the step before/) }]);
+    expect(out.cues).toEqual([]);
+  });
+
+  it("a real chain of steps on the narrator's words is kept as before (Frederick's job 385)", async () => {
+    const words = W("So get a stepladder, take one alarm down, and read the label.", 60);
+    const steps: CueSpec = { id: "07-step-labels", template: "StepLabels", start: "So get a stepladder", startPad: -0.15, end: "read the label.", endPad: 0.3, props: { steps: [{ text: "Get a stepladder", at: "@get a stepladder" }, { text: "Take one alarm down", at: "@take one alarm down" }, { text: "Read the label", at: "@read the label" }] } };
+    const { ask } = asking([[steps]]);
+    const out = await planGraphics({ words, film: { scenes: [scene(12, 59, 65, { scriptText: words.map(w => w.text).join(" ") })] }, ask, ensureIcon: async () => true });
+    expect(out.rounds[0].problems).toEqual([]);
+    expect(out.cues.map(c => c.id)).toEqual(["07-step-labels"]);
   });
 });

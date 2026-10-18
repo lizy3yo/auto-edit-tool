@@ -211,13 +211,19 @@ function findTokens(toks: string[], want: string[], from: number): number {
   return -1;
 }
 
+/** A step's ways of doing it: the step, then each choice joined to it after a comma
+ * (`joinChoiceSteps`: "catch a flight attendant as they pass, or step back to the galley"). */
+const waysOf = (step: string) => step.split(/\s*[,;]\s*(?=(?:or|alternatively)\b)/i);
+
 /**
  * Whether `items` really are a spoken list in `sentence`: every item is there, in order, at most
  * `LIST_ITEM_MAX_WORDS` words, with at most `GAP_MAX_WORDS` words between two items, and joined the
  * way list items are — two items need a comma between them, three or more at least one. A pair
- * joined only by "and" ("the potholders and the coasters") fails. Pure.
+ * joined only by "and" ("the potholders and the coasters") fails. For a list of `steps` the word
+ * limit holds for each WAY of a step (`waysOf`): job 399's "catch a flight attendant as they pass, or
+ * step back to the galley" is one step of 13 words, two ways of 7 and 6. Pure.
  */
-export function validateSpokenList(sentence: string, items: string[]): boolean {
+export function validateSpokenList(sentence: string, items: string[], steps = false): boolean {
   if (!Array.isArray(items) || items.length < 2) return false;
   const spans = tokenSpans(sentence);
   const toks = spans.map(t => t.tok);
@@ -226,7 +232,8 @@ export function validateSpokenList(sentence: string, items: string[]): boolean {
   let commas = 0;
   for (const item of items) {
     const want = tokenSpans(String(item ?? "")).map(t => t.tok);
-    if (!want.length || want.length > LIST_ITEM_MAX_WORDS) return false;
+    const ways = steps ? waysOf(String(item ?? "")) : [String(item ?? "")];
+    if (!want.length || ways.some(w => tokenSpans(w).length > LIST_ITEM_MAX_WORDS)) return false;
     const at = findTokens(toks, want, cursor);
     if (at < 0) return false;
     if (prevEnd >= 0) {
@@ -284,7 +291,8 @@ For each list give its items EXACTLY as spoken, word for word — each item with
 words up to the next comma ("a flying geese row across the middle"), without the "and"/"or" that
 joins it. A list's first item may sit at the end of a longer clause ("…sitting at a kitchen table
 with a straight-stitch machine, a rotary cutter, and a pile of scraps": the machine is the first
-item).
+item). In a sequence of steps, a CHOICE of another way to do a step ("call the office, or send an
+email") is part of that step, never the next step: give both ways as ONE item.
 
 NOT a list:
 - one thing being talked about ("the one that paid me best came out of a coffee can")
@@ -314,8 +322,12 @@ export function parseSpokenLists(text: string, sentences: string[]): SpokenList[
     // as rest, as a good night's sleep…" (job 362, again in jobs 392 and 395). Dropped here, the
     // sentence shape may still find the real list in that sentence (`findSpokenLists` adds it).
     if (!steps && !itemsAreThings(sentences[n], items)) continue;
-    if (validateSpokenList(sentences[n], items))
-      out.push({ sentence: n, items, ...(steps ? { kind: "steps" as const } : {}) });
+    // A step offered as a CHOICE ("…, or step back to the galley", job 399) is part of the step
+    // before it, never the next one (`joinChoiceSteps`). A list of things keeps its "or": "a saw,
+    // a drill, or a plane" is three things to show.
+    const kept = steps ? joinChoiceSteps(sentences[n], items) : items;
+    if (validateSpokenList(sentences[n], kept, steps))
+      out.push({ sentence: n, items: kept, ...(steps ? { kind: "steps" as const } : {}) });
   }
   return out.sort((a, b) => a.sentence - b.sentence);
 }
@@ -324,24 +336,92 @@ export function parseSpokenLists(text: string, sentences: string[]): SpokenList[
 const SUBJECT_START = /^(?:i|you|we|he|she|they|it|there|that|this|these|those|my|our|his|her|their)\b/i;
 
 /**
+ * Words that open a CHOICE, not the next step: "or", "or else", "alternatively". Helena's job 399
+ * (2:19): "So wait until everyone's been served, then catch a flight attendant as they pass, or step
+ * back to the galley, and phrase it as an offer." Stepping back to the galley is ANOTHER WAY to reach
+ * the crew, not something done after catching one; drawn as the next step (the graphic's numbered
+ * chain "1 Wait until served → 2 Catch an attendant → 3 Or step to galley → 4 …") it tells the viewer
+ * to do both. A choice is part of the step before it.
+ */
+const OFFERS_A_CHOICE = /^(?:or|alternatively)\b/i;
+const CHOICE_WORDS = new Set(["or", "alternatively"]);
+
+/**
+ * A step list with every CHOICE joined to the step before it: a step that opens on "or" /
+ * "alternatively", or has one in the words between it and the step before (the model leaves the
+ * joining "or" out of its items, job 399's "…as they pass, or step back to the galley"), becomes part
+ * of that step — one item, the sentence's own words from the first way's start to the choice's end.
+ * The first step is never joined to anything (job 399's "Or look underneath this video, open the
+ * description, and tap the link at the top." offers the whole sequence as a choice, and its steps
+ * are still done in order). A list whose items are not found in order is returned as it is, for
+ * `validateSpokenList` to refuse; an item not joined keeps its own text. Pure.
+ */
+export function joinChoiceSteps(sentence: string, items: string[]): string[] {
+  const spans = tokenSpans(sentence);
+  const toks = spans.map(t => t.tok);
+  const found: { a: number; b: number; item: string }[] = [];
+  let cursor = 0;
+  for (const item of items) {
+    const want = tokenSpans(String(item ?? "")).map(t => t.tok);
+    const at = findTokens(toks, want, cursor);
+    if (at < 0) return items;
+    found.push({ a: at, b: at + want.length, item });
+    cursor = at + want.length;
+  }
+  const out: { a: number; b: number; item: string }[] = [];
+  for (const f of found) {
+    const prev = out[out.length - 1];
+    const choice = !!prev && (CHOICE_WORDS.has(toks[f.a]) || toks.slice(prev.b, f.a).some(t => CHOICE_WORDS.has(t)));
+    if (!choice) out.push({ ...f });
+    else {
+      prev.b = f.b;
+      prev.item = sentence.slice(spans[prev.a].start, spans[prev.b - 1].end);
+    }
+  }
+  return out.map(o => o.item);
+}
+
+/**
  * The steps in one sentence, by shape: three or more comma pieces, the last joined by "and"/"then",
  * each a short instruction that starts on its own verb-like word — no subject ("I went…"), no
- * determiner ("a saw" is a thing), no aside ("Honestly"), at most `STEP_MAX_WORDS`. Pure.
+ * determiner ("a saw" is a thing), no aside ("Honestly"), at most `STEP_MAX_WORDS`. A piece that
+ * offers a choice (`OFFERS_A_CHOICE`: "…, or soak it") is part of the step before it, never a step of
+ * its own — it used to sink the whole sentence instead. Pure.
  */
 export function stepsByShape(sentence: string): string[] | null {
-  const pieces = sentence.split(/[,;]/).map(p => p.trim()).filter(Boolean);
+  // Each comma piece where it sits, so a choice joined to its step keeps the sentence's own words.
+  const pieces: string[] = [];
+  let from = -1;
+  let to = -1;
+  for (const m of Array.from(sentence.matchAll(/[^,;]+/g))) {
+    const text = m[0].trim();
+    if (!text) continue;
+    const [a, b] = [m.index!, m.index! + m[0].length];
+    if (from >= 0 && OFFERS_A_CHOICE.test(text)) to = b;
+    else {
+      if (from >= 0) pieces.push(sentence.slice(from, to).trim());
+      [from, to] = [a, b];
+    }
+  }
+  if (from >= 0) pieces.push(sentence.slice(from, to).trim());
   if (pieces.length < 3) return null;
   const last = pieces[pieces.length - 1];
   if (!/^(?:and|then|and then)\s/i.test(last)) return null;
   const items = pieces.map(p => p.replace(/^(?:and then|and|then)\s+/i, "").replace(/[.!?]+$/, "").trim());
   const isStep = (t: string) => {
-    const words = t.split(/\s+/);
+    // The step itself is its first way; a choice joined to it is held only to the length limit.
+    const ways = waysOf(t);
+    const words = ways[0].split(/\s+/);
     const first = (words[0] ?? "").replace(/[^a-z]/gi, "").toLowerCase();
     return (
       words.length >= 2 &&
-      words.length <= STEP_MAX_WORDS &&
+      ways.every(w => w.split(/\s+/).length <= STEP_MAX_WORDS) &&
       !!first &&
       !SUBJECT_START.test(first) &&
+      // …and a subject in a contraction ("and you'll know", "and I'll answer" read "youll", "ill"
+      // above): a sentence an "or" piece used to sink can now reach this line, so its last piece is
+      // held to the same rule.
+      !SUBJECT_START.test((words[0] ?? "").toLowerCase().replace(/’/g, "'")) &&
       !DETERMINER.test(t) &&
       !NOT_A_LIST_ITEM.has(first) &&
       !/ly$/.test(first) &&
@@ -374,7 +454,7 @@ export function spokenListsByShape(sentences: string[], only?: Set<number>): Spo
       if (validateSpokenList(s, items) && itemsAreThings(s, items)) out.push({ sentence: n, items });
     if (out.some(l => l.sentence === n)) return;
     const steps = stepsByShape(s);
-    if (steps && validateSpokenList(s, steps)) out.push({ sentence: n, items: steps, kind: "steps" });
+    if (steps && validateSpokenList(s, steps, true)) out.push({ sentence: n, items: steps, kind: "steps" });
   });
   return out;
 }
@@ -442,6 +522,10 @@ const PLAIN = new Set(["with", "from", "that", "this", "these", "those", "some",
 /** A list item's words without its joiners or trailing punctuation. */
 const bareItem = (t: string) =>
   stripJoiners(t.trim()).replace(/[.!?;:,]+$/, "").trim();
+
+/** A step's first way of doing it, before a choice joined to it after a comma ("…as they pass, or
+ * step back to the galley"); an "or" inside one piece ("two or three drops") stays. */
+const firstChoice = (step: string) => step.replace(/\s*[,;]\s*(?:or|alternatively)\b[\s\S]*$/i, "").trim() || step;
 
 /** The longest bridge into a list (a clause leading in, not a passage of its own). */
 const BRIDGE_HOST_MAX_WORDS = 16;
@@ -787,12 +871,15 @@ export function applySpokenLists(
       });
       const base = scenes[G[a].scene];
       // A STEP is the host's hands doing it (a photo — never a video of hands), on the thing being
-      // made; a planner picture that already shows it keeps its look.
+      // made; a planner picture that already shows it keeps its look. A step that offers a choice
+      // ("catch a flight attendant as they pass, or step back to the galley", job 399) shows its
+      // first way: a picture draws ONE thing, never "X or Y".
+      const way = firstChoice(bare);
       const show =
         own >= 0
           ? scenes[own].showSubject!
           : r.kind === "steps"
-            ? `the host's hands, mid-step: ${bare.charAt(0).toLowerCase()}${bare.slice(1)}${opts.main ? `, while making the ${opts.main}` : ""}`
+            ? `the host's hands, mid-step: ${way.charAt(0).toLowerCase()}${way.slice(1)}${opts.main ? `, while making the ${opts.main}` : ""}`
             : `${bare}${opts.main ? ` (for the ${opts.main})` : ""}`;
       const pic = listPicture(base, text, show);
       if (own >= 0) {

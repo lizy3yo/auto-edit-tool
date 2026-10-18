@@ -3,10 +3,12 @@ import type { StoryboardScene } from "@shared/types";
 import {
   applySpokenLists,
   findSpokenLists,
+  joinChoiceSteps,
   listsByShape,
   parseSpokenLists,
   splitSentences,
   spokenListsByShape,
+  stepsByShape,
   validateSpokenList,
   type SpokenList,
 } from "./spokenLists";
@@ -371,5 +373,79 @@ describe("a list left alone says why", () => {
     const r = applySpokenLists(scenes, shapeLists(scenes));
     expect(r.applied).toBe(0);
     expect(r.skipped.join(" ")).toMatch(/CTA/);
+  });
+});
+
+describe("a step offered as a choice is part of the step before it (A6, Helena's job 399)", () => {
+  // Job 399's sentence 32. Stepping back to the galley is another way to reach the crew, not a step done
+  // after catching one; the film's step graphic chained it as step 3 of 4.
+  const ask399 =
+    "So wait until everyone's been served, then catch a flight attendant as they pass, or step back to the galley, and phrase it as an offer.";
+  const steps = (sentence: string, items: string[]) =>
+    parseSpokenLists(JSON.stringify({ lists: [{ sentence: 0, kind: "steps", items }] }), [sentence]);
+  const joined = ["wait until everyone's been served", "catch a flight attendant as they pass, or step back to the galley", "phrase it as an offer"];
+
+  it("the model's four steps become three: the choice joins the step before it, in the sentence's own words", () => {
+    // the model leaves the joining "or" out of its items, or keeps it
+    expect(steps(ask399, ["wait until everyone's been served", "catch a flight attendant as they pass", "step back to the galley", "phrase it as an offer"])).toEqual([
+      { sentence: 0, items: joined, kind: "steps" },
+    ]);
+    expect(steps(ask399, ["wait until everyone's been served", "catch a flight attendant as they pass", "or step back to the galley", "phrase it as an offer"])).toEqual([
+      { sentence: 0, items: joined, kind: "steps" },
+    ]);
+    // the joined step is 13 words — each way is held to the item limit, not the two together
+    expect(joinChoiceSteps("Rinse it, scrub it, alternatively soak it overnight, then dry it.", ["Rinse it", "scrub it", "soak it overnight", "dry it"])).toEqual([
+      "Rinse it",
+      "scrub it, alternatively soak it overnight",
+      "dry it",
+    ]);
+  });
+
+  it("by sentence shape, a choice piece joins its step instead of sinking the sentence", () => {
+    // the real sentence opens on "So", which the shape rules never take as a step — as before
+    expect(stepsByShape(ask399)).toBeNull();
+    expect(stepsByShape(ask399.replace(/^So w/, "W"))).toEqual(["Wait until everyone's been served", joined[1], "phrase it as an offer"]);
+    expect(spokenListsByShape(["Rinse the jar, dry it, or leave it on the rack, and fill it to the top."])).toEqual([
+      { sentence: 0, items: ["Rinse the jar", "dry it, or leave it on the rack", "fill it to the top"], kind: "steps" },
+    ]);
+  });
+
+  it("a choice step's picture shows its first way: a picture draws one thing, never 'X or Y'", () => {
+    const found = steps(ask399, ["wait until everyone's been served", "catch a flight attendant as they pass", "step back to the galley", "phrase it as an offer"])!;
+    const scenes = [
+      scene(24, "Ask while the cart is still working its way back, and you're asking the crew to guess whether the last few rows will come up short."),
+      host(25, "So wait until everyone's been served, then catch a flight attendant as they pass,"),
+      scene(26, "or step back to the galley, and phrase it as an offer."),
+      host(27, "Two asks in, you might wonder how anyone keeps this straight."),
+    ];
+    const r = applySpokenLists(scenes, found);
+    const made = r.scenes.filter(s => s.listCut);
+    expect(made.map(s => s.scriptText)).toEqual([
+      "So wait until everyone's been served,",
+      "then catch a flight attendant as they pass, or step back to the galley,",
+      "and phrase it as an offer.",
+    ]);
+    expect(made[1].showSubject).toBe("the host's hands, mid-step: catch a flight attendant as they pass");
+  });
+
+  it("real step lists with an 'or' INSIDE a step are kept exactly as they were (jobs 351, 354-395, 399)", () => {
+    for (const [sentence, items] of [
+      ["It means getting the fabric damp or warm, pinning it into shape, and letting it dry that way so it remembers.", ["getting the fabric damp or warm", "pinning it into shape", "letting it dry that way so it remembers"]], // 351
+      ["Lift your phone, point the camera at that square, and hold it steady for a second or two.", ["Lift your phone", "point the camera at that square", "hold it steady for a second or two"]], // 354…395
+      // the first step after a sentence-opening "Or" is not joined to anything: the steps are still done in order
+      ["Or look underneath this video, open the description, and tap the link at the top.", ["look underneath this video", "open the description", "tap the link at the top"]], // 399
+    ] as [string, string[]][])
+      expect(steps(sentence, items)).toEqual([{ sentence: 0, items, kind: "steps" }]);
+    // a list of THINGS keeps its "or": three things to show (job 355)
+    const sparrow = "But a good chunk gets flicked into the dirt, carried off by a rat after dark, or shared with every sparrow on the block.";
+    const things = ["flicked into the dirt", "carried off by a rat after dark", "shared with every sparrow on the block"];
+    expect(parseSpokenLists(JSON.stringify({ lists: [{ sentence: 0, kind: "things", items: things }] }), [sparrow])).toEqual([{ sentence: 0, items: things }]);
+  });
+
+  it("two ways of doing one thing are no sequence of steps; a subject in a contraction is no step", () => {
+    expect(steps("Call the office, or send an email.", ["Call the office", "send an email"])).toEqual([]);
+    // the "or" piece used to sink this sentence; joined, its "and you'll know" must still not be a step
+    expect(stepsByShape("Pick one up, look it over, or ask the seller, and you'll know.")).toBeNull();
+    expect(stepsByShape("Pick one up, look it over, or ask the seller, and I'll explain the rest.")).toBeNull();
   });
 });
