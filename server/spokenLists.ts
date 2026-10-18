@@ -31,6 +31,7 @@ import type { StoryboardScene } from "@shared/types";
 import { invokeClaude } from "./claude";
 import { safeParseJSON } from "./jsonRepair";
 import { namedPeople } from "./hostLook";
+import { namesHostBefore } from "./hostIntro";
 import {
   FRESH,
   HOST_HANDOFF_MIN_WORDS,
@@ -1061,7 +1062,6 @@ export function applySpokenLists(
       ? (scenes[G[a].scene].scriptText ?? "").slice(G[a].end, G[b].start)
       : `${(scenes[G[a].scene].scriptText ?? "").slice(G[a].end)} ${(scenes[G[b].scene].scriptText ?? "").slice(0, G[b].start)}`;
   const punctBetween = (a: number, b: number) => /[,.;:!?]/.test(between(a, b));
-  const nameToks = tokenSpans(opts.hostName ?? "").map(t => t.tok);
 
   interface Region {
     starts: number[];
@@ -1158,8 +1158,13 @@ export function applySpokenLists(
       !host.hostIntro &&
       !!scenes[r.first - 1]?.hostPresent;
     if (onlyList) return r.first > 0 || no("is the film's first line");
-    // The introduction keeps the host's name on camera: its list hands over only after the name.
-    if (host.hostIntro && nameToks.length && !kept.some((_, j) => nameToks.every((w, q) => kept[j + q] === w)))
+    // The introduction keeps the host's name on camera: its list hands over only after the name —
+    // the name as the introduction was found (`namesHostBefore`: "I am Sam" for Sawdust Sam, job 407).
+    if (
+      host.hostIntro &&
+      opts.hostName?.trim() &&
+      !namesHostBefore(host.scriptText ?? "", opts.hostName, G[r.starts[0]].start)
+    )
       return no("would take the host's name off the introduction");
     // Otherwise a list inside a host line ALWAYS becomes pictures (Lance's job 314: "A bin in the hall
     // closet, a bag in the garage, maybe a box under the bed. And there's a decent chance…" stayed on

@@ -31,6 +31,7 @@ import {
   namesOnlyAnimal,
   personKey,
 } from "./hostLook";
+import { hostNameRanges, namesHostBefore } from "./hostIntro";
 
 /** A picture shorter than this is a flash and folds into a neighbour. */
 export const SHOT_MIN_SEC = 1.2;
@@ -219,16 +220,17 @@ export const HOST_PART_MAX_SEC = 5;
 
 /**
  * Words the host says after their own name in `text` — the self-introduction may run long to
- * reach the name, and only what comes AFTER it counts against `HOST_PART_MAX_SEC`. Pure.
+ * reach the name, and only what comes AFTER it counts against `HOST_PART_MAX_SEC`. The name is
+ * found the way the introduction was (`hostNameRanges`): looked for as the WHOLE name only, "I am
+ * Sam" on Sawdust Sam's channel (job 407), or "I am Mae" on Granny Mae's, counted every word of the
+ * line. Pure.
  */
 export function wordsAfterName(text: string, hostName?: string): number {
-  const toks = tokenSpans(text).map(t => t.tok);
-  const name = tokenSpans(hostName ?? "").map(t => t.tok);
-  if (!name.length) return toks.length;
-  for (let i = toks.length - name.length; i >= 0; i--) {
-    if (name.every((w, k) => toks[i + k] === w)) return toks.length - (i + name.length);
-  }
-  return toks.length;
+  const toks = tokenSpans(text);
+  const named = hostNameRanges(text, hostName);
+  if (!named.length) return toks.length;
+  const end = named[named.length - 1][1];
+  return toks.filter(t => t.start >= end).length;
 }
 
 /**
@@ -578,7 +580,6 @@ export function applyShotPlan(
   const byScene = new Map(plans.map(p => [p.scene, p]));
   const originals = new Map<number, StoryboardScene>();
   const out: StoryboardScene[] = [];
-  const nameToks = tokenSpans(opts.hostName ?? "").map(t => t.tok);
   for (let si = 0; si < scenes.length; si++) {
     const s = scenes[si];
     let plan = byScene.get(s.index);
@@ -616,17 +617,16 @@ export function applyShotPlan(
         continue;
       }
       plan = { ...plan, shots: shotsLeft };
-      if (s.hostIntro && nameToks.length) {
-        const said = spans.slice(0, hostEnd).map(t => t.tok);
-        const hasName = said.some(
-          (_, i) =>
-            i + nameToks.length <= said.length &&
-            nameToks.every((w, k) => said[i + k] === w)
-        );
-        if (!hasName) {
-          out.push(s);
-          continue;
-        }
+      // The introduction keeps the name on the host — found as the introduction was found
+      // (`namesHostBefore`), so "I am Sam" (Sawdust Sam, job 407) may hand over after the name too;
+      // matched as the whole name only, every hand-off on such an introduction was refused.
+      if (
+        s.hostIntro &&
+        opts.hostName?.trim() &&
+        !namesHostBefore(text, opts.hostName, spans[hostEnd - 1].end)
+      ) {
+        out.push(s);
+        continue;
       }
       pieces.push({ at: 0, host: true });
       cursor = hostEnd;

@@ -113,6 +113,33 @@ describe("applyShotPlan", () => {
     expect(withAfter.slice(0, -1)).toEqual([host]);
   });
 
+  it("hands over after a name said by one word of the channel's name, never before it (job 407)", () => {
+    const SAM =
+      "I am Sam, and this one is for anybody who has wondered how a family got through a mountain winter on a woodlot.";
+    const host = scene(9, SAM, { hostPresent: true, hostIntro: true });
+    const plan = (hostUntil: string, from: string) => [
+      { scene: 9, hostUntil, shots: [{ from, show: "a snowed-in cabin at the edge of a woodlot" }] },
+    ];
+    // Matched as the whole name only, "Sawdust Sam" was never said, so every hand-off was refused.
+    const handed = applyShotPlan([host, after], plan("who has wondered", "how a family"), {
+      hostName: "Sawdust Sam",
+    }).scenes.slice(0, -1);
+    expect(handed.map(s => s.scriptText)).toEqual([
+      "I am Sam, and this one is for anybody who has wondered",
+      "how a family got through a mountain winter on a woodlot.",
+    ]);
+    expect(handed[0].hostPresent && handed[0].hostIntro).toBe(true);
+    // A hand-off that would take the name off the host is still refused.
+    const SAWDUST = "Folks call me by the shop, but I am Sam, and this one is for anybody who builds.";
+    const early = scene(9, SAWDUST, { hostPresent: true, hostIntro: true });
+    expect(
+      applyShotPlan([early, after], plan("by the shop, but", "I am Sam"), { hostName: "Sawdust Sam" }).scenes.slice(
+        0,
+        -1
+      )
+    ).toEqual([early]);
+  });
+
   it("cuts a b-roll beat on the words that name each thing", () => {
     const b = scene(
       4,
@@ -432,6 +459,17 @@ describe("wordsAfterName", () => {
     const { wordsAfterName } = await import("./shotList");
     expect(wordsAfterName("I'm Hank Hardwood, and this one's for anybody", "Hank Hardwood")).toBe(5);
     expect(wordsAfterName("Out of 10 crochet projects", "Granny Mae")).toBe(5);
+  });
+
+  it("finds the name the way the introduction was found — by one word of it too (job 407)", async () => {
+    const { wordsAfterName } = await import("./shotList");
+    // Matched as the whole name only, every word of these lines counted as "after the name".
+    expect(wordsAfterName("I am Sam, and this one is for anybody", "Sawdust Sam")).toBe(6);
+    expect(wordsAfterName("I am Mae, and this is my table.", "Granny Mae")).toBe(5);
+    expect(wordsAfterName("My name is Gideon Grant, and this channel is for", "Gideon Grant")).toBe(5);
+    // The ordinary word half of a name, uncapitalised, is not the name.
+    expect(wordsAfterName("Sweep the sawdust here, before it spreads", "Sawdust Sam")).toBe(7);
+    expect(wordsAfterName("I am Sam, and this one is for anybody", undefined)).toBe(9);
   });
 });
 

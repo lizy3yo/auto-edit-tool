@@ -3699,3 +3699,45 @@ describe("one picture, one subject: two sentences about different things are two
     expect(r.scenes.map(x => x.otherPerson)).toEqual(["a flight attendant", undefined]);
   });
 });
+
+describe("the host introduced by one word of a two-word channel name (job 407)", () => {
+  // Sawdust Sam's "I am Sam, and this one is for anybody…" played as a split screen, with no name
+  // card, and the audit counted no introduction: only "Sawdust Sam" and "Sawdust" were looked for.
+  // "I'm Brenda" on Backyard Brenda's channel would have missed the same way.
+  const params = { faceImageUrl: "https://example.com/host.jpg", hostName: "Sawdust Sam" } as any;
+  const film = () => [
+    pic(8, "That steel is why the last skill on this list held the other twenty-four together.", "an axe head on a stump", {
+      stillImage: true,
+    }),
+    host(
+      9,
+      "I am Sam, and this one is for anybody who has wondered how a family got through a mountain winter on a woodlot and very little cash.",
+      { splitVisual: "a woodlot at the edge of a clearing" }
+    ),
+    pic(10, "The title says lost, which is too strong, since folk schools still teach plenty of these", "a folk school bench", {
+      stillImage: true,
+    }),
+  ];
+
+  it("the introduction is found, put on camera full frame, and counted by the audit", async () => {
+    const { markHostIntroductions } = await import("./longformVideo");
+    const { checkPlan } = await import("./planGate");
+    const scenes = film();
+    expect(checkPlan(scenes, params).stats.introductions).toBe(1);
+    expect(checkPlan(scenes, params).findings.filter(f => f.rule === 6).map(f => f.scene)).toEqual([9]);
+    markHostIntroductions(scenes, params.hostName, true);
+    expect(scenes[1]).toMatchObject({ hostPresent: true, hostIntro: true });
+    expect(scenes[1].splitVisual).toBeUndefined();
+    expect(checkPlan(scenes, params).findings.filter(f => f.rule === 6)).toEqual([]);
+    expect(scenes[0].hostIntro || scenes[2].hostIntro).toBeFalsy();
+  });
+
+  it("the same for 'I'm Brenda' — and a name's ordinary-word half is never the host", async () => {
+    const { introducesHost } = await import("./longformVideo");
+    expect(introducesHost("I'm Brenda, and if you keep a small yard, this one's for you.", "Backyard Brenda")).toBe(true);
+    expect(introducesHost("Look at the backyard here, after the rain.", "Backyard Brenda")).toBe(false);
+    expect(introducesHost("Sweep up the sawdust here, before it spreads.", "Sawdust Sam")).toBe(false);
+    expect(introducesHost("It's sterling silver, not plate.", "Scarlett Sterling")).toBe(false);
+    expect(introducesHost("You can see the Carolina Wren here, on the feeder.", "Walter Wren")).toBe(false);
+  });
+});

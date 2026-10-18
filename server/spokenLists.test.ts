@@ -275,6 +275,36 @@ describe("the film is cut to fit its lists", () => {
     ]);
   });
 
+  it("Sawdust Sam (job 407): an introduction by one word of the name hands its list over after the name", () => {
+    // Matched as the whole name only, "I am Sam" never said "Sawdust Sam", so the list stayed on the host.
+    const scenes = [
+      host(1, "Hello.", { hostOpener: true }),
+      host(2, "I am Sam, and this one is for anybody standing at a chopping block with an axe, a froe, and a drawknife,", {
+        hostIntro: true,
+      }),
+      scene(3, "wondering how the cabin got built."),
+      host(4, "Bye."),
+    ];
+    const r = applySpokenLists(scenes, shapeLists(scenes), { hostName: "Sawdust Sam" });
+    expect(r.handed).toBe(1);
+    expect(rows(r.scenes).slice(1, 5)).toEqual([
+      ["I am Sam, and this one is for anybody standing at a chopping block with", true, false],
+      ["an axe,", false, true],
+      ["a froe,", false, true],
+      ["and a drawknife,", false, true],
+    ]);
+    // A list that comes before the name still stays with the host.
+    const before = [
+      host(1, "Hello.", { hostOpener: true }),
+      host(2, "With an axe, a froe, and a drawknife, I am Sam, and I build cabins.", { hostIntro: true }),
+      scene(3, "x."),
+      host(4, "Bye."),
+    ];
+    const kept = applySpokenLists(before, shapeLists(before), { hostName: "Sawdust Sam" });
+    expect(kept.handed).toBe(0);
+    expect(kept.skipped.join(" ")).toContain("would take the host's name off the introduction");
+  });
+
   it("leaves the host the list when the host would keep too little, lose the name, or speak on", () => {
     // A host line that is ONLY the list goes to the pictures (Lance's job 311); a host line that
     // keeps a few words before it does not hand over.

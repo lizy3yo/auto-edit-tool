@@ -177,6 +177,7 @@ import { presignOwnBucketUrl, storagePut } from "./storage";
 import { lightVideoFor } from "./lightVideo";
 import { voiceSpace69Labs } from "./tts69labs";
 import { applySpokenLists, findSpokenLists } from "./spokenLists";
+import { introSpans, introducesHost } from "./hostIntro";
 import { collectShownFacts, describeNamedLooks, namedLookClause } from "./namedLooks";
 import {
   classifyNarrationFailure,
@@ -11045,82 +11046,9 @@ export function lengthenPitchShots(
   return list;
 }
 
-/** Honorifics a host name carries that a host does not introduce themself by ("Granny Mae" → "Mae"). */
-const NAME_HONORIFIC =
-  /^(granny|grandma|grandpa|gramma|nana|aunt|auntie|uncle|mr|mrs|ms|miss|dr|pastor|farmer|chef|mama|papa)\.?$/i;
-
-/** The regexes that find the host introducing themself, built once per host name. */
-function introPatterns(hostName: string | undefined): RegExp[] {
-  const out: RegExp[] = [/\b[Mm]y name(?:['’]s| is)\s+[A-Z][\w'’-]*/g];
-  const name = hostName?.trim();
-  if (!name) return out;
-  const core = name.split(/\s+/).filter(p => !NAME_HONORIFIC.test(p));
-  const variants = new Set<string>([name]);
-  if (core.length) {
-    variants.add(core.join(" "));
-    variants.add(core[0]);
-  }
-  for (const v of Array.from(variants)) {
-    const esc = v
-      .replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
-      .replace(/\s+/g, "\\s+");
-    const notPossessive = "(?![\\w'’])";
-    out.push(
-      new RegExp(
-        `\\b(?:I['’]m|I am|this is|it['’]s|call me)\\s+${esc}${notPossessive}`,
-        "gi"
-      ),
-      new RegExp(`\\b${esc}\\s+here\\b`, "gi")
-    );
-  }
-  return out;
-}
-
-/**
- * Words that follow "I'm" at the start of a sentence without being a name ("I'm Not sure…"), so
- * the no-name backstop below never mistakes them for one.
- */
-const NOT_A_NAME =
-  /^(not|so|sure|sorry|going|glad|here|back|telling|talking|just|also|still|really|always|never|about|afraid|done|getting|looking|trying|the|a|an|in|on|at|from|with|over|sixty|seventy|eighty|one|two|three|four|five)$/i;
-
-/** Character spans [start, end) of every self-introduction in `text`. Pure. */
-export function introSpans(
-  text: string,
-  hostName: string | undefined
-): [number, number][] {
-  const spans: [number, number][] = [];
-  // No name to look for (a channel with neither a host name nor a display name): the FIRST
-  // "I'm <Name>" / "I am <Name>" near the start of the script is the introduction — hosts
-  // introduce themselves in the opening, so nothing later can be mistaken for one.
-  if (!hostName?.trim()) {
-    const opening = Math.max(700, Math.floor(text.length * 0.2));
-    for (const m of Array.from(text.matchAll(/\b(?:I['’]m|I am)\s+([A-Z][\w'’-]+)/g))) {
-      if (m.index! > opening) break;
-      if (NOT_A_NAME.test(m[1])) continue;
-      spans.push([m.index!, m.index! + m[0].length]);
-      break;
-    }
-  }
-  for (const re of introPatterns(hostName)) {
-    re.lastIndex = 0;
-    for (const m of Array.from(text.matchAll(re)))
-      spans.push([m.index!, m.index! + m[0].length]);
-  }
-  return spans;
-}
-
-/**
- * True when a line is the host introducing themself: "I'm Hank Hardwood", "I am Granny Mae",
- * "Hank here", "this is Ruth", "my name is…". Built from the channel's `hostName` (with and
- * without an honorific, and the first name alone) so it works for every channel without a
- * per-channel list. A possessive ("it's Hank's saw") is not an introduction. Pure — unit-tested.
- */
-export function introducesHost(
-  text: string | undefined,
-  hostName: string | undefined
-): boolean {
-  return introSpans(text ?? "", hostName).length > 0;
-}
+// The self-introduction finders (`introSpans`, `introducesHost`) live in ./hostIntro, where the
+// shot list and the list cutter reach them too; re-exported here, their old home.
+export { introSpans, introducesHost };
 
 /**
  * Put the host on camera wherever they introduce themself — a constant of the format, like the
@@ -11194,16 +11122,14 @@ export function startsSentence(scenes: StoryboardScene[], i: number): boolean {
 
 /**
  * Where the sentence that introduces the host begins inside `text` ("I'm Granny Mae", "my name is
- * Hank"), or 0 when it is the first sentence or there is none. Pure.
+ * Hank"), or 0 when it is the first sentence or there is none. Found by the same `introSpans` that
+ * flagged the beat `hostIntro`: this used to look for the host name's FIRST word only, so "I am Sam"
+ * on Sawdust Sam's channel (job 407), and "I'm Mae" on Granny Mae's, were never found here even once
+ * the beat was flagged, and the take kept the sentence before the name. Pure.
  */
 export function introSentenceStart(text: string, hostName?: string): number {
-  const first = hostName?.trim().split(/\s+/)[0];
-  const escaped = first?.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const intro = escaped
-    ? new RegExp(`\\b(?:I['’]m|I am|my name(?:'s| is)|this is)\\s+${escaped}`, "i")
-    : /\b(?:I['’]m|I am|my name(?:'s| is))\b/i;
-  const at = text.search(intro);
-  if (at <= 0) return 0;
+  const at = Math.min(Infinity, ...introSpans(text, hostName).map(([a]) => a));
+  if (!Number.isFinite(at) || at <= 0) return 0;
   let start = 0;
   const ends = /[.!?…]["'”’)\]]*\s+/g;
   let m: RegExpExecArray | null;
