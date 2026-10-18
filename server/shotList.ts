@@ -2326,7 +2326,9 @@ export type PictureFix = {
  * "you" and "your hands" are the host; "your customer" and "the host's neighbour" name someone else
  * (a viewer's customer is not the viewer). With THE VIEWER (`inputParams.viewerPerson`, a video
  * whose "you" the host's job serves), "you", "your hands" and "the viewer" are that person by name,
- * never the host — job 402 scenes 17 and 20. Pure.
+ * never the host — job 402 scenes 17 and 20 — and "you and a flight attendant" keeps them beside the
+ * other person (the host words of a "host and …" answer are found again in the description; the
+ * viewer's are not). Pure.
  */
 export function whoOf(raw: unknown, viewer?: RecurringPerson): string | null | undefined {
   if (typeof raw !== "string" || !raw.trim()) return undefined;
@@ -2335,7 +2337,10 @@ export function whoOf(raw: unknown, viewer?: RecurringPerson): string | null | u
   if (!host && !you) return otherPersonOf(raw);
   const others = namedPeople(raw)?.people.filter(p => p.kind !== "self") ?? [];
   if (!others.length) return you && !host && viewer ? viewer.name : null;
-  return otherPersonOf(others.map(p => p.phrase.replace(/^(?:your|my|our)\s+/i, "the ")).join(" and "));
+  const alongside = you && !host && !!viewer && /^\s*(?:you|yourself|(?:the\s+)?viewer)\s*(?:,|&|\band\b|\bwith\b)/i.test(raw);
+  return otherPersonOf(
+    [...(alongside ? [viewer!.name] : []), ...others.map(p => p.phrase.replace(/^(?:your|my|our)\s+/i, "the "))].join(" and ")
+  );
 }
 
 /**

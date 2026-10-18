@@ -3816,4 +3816,23 @@ describe("'you' is the host's customer, not the host: one ordinary viewer with o
     expect(s.brollHostLook).toBe(GARAGE);
     expect(s.otherPerson).toBeUndefined();
   });
+
+  it("with one passenger in the story, a shot named as the viewer is the viewer, not her (job 402)", () => {
+    // The planner writes the viewer's name in every shot of "you". With the story's ONE recurring
+    // passenger that name fitted her by role, and every picture of "you" was drawn as her.
+    const storyWoman = { name: "the woman passenger", look: "a woman in her sixties, long grey hair in a low ponytail, a red wool coat, black trousers" };
+    const story = pic(3, "the whole can of ginger ale,", "a woman passenger in an empty row holding a whole soda can upright", {
+      humanPresent: true,
+      otherPerson: "a woman passenger",
+    });
+    const ask = pic(17, "On many of those carriers, you can have the whole thing just by asking.", "a passenger holding a full soda can over the tray", {
+      humanPresent: true,
+      otherPerson: "the passenger",
+    });
+    markHostBroll([story, ask], { hostLook: CREW, hostName: "Helena Hart", recurringPeople: [storyWoman], viewerPerson: passenger }, "https://x/host.png");
+    expect(buildStillPrompt(ask)).toContain(FLYER);
+    expect(buildStillPrompt(ask)).not.toContain(storyWoman.look);
+    expect(buildStillPrompt(story)).toContain(storyWoman.look);
+    expect(buildStillPrompt(story)).not.toContain(FLYER);
+  });
 });

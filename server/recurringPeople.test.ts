@@ -707,3 +707,87 @@ describe("picturesTheViewer and the viewer's look — the general rules, their e
     expect(hostWordsAsViewer("a cup on a lap tray", PASSENGER)).toBe("a cup on a lap tray");
   });
 });
+
+describe("the viewer's look: the viewer's own name first, only on pictures about 'you' (review of round 11)", () => {
+  it("the viewer's exact name beats a recurring person who only shares the role", () => {
+    // The planner writes the viewer's name in every shot of "you"; with ONE recurring passenger
+    // that name used to fit her by role and every picture of "you" was drawn as her.
+    expect(matchRecurringPeople("the passenger", 1, [WOMAN], PASSENGER)).toEqual([PASSENGER]);
+    expect(matchRecurringPeople("a passenger", 1, [WOMAN], PASSENGER)).toEqual([PASSENGER]);
+    // Her own name, or her sex, still takes her.
+    expect(matchRecurringPeople("the woman passenger", 1, [WOMAN], PASSENGER)).toEqual([WOMAN]);
+    expect(matchRecurringPeople("a woman passenger", 1, [WOMAN], PASSENGER)).toEqual([WOMAN]);
+    // No viewer: the one passenger by role, exactly as before.
+    expect(matchRecurringPeople("the passenger", 1, [WOMAN])).toEqual([WOMAN]);
+  });
+
+  it("a label that names 'you' beside its person is someone the viewer meets, never the viewer", () => {
+    expect(matchRecurringPeople("the passenger next to you", 1, [], PASSENGER)).toEqual([]);
+    expect(matchRecurringPeople("a passenger beside you", 1, [], PASSENGER)).toEqual([]);
+    expect(matchRecurringPeople("your seatmate", 1, [], PASSENGER)).toEqual([]);
+    expect(matchRecurringPeople("an older passenger", 1, [], PASSENGER)).toEqual([PASSENGER]);
+  });
+
+  it("job 402: the story's own passengers keep no viewer look; the passengers of lines to 'you' get it", () => {
+    const scenes = [
+      line(3, "the whole can of ginger ale,", "an older woman passenger in an empty row holding a whole silver and red soda can upright", {
+        humanPresent: true, otherPerson: "an older woman passenger", listCut: true,
+      }),
+      line(7, "He figures she must know somebody on the crew. She doesn't. What she knows is which questions flight attendants like hearing, and when to ask them.", "a flight attendant leaning down to speak quietly with an older woman passenger in her seat", {
+        humanPresent: true, otherPerson: "a flight attendant and an older woman passenger",
+      }),
+      line(19, "So when the cart reaches your row, speak up. \"Could I keep the rest of the can, please?\"", "a passenger's hand reaching up toward a soda can held by a flight attendant at the beverage cart stopped at a row", {
+        humanPresent: true, otherPerson: "a passenger and a flight attendant",
+      }),
+      line(25, "You're also welcome to ask for another, and the only real trick is when.", "a passenger's hand reaching for a second pretzel bag from a snack basket held by a flight attendant", {
+        humanPresent: true, otherPerson: "a passenger and a flight attendant",
+      }),
+    ];
+    markHostBroll(scenes, { hostLook: CREW_LOOK, hostName: "Helena Hart", viewerPerson: PASSENGER }, "https://x/host.png");
+    const looksOf = (k: number) => scenes.find(s => s.index === k)!.otherPersonLooks;
+    expect(looksOf(3)).toBeUndefined();
+    expect(looksOf(7)).toBeUndefined();
+    expect(looksOf(19)).toEqual([PASSENGER]);
+    expect(looksOf(25)).toEqual([PASSENGER]);
+    // The story's passengers are still drawn as someone else, never the host.
+    expect(scenes.every(s => !s.brollHostLook && !!s.otherPerson)).toBe(true);
+  });
+
+  it("hands at a viewer's thing are the viewer's only when 'you' does something, never when 'you' only receives", () => {
+    const one = (scriptText: string, show = "hands pouring juice into a plastic cup on a passenger's tray") => [
+      line(1, scriptText, show, { humanPresent: true }),
+    ];
+    // Job 402 scenes 17 and 20: "you" is the one asking.
+    expect(picturesTheViewer(one("On many of those carriers, you can have the whole thing just by asking."), 0, PASSENGER)).toBe(true);
+    expect(picturesTheViewer(one("Juice works the same way. If they're running short, they'll tell you, and you're no worse off for trying."), 0, PASSENGER)).toBe(true);
+    // The crew pours FOR you: the hands are the worker's — the host's on a crew host's channel.
+    expect(picturesTheViewer(one("They'll pour it for you."), 0, PASSENGER)).toBe(false);
+    expect(picturesTheViewer(one("If they're running short, they'll tell you."), 0, PASSENGER)).toBe(false);
+    const served = one("They'll pour it for you.");
+    markHostBroll(served, { hostLook: CREW_LOOK, hostName: "Helena Hart", viewerPerson: PASSENGER }, "https://x/host.png");
+    expect(served[0].brollHostLook).toBe(CREW_LOOK);
+    expect(served[0].otherPerson).toBeUndefined();
+  });
+
+  it("the viewer's role in the words is the viewer only on a line to 'you'", () => {
+    const one = (scriptText: string) => [line(1, scriptText, "a passenger reaching up for a bag in the overhead bin", { humanPresent: true })];
+    expect(picturesTheViewer(one("Reach up for your bag before the aisle fills."), 0, PASSENGER)).toBe(true);
+    expect(picturesTheViewer(one("She reached up for her bag before the aisle filled."), 0, PASSENGER)).toBe(false);
+    const story = one("She reached up for her bag before the aisle filled.");
+    markHostBroll(story, { hostLook: CREW_LOOK, hostName: "Helena Hart", viewerPerson: PASSENGER }, "https://x/host.png");
+    expect(story[0].otherPerson).toBe("a passenger");
+    expect(story[0].otherPersonLooks).toBeUndefined();
+  });
+});
+
+describe("the line check's 'you and someone' keeps the viewer beside them", () => {
+  it("'you and a flight attendant' is the viewer and the attendant; with no viewer, as before", () => {
+    expect(whoOf("you and a flight attendant", PASSENGER)).toBe("the passenger and a flight attendant");
+    expect(whoOf("the viewer and a flight attendant", PASSENGER)).toBe("the passenger and a flight attendant");
+    expect(matchRecurringPeople(whoOf("you and a flight attendant", PASSENGER)!, 2, [], PASSENGER)).toEqual([PASSENGER]);
+    // A viewer's customer is still only the customer, and the host's answer is unchanged.
+    expect(whoOf("your customer", PASSENGER)).toBe("the customer");
+    expect(whoOf("host and a customer", PASSENGER)).toBe("a customer");
+    expect(whoOf("you and a flight attendant")).toBe("a flight attendant");
+  });
+});
