@@ -5667,3 +5667,60 @@ describe("the film never ends on a host shot under a second (the audit, 2026-10-
     expect(closingFoldTarget(notTail, 1)).toBe(-1);
   });
 });
+
+describe("job 409 scene 28: a picture of the host is never kept past the host check (round 13)", () => {
+  // Gideon's job 409: "The essay is called On the Shortness of Life…" drew the host reading face on at
+  // the study desk for 11.6 s — job 401 scene 20's picture again, the one the face check was built
+  // for. Its two draws came back "staged", "staged", and "the same faults twice in a row" kept the
+  // second before the host check ran. Scene 19 of the same film shows the check works when reached:
+  // its first draw was refused "face shown" and drawn again turned away.
+  const PHOTO = "https://x/host.png";
+  const reader = () =>
+    pic(
+      28,
+      "The essay is called On the Shortness of Life, and it opens by picking a fight with its own title. Everyone complains that life is too short, Seneca says.",
+      "the host reading a book at the desk in the study",
+      {
+        humanPresent: true,
+        brollHostRef: PHOTO,
+        brollHostLook:
+          "A man in his sixties with fair skin, short gray hair, wire-rimmed glasses, wearing a gray sweater over a white collared shirt",
+      }
+    );
+
+  it("scene 28 is a picture the host check must pass; a picture of nobody or of someone else is not", async () => {
+    const { hostCheckDue } = await import("./longformVideo");
+    expect(hostCheckDue(reader(), false)).toBe(true);
+    // A look on the host's own face is one too: its face is allowed, never a stranger's.
+    expect(hostCheckDue({ ...reader(), hostFaceShown: true }, false)).toBe(true);
+    // Drawn with nobody in it (no host photo sent), someone else's picture, a thing alone.
+    expect(hostCheckDue(reader(), true)).toBe(false);
+    expect(hostCheckDue({ ...reader(), otherPerson: "a passenger" }, false)).toBe(false);
+    expect(hostCheckDue({ ...reader(), humanPresent: false }, false)).toBe(false);
+    expect(hostCheckDue({ ...reader(), brollHostRef: undefined }, false)).toBe(false);
+  });
+
+  it("'staged' twice on it is kept only after the host check; the same repeat on a picture of no one is kept as before", async () => {
+    const { repeatedFaultsMove } = await import("./longformVideo");
+    const host = { unchecked: false, hostUnchecked: true };
+    const thing = { unchecked: false, hostUnchecked: false };
+    expect(repeatedFaultsMove("staged", "staged", host)).toBe("check the host");
+    expect(repeatedFaultsMove("staged", "staged", thing)).toBe("keep");
+    // Job 343's phone screen, "writing, brand, staged" each time: kept on the spot, as before.
+    expect(repeatedFaultsMove("writing+brand or clutter+staged", "writing+brand or clutter+staged", thing)).toBe("keep");
+    // Not a repeat, a detail alone, a check that could not run, a clean frame: on to the checks below.
+    expect(repeatedFaultsMove("staged", "wrong place", host)).toBe("go on");
+    expect(repeatedFaultsMove("detail", "detail", thing)).toBe("go on");
+    expect(repeatedFaultsMove("staged", "staged", { unchecked: true, hostUnchecked: true })).toBe("go on");
+    expect(repeatedFaultsMove("", "", host)).toBe("go on");
+  });
+
+  it("refused there, it takes the host check's own moves: turned away, then nobody — never kept", async () => {
+    const { hostPictureMove } = await import("./longformVideo");
+    const faceOn = { same: true, face: true };
+    expect(hostPictureMove(faceOn, false, 0, false)).toEqual({ move: "redraw", why: "face", turnAway: true });
+    // A fallback refused when the draws ran out: drawn with nobody in it, one draw past the budget.
+    expect(hostPictureMove(faceOn, false, 0, true)).toEqual({ move: "nobody", why: "face", turnAway: true });
+    expect(hostPictureMove({ same: true, face: false }, false, 0, true)).toEqual({ move: "keep" });
+  });
+});

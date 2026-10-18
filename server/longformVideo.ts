@@ -153,6 +153,45 @@ export function hostPictureMove(
     turnAway: face,
   };
 }
+/**
+ * A PICTURE OF THE HOST NEVER SHIPS UNCHECKED (2026-10-18, the review of job 409). Scene 28 drew the
+ * host reading face on at the study desk — job 401 scene 20's picture again, the one the face check
+ * was written for — and its two draws came back "staged", "staged": the second was kept as "the same
+ * faults twice in a row" before the host check below that keep ever ran, and a frame kept as a
+ * fallback when the draws ran out could ship past it the same way. Whether a frame is one the host
+ * check (`scanSameHost` → `hostPictureMove`) must pass before ANY path ships it: drawn from the host
+ * photo (`markHostBroll`), not someone else, and not drawn with nobody in it. A step on the host's own
+ * face (`hostFaceShown`) is one too — its face is allowed, never a stranger's. The caller leaves out
+ * the book cover (no host photo goes with it) and `HOST_IDENTITY_CHECK=0`. Pure.
+ */
+export function hostCheckDue(
+  scene: Pick<StoryboardScene, "humanPresent" | "brollHostRef" | "otherPerson">,
+  /** The picture is drawn with nobody in it (no host photo is sent). */
+  personFree: boolean
+): boolean {
+  return !!scene.humanPresent && !!scene.brollHostRef && !scene.otherPerson && !personFree;
+}
+/**
+ * THE SAME FAULTS TWICE IN A ROW, decided. A redraw that came back exactly as wrong as the picture it
+ * replaced is kept rather than drawn a third time from the same prompt (job 343: a phone screen drawn
+ * four times, "writing, brand, staged" each time) — "keep". Never a detail alone (one redraw at most,
+ * so keeping saves no picture) nor a frame the check could not judge — those "go on" to the checks
+ * below. A frame of the host the host check has not seen yet is kept only once that check passes it
+ * — "check the host": job 409 scene 28 shipped the host's drawn face on "staged", "staged", the host
+ * check never asked. A refusal there takes the host check's own redraw, or the picture with nobody in
+ * it, exactly as when the check is reached below. Pure.
+ */
+export type RepeatedFaultsMove = "go on" | "keep" | "check the host";
+export function repeatedFaultsMove(
+  /** What the check named on this frame (`checkFlags`, joined with "+"). */
+  faults: string,
+  /** …and on the frame before it. */
+  lastFaults: string,
+  frame: { unchecked: boolean; hostUnchecked: boolean }
+): RepeatedFaultsMove {
+  if (!faults || faults !== lastFaults || faults === "detail" || frame.unchecked) return "go on";
+  return frame.hostUnchecked ? "check the host" : "keep";
+}
 /** Added to a host picture redrawn with nobody in it: the line's things, never a stand-in person. */
 export const PERSON_FREE_FALLBACK =
   "Show only the things this line is about, on a surface or in their place — no person, no " +
@@ -10399,6 +10438,9 @@ async function drawValidatedStill(
   // (`HOST_IDENTITY_REDRAWS`), then drawn with nobody in it — a stranger never ships.
   let hostMisses = 0;
   let personFree = false;
+  // Frames of the host the host check has not seen yet (`hostCheckDue`): none of them ships until it
+  // has — the keep of the same faults twice and the fallbacks below ask it first (job 409 scene 28).
+  const hostUnchecked = new WeakSet<Buffer>();
   // NO NEAR-COPIES IN A VIDEO (server/pictureVariety.ts): a picture that nearly copies another
   // picture of the same video is drawn once more, told to differ.
   let varietyRerolls = 0;
@@ -10461,7 +10503,77 @@ async function drawValidatedStill(
       `[Longform] scene ${scene.index} still blocked (content policy) → tier ${tier} (${["aggressive", "llm-rewrite", "subject-generic", "generic"][tier - 1]}) prompt`
     );
   };
-  for (let attempt = 1; attempt <= attempts; attempt++) {
+  // THE HOST IS THE HOST (2026-10-15, the review: Scarlett's routine pictures showed "a different
+  // woman"): a picture of the host is laid beside the host photo and must be the same person — hair,
+  // age, skin, build, and the face when it is shown. AND NO FACE (2026-10-18, the review of jobs
+  // 401-407: the host reading at a desk face on, smiling into the lens with a phone at the ear, a
+  // full-body axe swing — all passed as "the same person"): the same call says whether the face shows,
+  // and outside a step on the host's own face or a look on it (`hostFaceShown`) a shown face is a miss
+  // too, redrawn from behind or the side (`turnHostAway`; `hostTurnedAway` keeps it for a Regenerate).
+  // A face-shown picture of someone else is a miss like any other: redrawn, then drawn with nobody in
+  // it. Drawn again on a miss; after `HOST_IDENTITY_REDRAWS` misses — or on the last attempt — the
+  // picture is drawn with nobody in it, and a frame of a stranger or a face is never kept as a fallback
+  // (`hostPictureMove`). `HOST_IDENTITY_CHECK=0` turns it off.
+  // ONE CHECK FOR EVERY WAY OUT (job 409 scene 28): asked where the frame would ship — after the
+  // other checks, at the keep of the same faults twice, and of a fallback when the draws run out — so
+  // each frame of the host meets it once, wherever it leaves. True when the frame may ship; false when
+  // it was refused and the next draw is set up (the refused frame is never a fallback).
+  const meetsHostCheck = async (f: Drawn, attempt: number): Promise<boolean> => {
+    hostUnchecked.delete(f.buffer);
+    // A look on the host's face whose look is the HAIR (`hairLookOnFace`) is judged on the face,
+    // age and skin: its hair is drawn as its words give it, never the photo's.
+    const who = await scanSameHost(scene.brollHostRef!, f.buffer, !!scene.hostFaceShown, hairLookOnFace(scene));
+    const move = hostPictureMove(who, !!scene.hostFaceShown, hostMisses, attempt >= attempts);
+    if (move.move === "keep") return true;
+    hostMisses++;
+    // On the record, and never kept as a fallback: this frame cannot ship.
+    if (move.why === "someone else") f.flags.push(NOT_THE_HOST);
+    if (move.turnAway) f.flags.push(FACE_SHOWN);
+    lastError =
+      move.why === "face"
+        ? `Still image shows the host's face (${who.what})`
+        : `Still image shows someone other than the host (${who.what})`;
+    // The face is never asked for again — on this redraw or a later Regenerate. A chin line
+    // keeps its lips cut (the chin is what its line is about) and a piece worn at the neck
+    // keeps the front it sits on (`mayTurnHostAway`): each is drawn again as it was.
+    const turn = move.turnAway && mayTurnHostAway(scene);
+    if (turn) {
+      scene.hostTurnedAway = true;
+      prompt = turnHostAway(prompt);
+    }
+    if (move.move === "nobody") {
+      personFree = true;
+      prompt = `${buildStillPrompt({ ...scene, humanPresent: false, brollHostLook: undefined, brollHostRef: undefined, hostFaceShown: undefined }, false, visualOverride, subject, square)} ${PERSON_FREE_FALLBACK}`;
+      // Every fallback goes, the refused one with them: nothing else may ship in its place.
+      offSubjectFallback = undefined;
+      copyFallback = undefined;
+      textyFallback = undefined;
+      personFallback = undefined;
+      brokenFallback = undefined;
+      // The last move always gets its draw (a fallback refused past the last attempt: its caller).
+      if (attempt === attempts) attempts++;
+    }
+    console.warn(
+      `[Longform] scene ${scene.index} shows ${move.why === "face" ? "the host's face" : "someone other than the host"} (${who.what}) → ` +
+        (personFree
+          ? "drawing it with nobody in it"
+          : turn
+            ? "drawing them again from behind or the side"
+            : "drawing them again from the host photo")
+    );
+    return false;
+  };
+  for (let attempt = 1; ; attempt++) {
+    // THE DRAWS RAN OUT: a frame kept as a fallback ships below the loop, and a fallback of the host
+    // meets the host check first (job 409: a "staged" frame of the host was a fallback the check never
+    // saw). Refused, the picture is drawn once more with nobody in it, and this pass is that draw.
+    // Bounded: that refusal clears every fallback and draws with nobody in it, so no frame after it is
+    // one of the host and this asks at most once.
+    if (attempt > attempts) {
+      const fallback = offSubjectFallback ?? copyFallback ?? textyFallback ?? personFallback ?? brokenFallback;
+      if (!fallback || !hostUnchecked.has(fallback.buffer) || (await meetsHostCheck(fallback, attempt))) break;
+      attempts = attempt;
+    }
     let r: GenerationResult | undefined;
     try {
       // A picture of the host at work (`markHostBroll`) is drawn from the host's own photo, so it
@@ -10574,6 +10686,7 @@ async function drawValidatedStill(
       );
       flags = check?.flags ?? checkFlags(defects);
       const drawn: Drawn = { buffer, mimeType: r.mimeType, flags };
+      if (hostCheckDue(scene, personFree) && process.env.HOST_IDENTITY_CHECK !== "0") hostUnchecked.add(buffer);
       const faults = checkFlags(defects).join("+");
       // A REDRAW THAT CHANGES WHAT CAUSED IT (`faultRedrawFor`): broken geometry or readable writing
       // named a second time gets one draw with its prompt changed against it, before the keep below
@@ -10616,13 +10729,15 @@ async function drawValidatedStill(
       // here saves no picture; it only skips the checks below. A host picture whose detail redraw
       // came back with the same detail shipped without ever meeting the host check, which with the
       // detail check off it would have met: the face or a stranger, unasked. It goes on to them.
-      if (
-        faults &&
-        faults === lastFaults &&
-        faults !== "detail" &&
-        !defects.unchecked &&
-        process.env.REDRAW_SAME_FAULTS !== "1"
-      ) {
+      // NOR A PICTURE OF THE HOST UNASKED (job 409 scene 28, `repeatedFaultsMove`): any other fault
+      // twice in a row did the same — "staged", "staged" shipped the host's drawn face. The frame is
+      // kept only once the host check passes it; refused, it takes that check's own redraw.
+      const repeat = repeatedFaultsMove(faults, lastFaults, {
+        unchecked: !!defects.unchecked,
+        hostUnchecked: hostUnchecked.has(buffer),
+      });
+      if (repeat !== "go on" && process.env.REDRAW_SAME_FAULTS !== "1") {
+        if (repeat === "check the host" && !(await meetsHostCheck(drawn, attempt))) continue;
         console.warn(
           `[Longform] scene ${scene.index} still came back with the same faults (${faults}) → keeping it`
         );
@@ -10865,67 +10980,10 @@ async function drawValidatedStill(
           sameThingRefused = "different";
         }
       }
-      // THE HOST IS THE HOST (2026-10-15, the review: Scarlett's routine pictures showed "a
-      // different woman"): a picture of the host is laid beside the host photo and must be the same
-      // person — hair, age, skin, build, and the face when it is shown. AND NO FACE (2026-10-18, the
-      // review of jobs 401-407: the host reading at a desk face on, smiling into the lens with a phone
-      // at the ear, a full-body axe swing — all passed as "the same person"): the same call says
-      // whether the face shows, and outside a step on the host's own face or a look on it
-      // (`hostFaceShown`) a shown face is a miss too, redrawn from behind or the side (`turnHostAway`;
-      // `hostTurnedAway` keeps it for a Regenerate). A face-shown picture of someone else is a miss
-      // like any other: redrawn, then drawn with nobody in it.
-      // Drawn again on a miss; after `HOST_IDENTITY_REDRAWS` misses — or on the last attempt — the
-      // picture is drawn with nobody in it, and a frame of a stranger or a face is never kept as a
-      // fallback (`hostPictureMove`). `HOST_IDENTITY_CHECK=0` turns it off.
-      if (
-        scene.humanPresent &&
-        scene.brollHostRef &&
-        !scene.otherPerson &&
-        !personFree &&
-        process.env.HOST_IDENTITY_CHECK !== "0"
-      ) {
-        // A look on the host's face whose look is the HAIR (`hairLookOnFace`) is judged on the face,
-        // age and skin: its hair is drawn as its words give it, never the photo's.
-        const who = await scanSameHost(scene.brollHostRef, buffer, !!scene.hostFaceShown, hairLookOnFace(scene));
-        const move = hostPictureMove(who, !!scene.hostFaceShown, hostMisses, attempt >= attempts);
-        if (move.move !== "keep") {
-          hostMisses++;
-          // On the record, and never kept as a fallback: this frame cannot ship.
-          if (move.why === "someone else") flags.push(NOT_THE_HOST);
-          if (move.turnAway) flags.push(FACE_SHOWN);
-          lastError =
-            move.why === "face"
-              ? `Still image shows the host's face (${who.what})`
-              : `Still image shows someone other than the host (${who.what})`;
-          // The face is never asked for again — on this redraw or a later Regenerate. A chin line
-          // keeps its lips cut (the chin is what its line is about) and a piece worn at the neck
-          // keeps the front it sits on (`mayTurnHostAway`): each is drawn again as it was.
-          const turn = move.turnAway && mayTurnHostAway(scene);
-          if (turn) {
-            scene.hostTurnedAway = true;
-            prompt = turnHostAway(prompt);
-          }
-          if (move.move === "nobody") {
-            personFree = true;
-            prompt = `${buildStillPrompt({ ...scene, humanPresent: false, brollHostLook: undefined, brollHostRef: undefined, hostFaceShown: undefined }, false, visualOverride, subject, square)} ${PERSON_FREE_FALLBACK}`;
-            offSubjectFallback = undefined;
-            copyFallback = undefined;
-            textyFallback = undefined;
-            brokenFallback = undefined;
-            // The last move always gets its draw: nothing else may ship in its place.
-            if (attempt === attempts) attempts++;
-          }
-          console.warn(
-            `[Longform] scene ${scene.index} shows ${move.why === "face" ? "the host's face" : "someone other than the host"} (${who.what}) → ` +
-              (personFree
-                ? "drawing it with nobody in it"
-                : turn
-                  ? "drawing them again from behind or the side"
-                  : "drawing them again from the host photo")
-          );
-          continue;
-        }
-      }
+      // THE HOST IS THE HOST, AND NO FACE (`meetsHostCheck`): laid beside the host photo once every
+      // other check let the frame through. Refused, it is drawn again — turned away, from the host
+      // photo, or with nobody in it — and never kept as a fallback.
+      if (hostUnchecked.has(buffer) && !(await meetsHostCheck(drawn, attempt))) continue;
       // NO NEAR-COPIES IN A VIDEO: compared with EVERY picture of this video drawn so far, not only
       // the one before (Dale's job 372: ~13 near-identical phone screens). One redraw, told to
       // differ — a screen also moves to another setting; the first draw is kept as the fallback.

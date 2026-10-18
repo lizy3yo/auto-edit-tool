@@ -11097,6 +11097,216 @@ describe("a host picture that drew the face is drawn again turned away (round 11
   });
 });
 
+describe("a picture of the host never ships past the host check (job 409 scene 28, round 13)", () => {
+  // Job 409 scene 28 as it was stored: the host reading at the study desk, drawn face on for 11.6 s.
+  // Its two draws came back "staged", "staged", and the second was kept as "the same faults twice in
+  // a row" before the host check ever ran: pictureChecks [["staged"], ["staged"]], no face asked.
+  const pngOf = (bg: string) =>
+    sharp({ create: { width: 8, height: 8, channels: 3, background: bg } }).png().toBuffer();
+  const drawsOf = (...frames: Buffer[]) => {
+    const fn = vi.fn();
+    for (const f of frames) fn.mockResolvedValueOnce({ success: true, fileData: f });
+    return fn;
+  };
+  // One good draw, then the provider fails every time: the draws run out on the fallback.
+  const thenFailing = (f: Buffer) =>
+    vi
+      .fn()
+      .mockResolvedValueOnce({ success: true, fileData: f })
+      .mockResolvedValue({ success: false, error: "OpenAI image 500: oops" });
+  const verdict = (over: Record<string, unknown> = {}) => ({ overlay: false, broken: false, what: "", ...over }) as any;
+  const checks = (...vs: Record<string, unknown>[]) => {
+    mockScanStillDefects.mockReset();
+    for (const v of vs) mockScanStillDefects.mockResolvedValueOnce(verdict(v));
+    mockScanStillDefects.mockResolvedValue(verdict());
+  };
+  const hostSays = (...vs: { same: boolean; face?: boolean; what?: string }[]) => {
+    mockScanSameHost.mockReset();
+    for (const v of vs) mockScanSameHost.mockResolvedValueOnce({ what: "", ...v } as any);
+    mockScanSameHost.mockResolvedValue({ same: true, what: "" });
+  };
+  const askedAbout = (k: number) => mockScanSameHost.mock.calls[k][1] as unknown as Buffer;
+  afterEach(() => {
+    mockScanSameHost.mockReset();
+    mockScanSameHost.mockResolvedValue({ same: true, what: "" });
+    mockScanStillDefects.mockReset();
+    mockScanStillDefects.mockResolvedValue(verdict());
+  });
+  const STAGED = { staged: true, what: "warm lamp glow, a styled study" };
+  const reader = () =>
+    ({
+      index: 28,
+      scriptText:
+        "The essay is called On the Shortness of Life, and it opens by picking a fight with its own title. Everyone complains that life is too short, Seneca says.",
+      showSubject: "the host reading a book at the desk in the study",
+      visualPrompt: "the host reading a book at the desk in the study",
+      humanPresent: true,
+      brollHostLook:
+        "A man in his sixties with fair skin, short gray hair, wire-rimmed glasses, wearing a gray sweater over a white collared shirt",
+      brollHostRef: "https://r2/host.jpg",
+    }) as any;
+  // The same line drawn as a thing alone: nobody in it, no host photo sent.
+  const desk = () => ({
+    ...reader(),
+    showSubject: "an open book on a study desk",
+    visualPrompt: "An open book on a study desk.",
+    humanPresent: false,
+    brollHostLook: undefined,
+    brollHostRef: undefined,
+  });
+
+  it("staged twice: the repeat meets the host check first — the drawn face is refused and drawn again turned away", async () => {
+    const { HOST_TURNED_AWAY_CLAUSE } = await import("./longformVideo");
+    const [a, b, c] = await Promise.all([pngOf("#a91"), pngOf("#a92"), pngOf("#a93")]);
+    checks(STAGED, STAGED);
+    hostSays({ same: true, face: true, what: "face on, reading at the desk" }, { same: true, face: false });
+    const scene = reader();
+    const genImage = drawsOf(a, b, c);
+    const out = await generateValidatedStill(scene, 4, undefined, genImage);
+    // The first staged draw takes its one clean redraw before the host check, as ever; the repeat
+    // is asked before it can be kept.
+    expect(mockScanSameHost).toHaveBeenCalledTimes(2);
+    expect(askedAbout(0).equals(b)).toBe(true);
+    expect(genImage).toHaveBeenCalledTimes(3);
+    expect(genImage.mock.calls[2][0].prompt).toContain(HOST_TURNED_AWAY_CLAUSE);
+    expect(genImage.mock.calls[2][0].referenceImageUrl).toBe("https://r2/host.jpg");
+    expect(scene.hostTurnedAway).toBe(true);
+    expect(scene.pictureChecks.map((x: any) => x.flags)).toEqual([["staged"], ["staged", "face shown"], []]);
+    expect(out.buffer.equals(b)).toBe(false);
+    expect(out.buffer.equals(c)).toBe(true);
+    expect(out.flaws).toBeUndefined();
+  });
+
+  it("staged twice and the host as the host: kept as before — one host check, no third picture", async () => {
+    const [a, b] = await Promise.all([pngOf("#b91"), pngOf("#b92")]);
+    checks(STAGED, STAGED);
+    hostSays({ same: true, face: false });
+    const genImage = drawsOf(a, b);
+    const out = await generateValidatedStill(reader(), 4, undefined, genImage);
+    expect(genImage).toHaveBeenCalledTimes(2);
+    expect(mockScanSameHost).toHaveBeenCalledTimes(1);
+    expect(out.buffer.equals(b)).toBe(true);
+    expect(out.flaws).toEqual(["staged"]);
+  });
+
+  it("someone else on the repeat, at the last attempt, is drawn once more with nobody in it", async () => {
+    const { PERSON_FREE_FALLBACK } = await import("./longformVideo");
+    const [a, b, c] = await Promise.all([pngOf("#c91"), pngOf("#c92"), pngOf("#c93")]);
+    checks(STAGED, STAGED);
+    hostSays({ same: false, face: true, what: "a younger man" });
+    const scene = reader();
+    const genImage = drawsOf(a, b, c);
+    const out = await generateValidatedStill(scene, 2, undefined, genImage);
+    expect(genImage).toHaveBeenCalledTimes(3);
+    const last = genImage.mock.calls[2][0];
+    expect(last.prompt).toContain(PERSON_FREE_FALLBACK);
+    expect(last.referenceImageUrl).toBeUndefined();
+    expect(out.buffer.equals(c)).toBe(true);
+    expect(scene.pictureChecks[1].flags).toEqual(["staged", "not the host", "face shown"]);
+  });
+
+  it("a picture of no person keeps the repeat exactly as today — the host check is never asked", async () => {
+    const [a, b] = await Promise.all([pngOf("#d91"), pngOf("#d92")]);
+    checks(STAGED, STAGED);
+    const genImage = drawsOf(a, b);
+    const out = await generateValidatedStill(desk(), 4, undefined, genImage);
+    expect(genImage).toHaveBeenCalledTimes(2);
+    expect(mockScanSameHost).not.toHaveBeenCalled();
+    expect(out.buffer.equals(b)).toBe(true);
+    expect(out.flaws).toEqual(["staged"]);
+  });
+
+  it("someone else's picture (otherPerson) and HOST_IDENTITY_CHECK=0 keep the repeat unasked, as before", async () => {
+    const [a, b, c, d] = await Promise.all([pngOf("#e91"), pngOf("#e92"), pngOf("#e93"), pngOf("#e94")]);
+    checks(STAGED, STAGED);
+    const other = await generateValidatedStill({ ...reader(), otherPerson: "a passenger" }, 4, undefined, drawsOf(a, b));
+    expect(other.buffer.equals(b)).toBe(true);
+    expect(mockScanSameHost).not.toHaveBeenCalled();
+    process.env.HOST_IDENTITY_CHECK = "0";
+    try {
+      checks(STAGED, STAGED);
+      const off = await generateValidatedStill(reader(), 4, undefined, drawsOf(c, d));
+      expect(off.buffer.equals(d)).toBe(true);
+      expect(mockScanSameHost).not.toHaveBeenCalled();
+    } finally {
+      delete process.env.HOST_IDENTITY_CHECK;
+    }
+  });
+
+  it("the draws run out on a fallback of the host: it meets the host check, and a face is drawn with nobody in it", async () => {
+    const { PERSON_FREE_FALLBACK } = await import("./longformVideo");
+    const [a, c] = await Promise.all([pngOf("#f91"), pngOf("#f93")]);
+    checks(STAGED);
+    hostSays({ same: true, face: true, what: "face on, reading at the desk" });
+    const scene = reader();
+    const genImage = vi
+      .fn()
+      .mockResolvedValueOnce({ success: true, fileData: a })
+      .mockResolvedValueOnce({ success: false, error: "OpenAI image 500: oops" })
+      .mockResolvedValueOnce({ success: true, fileData: c });
+    const out = await generateValidatedStill(scene, 2, undefined, genImage);
+    expect(mockScanSameHost).toHaveBeenCalledTimes(1);
+    expect(askedAbout(0).equals(a)).toBe(true);
+    // One draw past the budget, and only one: the picture with nobody in it.
+    expect(genImage).toHaveBeenCalledTimes(3);
+    expect(genImage.mock.calls[2][0].prompt).toContain(PERSON_FREE_FALLBACK);
+    expect(genImage.mock.calls[2][0].referenceImageUrl).toBeUndefined();
+    expect(scene.pictureChecks.map((x: any) => x.flags)).toEqual([["staged", "face shown"], []]);
+    expect(out.buffer.equals(a)).toBe(false);
+    expect(out.buffer.equals(c)).toBe(true);
+  });
+
+  it("a refused fallback whose picture with nobody in it fails too ends the scene — the face never ships", async () => {
+    const a = await pngOf("#f95");
+    checks(STAGED);
+    hostSays({ same: true, face: true, what: "face on" });
+    const genImage = thenFailing(a);
+    await expect(generateValidatedStill(reader(), 2, undefined, genImage)).rejects.toThrow(/500/);
+    expect(genImage).toHaveBeenCalledTimes(3);
+  });
+
+  it("…the host as the host ships that fallback, checked once; a fallback of no person ships unasked, as today", async () => {
+    const [a, b] = await Promise.all([pngOf("#191"), pngOf("#192")]);
+    checks(STAGED);
+    hostSays({ same: true, face: false });
+    const host = thenFailing(a);
+    const kept = await generateValidatedStill(reader(), 2, undefined, host);
+    expect(host).toHaveBeenCalledTimes(2);
+    expect(mockScanSameHost).toHaveBeenCalledTimes(1);
+    expect(kept.buffer.equals(a)).toBe(true);
+    expect(kept.flaws).toEqual(["staged"]);
+
+    hostSays();
+    checks(STAGED);
+    const thing = thenFailing(b);
+    const plain = await generateValidatedStill(desk(), 2, undefined, thing);
+    expect(thing).toHaveBeenCalledTimes(2);
+    expect(mockScanSameHost).not.toHaveBeenCalled();
+    expect(plain.buffer.equals(b)).toBe(true);
+  });
+
+  it("a frame the host check already passed is not asked again when it ships as a fallback", async () => {
+    const { withCostMeter } = await import("./costMeter");
+    const { rememberPicture, pictureFingerprint, pictureThumb } = await import("./pictureVariety");
+    const a = await pngOf("#291");
+    checks();
+    hostSays({ same: true, face: false });
+    // Passed the host check, then refused as a near copy of scene 27, then nothing more is drawn.
+    mockScanNearCopy.mockReset();
+    mockScanNearCopy.mockResolvedValue({ copy: true, what: "the same desk" });
+    try {
+      const job = 40928;
+      rememberPicture(job, 27, await pictureFingerprint(a, false), await pictureThumb(a, false));
+      const out = await withCostMeter(job, () => generateValidatedStill(reader(), 2, undefined, thenFailing(a)));
+      expect(out.buffer.equals(a)).toBe(true);
+      expect(mockScanSameHost).toHaveBeenCalledTimes(1);
+    } finally {
+      mockScanNearCopy.mockReset();
+      mockScanNearCopy.mockResolvedValue({ copy: false, what: "" });
+    }
+  });
+});
+
 describe("a look on the host's own face shows her face, and only hers (the operator's decision on the audit's cause 9)", () => {
   const pngOf = (bg: string) =>
     sharp({ create: { width: 8, height: 8, channels: 3, background: bg } }).png().toBuffer();
