@@ -5710,3 +5710,57 @@ describe("Werner's job 408 scenes 2-3: lines that compare are never one picture 
     expect(groups).toEqual([{ ids: [0, 1], show }]);
   });
 });
+
+describe("the line's own subject is the picture's (round 13: jobs 410 and 408)", () => {
+  it("410 scene 20: the juice on the beverage cart is the picture, not the cart kept small at the back", async () => {
+    const { attachMemory, memoryView } = await import("./pictureMemory");
+    const things: KeyThing[] = [
+      { name: "beverage cart", main: true, look: "a metal service cart with wheels, a flat top holding plastic cups, ice, aluminum cans" },
+      { name: "empty row", look: "a row of three blue seats near the front of the cabin, unoccupied" },
+    ];
+    const row = pic(3, "one of them was sitting in an empty row closer to the front, holding", "an older woman seen from the side sitting alone in an empty row of three blue seats, the beverage cart rolling away down the aisle behind her", {
+      keyThing: "empty row",
+      otherKeyThings: ["beverage cart"],
+    });
+    const juice = pic(20, "Juice works the same way. If they're running short, they'll tell you, and you're no worse off for trying.", "a small plastic cup of orange juice beside a juice can on the beverage cart", {
+      keyThing: "beverage cart",
+    });
+    const board = [row, juice];
+    attachMemory(board, board, things);
+    expect(juice.keyThing).toBeUndefined();
+    expect(juice.otherKeyThings).toEqual(["beverage cart"]);
+    expect(memorySourcesFor(board, juice)).toEqual([]);
+    expect(memoryView(juice)).not.toBe(BACKGROUND_VIEW);
+    expect(row.keyThing).toBe("empty row");
+  });
+
+  it("410 scene 6: the bottle of water she was holding is in her hand; a tray that holds things has no hand", async () => {
+    const { keepListHolders } = await import("./spokenLists");
+    const scenes = [
+      pic(3, "one of them was sitting in an empty row closer to the front, holding", "an older woman seen from the side sitting alone in an empty row", {
+        otherPerson: "an older woman passenger",
+        humanPresent: true,
+      }),
+      pic(4, "the whole can of ginger ale,", "an older woman's hand holding a full soda can in the empty row", { listCut: true, otherPerson: "an older woman passenger", humanPresent: true }),
+      pic(6, "and a bottle of water for later.", "small water bottle resting on the tray table in the empty row", { listCut: true }),
+    ];
+    expect(keepListHolders(scenes)).toBe(1);
+    expect(scenes[2]).toMatchObject({
+      showSubject: "small water bottle in the empty row, held in an older woman passenger's hand",
+      otherPerson: "an older woman passenger",
+      humanPresent: true,
+    });
+    const tray = [
+      pic(236, "Cut the pockets a little bigger, and the same tray holds", "hands cutting wider pockets into a wooden tray", { humanPresent: true }),
+      pic(237, "a small teapot", "a small teapot sitting inside a tray pocket on the workbench", { listCut: true }),
+    ];
+    expect(keepListHolders(tray)).toBe(0);
+  });
+
+  it("408 scene 21: the line check is told the line ends on the stick the picture left out", async () => {
+    const { closingThing } = await import("./shotList");
+    const line = "Then the next. The toilet starts flushing slow, and you decide the toilet is getting old. The toilet is fine. There is a stick in it.";
+    expect(closingThing(line, "toilet bowl with water draining slowly, paper piling near the bend")).toBe("There is a stick in it.");
+    expect(closingThing(line, "a toilet bowl with high standing water, paper caught on a stick across the drain")).toBeUndefined();
+  });
+});

@@ -843,6 +843,68 @@ export function isSubject(s: StoryboardScene, thing: string): boolean {
   return hits(text.slice(m.index)) <= hits(text.slice(0, m.index));
 }
 
+/**
+ * "on the", "atop a", "on top of its small metal …": what comes next is the surface something sits
+ * on. The words between the article and the thing describe it — never another article or a place
+ * word, so "on the floor beside a bed" does not put anything on the bed.
+ */
+const SITS_ON =
+  /\b(?:on\s+top\s+of|on|onto|upon|atop)\s+(?:the|a|an|its|their|his|her|this|that|my|your|our|one)\s+(?:(?!(?:the|a|an|of|and|or|with|beside|near|next|by|in|on|at|under|behind|above|below|from|to|for|its|their|his|her)\s)[a-z'’-]+\s+){0,3}$/i;
+/**
+ * Words ending in -ing that are things or times, not something being done ("a ceiling", "in the
+ * evening", "something").
+ */
+const ING_THING =
+  /^(?:\w*thing|morning|evening|ceiling|building|clothing|bedding|railing|siding|string|spring|icing|frosting|topping|stuffing|filling|lining|padding|wiring|tubing|flooring|shelving|awning|setting|painting|drawing|wedding|pudding|earring|sapling|seedling|duckling)$/i;
+const PLACED_ING = new RegExp(`^(?:${STARTS_RESTING}|${STORING})$`, "i");
+/**
+ * A part a thing has: "a point on the star blanket", "the test button on the smoke alarm face", "the
+ * end grain on a rough-sawn board" are close-ups OF the thing, not things put down on it.
+ */
+const PART_OF_IT =
+  /\b(?:points?|buttons?|grain|stitch(?:es)?|seams?|edges?|corners?|sides?|faces?|tops?|bottoms?|underside|ends?|labels?|dials?|notch(?:es)?|joints?|holes?|handles?|lids?|knobs?|switch(?:es)?|tips?|rims?|spouts?|hinges?|latch(?:es)?|valleys?|blocks?|patch(?:es)?|squares?|loops?|threads?|beads?|grille)\b/i;
+
+/**
+ * Whether key thing `thing` is only the SURFACE what picture `s` is about sits on: its description
+ * first names it (by its last word, "the beverage CART") right after "on (top of) the …", with
+ * something named before that which only sits, rests or stands there. Job 410 scene 20: "a small
+ * plastic cup of orange juice beside a juice can on the beverage cart" was filed under the cart;
+ * `isSubject` put the cart beside the subject, and the view meant for a thing beside it
+ * (`BACKGROUND_VIEW`) pushed the cart — and the juice on it — to the back of an empty row of seats.
+ * Never a thing being worked on: "hands brushing oil onto the incense holder", "a finger pressing the
+ * test button on the smoke alarm", "hands cutting a notch on the lattice panel" are about the holder,
+ * the alarm and the panel (replayed over the local storyboards, every such step kept its thing). A
+ * thing the description names first, or before any surface ("the cart with a cup on it"), is not one.
+ * By the description's words alone — any picture, any thing. Pure.
+ */
+export function holdsSubject(s: StoryboardScene, thing: string | undefined): boolean {
+  const text = pictureWords(s);
+  const head = nameWords(thing ?? "")
+    .filter(w => !NOT_A_NAME_WORD.has(w))
+    .pop();
+  if (!text.trim() || !head) return false;
+  const first = new RegExp(`\\b${head.replace(/s$/, "")}(?:s|es)?\\b`, "i").exec(text);
+  if (!first) return false;
+  const before = text.slice(0, first.index);
+  const on = SITS_ON.exec(before);
+  if (!on) return false;
+  const lead = before.slice(0, on.index);
+  if (!/[a-z]{3,}/i.test(lead.replace(/\b(?:the|and|with)\b/gi, "")) || PART_OF_IT.test(lead)) return false;
+  // Something DONE to it before the "on" makes it what is worked on, not where something sits.
+  return !(lead.toLowerCase().match(/[a-z]{2,}ing\b/g) ?? []).some(w => !ING_THING.test(w) && !PLACED_ING.test(w));
+}
+
+/**
+ * THE ITEM, NOT WHAT IT SITS ON: whether key thing `thing` is filed on picture `s` only as the surface
+ * its subject sits on (`holdsSubject`) while the LINE never names it — so the picture is about the
+ * item, and the surface is only beside it (`tagKeyThings`). A line that names the surface ("that's the
+ * board I cut bread on every morning") is about it, and keeps it. A close-up of one part (`partOf`) is
+ * about that part. Pure.
+ */
+export function onlyItsSurface(s: StoryboardScene, thing: string | undefined): boolean {
+  return !!thing && !s.partOf && holdsSubject(s, thing) && !wordsName(s.scriptText ?? s.narration ?? "", thing);
+}
+
 /** Words that ask for a close view: "close-up", "close view", "detail", "filling the frame", "macro". */
 const CLOSE_WORDS = /\bclose[- ]?(?:up|view|shot)\b|\bdetail\b|\bfilling (?:most of )?the (?:whole )?frame\b|\bmacro\b/i;
 
@@ -883,7 +945,10 @@ export function memoryViewFor(scenes: StoryboardScene[], s: StoryboardScene): st
   // A remembered thing beside what the picture is about stays beside it (`isSubject`): the same
   // thing, at its natural size — never the close view the rotation would give the subject.
   // A picture of one PART of it (`partOf`) is about that part, whatever order the words name them in.
-  if (!s.partOf && !isSubject(s, s.keyThing)) return BACKGROUND_VIEW;
+  // Never the SURFACE the subject sits on (`holdsSubject`, job 410 scene 20): kept small, it takes what
+  // sits on it to the back of the picture with it. One the line does not name is filed beside its
+  // item before this is asked (`tagKeyThings`); one the line names is what the line is about.
+  if (!s.partOf && !isSubject(s, s.keyThing) && !holdsSubject(s, s.keyThing)) return BACKGROUND_VIEW;
   // A CONTINUATION that repeats the words of the picture it is drawn from gets a concrete camera
   // (`REDRAW_CAMERAS`), never the stock memory views: told "a close view of one part of it", job 403
   // scene 14 came back as scene 10 a little closer, and job 405 scene 22 as scene 21 a little tighter
@@ -903,22 +968,40 @@ export function memoryViewFor(scenes: StoryboardScene[], s: StoryboardScene): st
 
 /**
  * Tag every drawn picture the shot list did not tag with the key thing its description names —
- * a split's panel (`splitVisual`), the QR background, a storyboard picture (`keyThingIn`). Returns
- * how many it tagged. Pure apart from mutating `scenes`.
+ * a split's panel (`splitVisual`), the QR background, a storyboard picture (`keyThingIn`) — never a
+ * surface its subject only sits on (`onlyItsSurface`), which a picture filed under one gives up to
+ * its other key things. Returns how many it tagged. Pure apart from mutating `scenes`.
  */
 export function tagKeyThings(scenes: StoryboardScene[], things: KeyThing[] | undefined): number {
-  if (!things?.length) return 0;
   let n = 0;
   for (const s of scenes) {
     if (!drawn(s)) continue;
+    // THE ITEM, NOT WHAT IT SITS ON (job 410 scene 20): the juice under "Juice works the same way"
+    // was filed under the beverage cart it sat on, drawn from the cart's first picture (a wide shot
+    // of a row of seats with the cart far down the aisle) and kept small with it — the juice came
+    // back a speck and shipped "subject missing". A surface the line never names is only beside the
+    // picture's item, so the picture is the item's (or nobody's, drawn from its words).
+    const surface = onlyItsSurface(s, s.keyThing) ? s.keyThing : undefined;
+    if (surface) s.keyThing = undefined;
+    if (!things?.length) {
+      if (surface) s.otherKeyThings = [surface, ...(s.otherKeyThings ?? []).filter(t => t !== surface)];
+      continue;
+    }
     const text = s.hostPresent ? s.splitVisual : (s.showSubject ?? s.visualPrompt);
     const named = keyThingsIn(text, things).map(t => t.name);
-    if (!s.keyThing && named[0]) {
-      s.keyThing = named[0];
+    // Filed anew only under a key thing the picture is ABOUT (or the item a screen shows): one beside
+    // the subject would take the view that keeps its memory small (`BACKGROUND_VIEW`), and the surface
+    // with it — job 399 scene 18's juice carton on the cart tray, beside a cup.
+    const own = named.find(
+      name => !onlyItsSurface(s, name) && (!surface || isSubject(s, name) || isScreen(s))
+    );
+    if (!s.keyThing && own) {
+      s.keyThing = own;
       n++;
     }
     // Every other key thing the picture names is remembered too.
     const others = named.filter(name => name !== s.keyThing);
+    if (surface && !others.includes(surface)) others.push(surface);
     s.otherKeyThings = others.length ? others : undefined;
   }
   return n;

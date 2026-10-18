@@ -33,7 +33,7 @@
 import type { StoryboardScene } from "@shared/types";
 import { invokeClaude } from "./claude";
 import { safeParseJSON } from "./jsonRepair";
-import { namedPeople } from "./hostLook";
+import { namedPeople, showsPerson } from "./hostLook";
 import { namesHostBefore } from "./hostIntro";
 import {
   FRESH,
@@ -1558,4 +1558,101 @@ export function applySpokenLists(
   }
   out.forEach((s, k) => (s.index = k + 1));
   return { scenes: out, applied, handed, cleared, skipped, apart };
+}
+
+/**
+ * The words leading into a list that say someone is holding what it names ("…, holding"). Only the
+ * -ing forms, and only with a person in the sentence (`PERSON_WORD`): "Cut the pockets a little
+ * bigger, and the same tray holds | a small teapot" (job 143) is a thing holding things.
+ */
+const HOLDING_LEAD = /\b(?:holding|carrying|clutching|cradling|gripping|juggling|balancing|toting|hugging)\s*[,:]?$/i;
+/** A first item that opens on the holding word itself ("holding the whole can,"). */
+const HOLDING_START = /^\s*(?:holding|carrying|clutching|cradling|gripping|juggling|balancing|toting|hugging)\b/i;
+/**
+ * A person in the sentence that leads into the list: the one doing the holding is someone. Never
+ * "their" or "its", which things have too ("the rack, holding their lids").
+ */
+const PERSON_WORD =
+  /\b(?:she|he|they|them|i|you|we|her|him|his|my|your|our|someone|somebody|everyone|everybody)\b/i;
+/** The host speaking of their own hands ("I walked in holding", "my arms full"). */
+const FIRST_PERSON = /\b(?:i|i'm|i’m|i've|i’ve|me|my)\b/i;
+/**
+ * "resting on the tray table", "standing in a seat-back pocket": where a thing is put down, not held
+ * (job 402 scene 5's bottle stood in a seat-back pocket while the line said she was holding it).
+ */
+const PUT_DOWN_ON =
+  /,?\s+(?:resting|sitting|lying|standing|set|placed|left|propped|perched|laid|tucked)\s+(?:on\s+top\s+of|on|upon|atop|in|inside|into)\s+(?:the|a|an|its|her|his|their|this|that)\s+[a-z'’-]+(?:\s+(?!(?:in|at|near|beside|by|inside|under|next|with|of|on|among|against|and)\b)[a-z'’-]+){0,3}/i;
+
+/** A description of a list item with the hand that holds it: put down nowhere, held in `hand`. */
+function heldIn(text: string | undefined, hand: string): string | undefined {
+  if (!text?.trim()) return text;
+  const t = text.replace(PUT_DOWN_ON, "").trim();
+  const stop = /[.!]\s*$/.test(t);
+  return `${t.replace(/[\s.!,;]+$/, "")}, held in ${hand}${stop ? "." : ""}`;
+}
+
+/**
+ * Who holds what a list of HELD things names, from the picture that leads into it and the list's own
+ * pictures: the one someone else they show (one person only), else the host when the host is at work
+ * in them or says it of their own hands. Undefined when nobody is known — nothing is guessed.
+ */
+function listHolder(
+  head: StoryboardScene | undefined,
+  run: StoryboardScene[]
+): { who: string; people?: number } | "host" | undefined {
+  const pictures = [...(head && !head.hostPresent ? [head] : []), ...run];
+  const other = pictures.find(s => s.otherPerson);
+  if (other) return (other.otherPeople ?? 1) > 1 ? undefined : { who: other.otherPerson!, people: other.otherPeople };
+  if (pictures.some(s => s.humanPresent)) return "host";
+  const said = (head?.scriptText ?? "").split(/(?<=[.!?])\s+/).pop() ?? "";
+  return head?.hostPresent && FIRST_PERSON.test(said) ? "host" : undefined;
+}
+
+/**
+ * A LIST OF WHAT SOMEONE HOLDS KEEPS THE ONE HOLDING IT (2026-10-18, job 410 scene 6): "…one of them
+ * was sitting in an empty row closer to the front, holding | the whole can of ginger ale, | a second
+ * bag of pretzels, | and a bottle of water for later." Items one and two showed the older woman's
+ * hands holding the can and the pretzels; the third was planned as "small water bottle resting on the
+ * tray table in the empty row", nobody in it, and drawn from the empty row's look ("unoccupied") —
+ * her seat came back empty, as if she had vanished. When the words leading into a list say someone is
+ * holding what it names, every item picture that shows nobody is given the holder (`listHolder`): held
+ * in their hand, the person carried as someone else (`otherPerson`) or as the host at work. Never a
+ * list of steps (the host's hands already), a CTA or split beat, or a picture with a person in it;
+ * nothing when the holder is not known. Run after every writer of descriptions, before
+ * `markHostBroll`, which keeps a person only while the words show one. Returns how many pictures
+ * were given the holder. Pure apart from mutating `scenes`.
+ */
+export function keepListHolders(scenes: StoryboardScene[]): number {
+  let n = 0;
+  const item = (s: StoryboardScene | undefined) => !!s?.listCut && !s.hostPresent;
+  for (let i = 0; i < scenes.length; i++) {
+    if (!item(scenes[i]) || item(scenes[i - 1])) continue;
+    let j = i;
+    while (item(scenes[j + 1])) j++;
+    const run = scenes.slice(i, j + 1);
+    const head = scenes[i - 1];
+    // The sentence the list hangs on: the end of the line before it, else the first item's own words.
+    const lead = (head?.scriptText ?? "").trim().replace(/[.!?…]+$/, "");
+    const sentence = lead.split(/(?<=[.!?])\s+/).pop() ?? "";
+    const held =
+      (HOLDING_LEAD.test(lead) && (PERSON_WORD.test(sentence) || !!namedPeople(sentence))) ||
+      (HOLDING_START.test(run[0].scriptText ?? "") && PERSON_WORD.test(sentence));
+    const holder = held && !run.some(s => s.listKind === "steps") ? listHolder(head, run) : undefined;
+    if (holder) {
+      const hand = holder === "host" ? "the host's hand" : `${holder.who}'s hand`;
+      for (const s of run) {
+        if (s.humanPresent || fixedBeat(s) || showsPerson(`${s.showSubject ?? ""} ${s.visualPrompt ?? ""}`)) continue;
+        s.showSubject = heldIn(s.showSubject, hand);
+        s.visualPrompt = heldIn(s.visualPrompt, hand) ?? s.visualPrompt;
+        s.humanPresent = true;
+        if (holder !== "host") {
+          s.otherPerson = holder.who;
+          s.otherPeople = holder.people;
+        }
+        n++;
+      }
+    }
+    i = j;
+  }
+  return n;
 }

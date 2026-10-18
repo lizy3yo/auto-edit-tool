@@ -2257,6 +2257,16 @@ something costs or is like (show the subject); a bare number, price or length of
 thing it is about); someone the line only sells to, tells, helps or mentions, who does nothing in
 it (show the thing); a warning about a danger (show the safe way, never the danger); something the
 line says does NOT happen or is NOT there (never draw it happening).
+THE LINE'S LAST WORD. A line that closes on a short sentence revealing the thing it was building to —
+the cause, the catch, the answer ("The printer is fine. There is a paper clip in the tray.") — makes
+its point with that thing: a picture without it is WRONG, however right the rest is. Rewrite it with
+that thing in it, where the line puts it. A picture marked ends on "…" closes on such a sentence.
+A STATE A PHOTO CANNOT SHOW. A still picture shows no speed and no change over time. When the line's
+point is how fast or slow something happens, or that it keeps getting worse (a queue that barely
+moves, dough that rose fast, a tyre slowly losing air), a picture that only names that speed is
+drawn as the ordinary everyday version and says nothing: it is WRONG. Write what the state leaves
+for the eye — a long line of people standing still, the dough domed high over the rim of its bowl,
+the tyre sagging flat at the bottom — with the cause the line names in view.
 It is WRONG when it does not show what the line points at. SHOW EXACTLY WHAT THE LINE POINTS AT: when a line points at a specific thing, or a specific part, side or detail of a thing (the box it comes in, its label, the battery door on the back, the dial, the date on the bottom, the hem), the picture is a close-up of exactly that — never the video's main thing somewhere else, never a plain version without it. What the script says that part shows (the words printed on it, a number, a setting) is shown exactly as the script says it.
 It is WRONG when a body part looks cut off. A BODY PART NEVER LOOKS CUT OFF: hair, a hand, a foot or a face is shown on the person, or on what really holds it — a wig on a mannequin head or wig stand, a practice hand, extensions in their packet. A few loose strands that really fall (in a brush, on a comb or towel, in a drain) are fine. Never hair still shaped like a head or a hairstyle with no head inside it, and never a hand, foot or face on its own. To show a colour or texture, show it on the person's own head or hands.
 It is WRONG when it shows a solid thing cut open, as a cutaway or see-through view, or from inside it — even as the close-up a line points at. ${NOTHING_CUT_OPEN_RULE}
@@ -2476,6 +2486,34 @@ export function forbidsOf(v: unknown): string | undefined {
   const text = v.replace(/\s+/g, " ").replace(/^["'“”‘’\s]+|["'“”‘’\s.]+$/g, "").trim();
   if (!/[a-z]{2}/i.test(text) || /^(?:no|na|-)$|^(?:null|none|nothing|n\/a|nil)\b/i.test(text)) return undefined;
   return text.slice(0, 160);
+}
+
+/** "There is a stick in it.", "The problem was a loose wire.": a short sentence that reveals a thing. */
+const REVEALS_A_THING =
+  /^(?:(?:and|but|so)\s+)?(?:there(?:'s|’s|\s+is|\s+are|\s+was|\s+were)|the\s+(?:problem|culprit|cause|answer|catch|reason)\s+(?:is|was))\s+(?:(?:just|only|simply|actually|really|still)\s+)?(?:a|an|the|one|some|two|three|your|its|their)\s+(.+?)[.!?…"”’]*$/i;
+
+/**
+ * THE LINE'S LAST WORD (2026-10-18, job 408 scene 21): the short closing sentence a picture's line
+ * builds to, when it reveals a thing the picture's words never name — "…you decide the toilet is
+ * getting old. The toilet is fine. There is a stick in it." over "toilet bowl with water draining
+ * slowly, paper piling near the bend": the stick the whole line was about was left out, and the
+ * picture shipped as a strong flush. The line check is told the sentence (`ends on "…"`), and holds
+ * the picture to it. Only "there is a …" and "the problem was a …" sentences of eight words or fewer,
+ * after another sentence — replayed over 22,500 local pictures it marks five: this stick, job 403's
+ * (drawn as the swab it is, which the check can tell), and one script's "But there is a blanket" over
+ * a bag of scraps, three times. Undefined otherwise. Pure.
+ */
+export function closingThing(line: string | undefined, show: string | undefined): string | undefined {
+  const sentences = (line ?? "").trim().split(/(?<=[.!?])\s+/).filter(Boolean);
+  if (sentences.length < 2) return undefined;
+  const last = sentences[sentences.length - 1];
+  const m = REVEALS_A_THING.exec(last);
+  if (!m || last.split(/\s+/).length > 8) return undefined;
+  const thing = m[1].split(/\s+(?:in|on|at|inside|under|behind|stuck|caught|of|with|for|from|that|which|to|left)\b/i)[0];
+  const words = thing.toLowerCase().replace(/[^a-z\s-]/g, " ").split(/\s+/).filter(w => w.length >= 3);
+  const have = new Set((show ?? "").toLowerCase().replace(/[^a-z\s]/g, " ").split(/\s+/));
+  const named = (w: string) => have.has(w) || have.has(`${w}s`) || have.has(w.replace(/(?:es|s)$/, ""));
+  return words.length && !words.some(named) ? last : undefined;
 }
 
 /** The pictures the fit check reads and may fix — drawn cutaways, never the CTA, cover or assets. */
@@ -2991,8 +3029,10 @@ export async function fitPicturesToLines(
         continue;
       }
       any = true;
+      // The thing the line closes on, when the picture's words leave it out (`closingThing`).
+      const closing = closingThing(said, s.showSubject ?? s.visualPrompt);
       lines.push(
-        `#${i} PICTURE${secs}${s.sameShot ? " (continues)" : ""}${s.joinedLine ? " (joined)" : ""}${sameSentence ? " (same sentence)" : ""}${i === firstMain ? " (FIRST of the MAIN thing)" : ""}: said "${said}" | shows: ${s.showSubject ?? s.visualPrompt ?? ""}`
+        `#${i} PICTURE${secs}${s.sameShot ? " (continues)" : ""}${s.joinedLine ? " (joined)" : ""}${sameSentence ? " (same sentence)" : ""}${i === firstMain ? " (FIRST of the MAIN thing)" : ""}${closing ? ` (ends on "${closing}")` : ""}: said "${said}" | shows: ${s.showSubject ?? s.visualPrompt ?? ""}`
       );
     }
     if (!any) continue;

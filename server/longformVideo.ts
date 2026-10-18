@@ -225,7 +225,7 @@ import {
 import { presignOwnBucketUrl, storagePut } from "./storage";
 import { lightVideoFor } from "./lightVideo";
 import { voiceSpace69Labs } from "./tts69labs";
-import { applySpokenLists, findSpokenLists } from "./spokenLists";
+import { applySpokenLists, findSpokenLists, keepListHolders } from "./spokenLists";
 import { introSpans, introducesHost } from "./hostIntro";
 import { collectShownFacts, describeNamedLooks, namedLookClause } from "./namedLooks";
 import {
@@ -17204,6 +17204,11 @@ async function runUnifiedPipeline(
           `${named.pictures} picture(s) updated, ${named.parts} close-up(s) of one part`
       );
   }
+  // A LIST OF WHAT SOMEONE HOLDS KEEPS THE ONE HOLDING IT (`keepListHolders`, job 410 scene 6: the
+  // third thing she was holding was drawn on an empty seat), after every writer of descriptions and
+  // before `markHostBroll`, which keeps a person only while the words show one.
+  const holders = keepListHolders(scenes);
+  if (holders > 0) console.log(`[Longform ${jobId}] held lists: ${holders} item picture(s) given the one holding them`);
   // The last gate before money is spent. A stretch the aligner could not make sense of even by
   // word count means the narration and the script disagree there (minutes of audio for a line of
   // text, or the reverse) — every clip rendered over it would be the wrong length. Job 94 shipped
