@@ -13874,4 +13874,42 @@ describe("a redraw drops what caused its fault (round 13, jobs 408 and 410)", ()
     expect(genImage.mock.calls[1][0].prompt).toMatch(/Reference image 2 is the picture shown RIGHT BEFORE/);
     expect(scene.memoryRefUrls).toEqual([S14, S18]);
   });
+
+  it("a continuation's missing redraw after a near-copy redraw names one camera, the near-copy one swapped close", async () => {
+    // Job 410's cart, continued as the same topic from the close-up camera: its near-copy redraw took
+    // the far camera (not a small subject), then the check could not find the cups. Dropping the
+    // memory must not put the continuation's own camera back beside the near-copy one.
+    const { withCostMeter } = await import("./costMeter");
+    const { pictureFingerprint, pictureThumb, rememberPicture, REDRAW_CAMERAS, REDRAW_VIEWS, FAR_CAMERA } =
+      await import("./pictureVariety");
+    const S15 = "https://r2/longform/410/still-src-15.png";
+    const cart = {
+      index: 16,
+      scriptText: "The cart comes back around once more before landing.",
+      showSubject: "the beverage cart parked in the aisle, plastic cups stacked on its top",
+      visualPrompt: "The metal beverage cart parked in the aircraft aisle, plastic cups stacked on its top.",
+      keyThing: "beverage cart",
+      memoryRefUrls: [S15],
+      memoryRefScenes: [{ index: 15, own: true }],
+      memoryRightBefore: 0,
+      memoryContinues: true,
+      memoryView: REDRAW_CAMERAS[0],
+      memoryWordsLook: CART_LOOK,
+    } as StoryboardScene;
+    const twelve = await photo(1211, 1536, 864);
+    rememberPicture(94821, 12, await pictureFingerprint(twelve), await pictureThumb(twelve));
+    mockScanNearCopy.mockResolvedValueOnce({ copy: true, what: "the same aisle" });
+    checks({}, { missing: true, what: "no cups on the cart" });
+    const genImage = drawsOf(twelve, await photo(1612, 1536, 864), await photo(1613, 1536, 864));
+    await withCostMeter(94821, () => generateValidatedStill(cart, 5, undefined, genImage));
+    expect(genImage).toHaveBeenCalledTimes(3);
+    const prompts = genImage.mock.calls.map(c => c[0].prompt as string);
+    expect(prompts[1]).toContain(REDRAW_VIEWS[FAR_CAMERA]); // its near-copy turn, as before
+    expect(genImage.mock.calls[2][0].referenceImageUrl).toBeUndefined();
+    expect(prompts[2]).not.toContain(REDRAW_VIEWS[FAR_CAMERA]);
+    expect(prompts[2]).toContain(REDRAW_VIEWS[2]);
+    expect(prompts[2]).not.toContain(`Camera for THIS picture: ${REDRAW_CAMERAS[0]}.`);
+    expect(prompts[2].match(/Camera for THIS picture:/g)).toHaveLength(1);
+    expect(prompts[2]).toContain(`HOW THE BEVERAGE CART LOOKS in every picture of this video: ${CART_LOOK}`);
+  });
 });

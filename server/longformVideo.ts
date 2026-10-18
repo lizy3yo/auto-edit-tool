@@ -10700,7 +10700,9 @@ async function drawValidatedStill(
     prompt = withoutFarCamera(prompt, near);
     wordsCamera = withoutFarCamera(wordsCamera, near);
     if (!memoryDropsOnRedraw(scene)) return;
-    const camera = redrawCameraClause(scene);
+    // A continuation keeps its own camera — unless a near-copy redraw already named one: the prompt
+    // never asks for two cameras at once (the near-copy clause stays, so it still differs).
+    const camera = prompt.includes(DIFFERENT_PICTURE_CLAUSE) ? "" : redrawCameraClause(scene);
     const fields = memoryToWords(scene);
     prompt = promptAfterMemoryChange(scene, prompt, fields, { personFree, visualOverride, subject, square, camera });
     wordsCamera = camera;
