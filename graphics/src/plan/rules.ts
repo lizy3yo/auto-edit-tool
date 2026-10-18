@@ -92,6 +92,49 @@ export function nameTagRange(film: FilmLayout): [number, number] | undefined {
   return scenes.length ? [scenes[0].narrationStartSec, scenes[scenes.length - 1].narrationEndSec] : undefined;
 }
 
+/** Whether a graphic is up, by more than a frame, while the name tag is (a frame of tolerance: an
+ * edge snapped onto the tag's cut touches it, not overlaps). */
+const overlapsTag = (cue: { start: number; end: number }, tag: [number, number] | undefined): boolean =>
+  !!tag && cue.start < tag[1] - 1 / FPS && cue.end > tag[0] + 1 / FPS;
+
+/** Whether a graphic is up while the host's name tag is (`nameTagRange`). Pure. */
+export const underNameTag = (cue: { start: number; end: number }, film: FilmLayout): boolean => overlapsTag(cue, nameTagRange(film));
+
+/** Whether a graphic is over a host take — full frame or a split — for more than an edge snapped
+ * onto the cut into or out of it (`PANEL_MIN_OVERLAP_SEC`). Pure. */
+export function overHostTake(cue: { start: number; end: number }, film: FilmLayout): boolean {
+  return film.scenes.some(s => s.hostPresent && Math.min(cue.end, s.narrationEndSec) - Math.max(cue.start, s.narrationStartSec) >= PANEL_MIN_OVERLAP_SEC);
+}
+
+/** Where a graphic's drawing goes on this film, as props for its template: the host's panel on a
+ * split (`TemplateDef.panel`), and below the host's chin over a host take (`TemplateDef.belowChin`),
+ * on the right while the name tag holds the bottom-left. */
+export type Placement = { panel?: HostPanel; low?: true; side?: "right" };
+
+/**
+ * The props that put a graphic where it belongs on THIS film's frame — set by the finishing step (and
+ * the lab's composite) before the first drawing, so every readability measure reads it where it
+ * ships, and decided again at every assembly from the film as it is (never saved in the plan).
+ *
+ * Job 407, "Number two squared the walls with a broadaxe." (115.33-118.33 s over host scene 21): the
+ * chapter label was drawn where it sits over b-roll, a band from y 660 to 925, and its top edge cut
+ * across the centred host's beard for 3 s. Over a host take it now goes low, below the chin; on a
+ * split also inside the host's panel (job 402's, on scene 14, crossed the seam onto the picture).
+ * While the name tag is up the bottom-left is the tag's, so a low label takes the right (a panel
+ * keeps its own side). One drawing that only partly covers a host take is low for all of it. Pure.
+ */
+export function placementFor(template: string, cue: { start: number; end: number }, film: FilmLayout): Placement {
+  const def = templateById(template);
+  const out: Placement = {};
+  const panel = def.panel ? hostPanelFor(cue, film) : undefined;
+  if (panel) out.panel = panel;
+  if (def.belowChin && overHostTake(cue, film)) {
+    out.low = true;
+    if (!panel && underNameTag(cue, film)) out.side = "right";
+  }
+  return out;
+}
+
 export function checkRules(cues: ResolvedCue[], film: FilmLayout, opts: { gap?: number } = {}): RuleProblem[] {
   const out: RuleProblem[] = [];
   const gap = opts.gap ?? 0;
@@ -120,11 +163,11 @@ export function checkRules(cues: ResolvedCue[], film: FilmLayout, opts: { gap?: 
         .filter(s => s.hostPresent)
         .reduce((sum, s) => sum + Math.max(0, Math.min(c.end, s.narrationEndSec) - Math.max(c.start, s.narrationStartSec)), 0);
       if (covered < c.end - c.start - 0.1) add("shows the host, but the host is not on screen for all of it");
-      if (nameTag && c.start < nameTag[1] - tol && c.end > nameTag[0] + tol) add("shows the host while the name tag is up");
+      if (overlapsTag(c, nameTag)) add("shows the host while the name tag is up");
     }
     if (c.template === "HostCaption") {
       if (!host.length) add("host caption with no host on screen");
-      if (nameTag && c.start < nameTag[1] - tol && c.end > nameTag[0] + tol) add("host caption while the name tag is up");
+      if (overlapsTag(c, nameTag)) add("host caption while the name tag is up");
     }
   }
   return out;

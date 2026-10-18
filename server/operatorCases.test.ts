@@ -3633,3 +3633,33 @@ describe("the host name card is judged on the take's real length (round 11 revie
     expect(nameCardSceneIndices(scenes, secs)).toEqual([0]);
   });
 });
+
+describe("a chapter label over the host sits clear of the face (round 11 review, 2026-10-18)", () => {
+  // 407 chapter-walls ("Number two squared the walls with a broadaxe.", 115.33-118.33 s over host
+  // scene 21, full frame): the label was drawn where it sits over b-roll, a band from y 660 to 925,
+  // and its top edge cut across the centred host's lower beard (it ends at ~690 px) for 3 s.
+  const R2 = "https://pub-x.r2.dev/longform/407";
+  const sam = [
+    { index: 20, narrationStartSec: 98.7739, narrationEndSec: 115.328, clipUrls: [`${R2}/still-20-0.mp4`] },
+    { index: 21, narrationStartSec: 115.328, narrationEndSec: 119.416, hostPresent: true, clipUrls: [`${R2}/clip-21-0.mp4`] },
+    { index: 22, narrationStartSec: 119.416, narrationEndSec: 127.451, clipUrls: [`${R2}/still-22-0.mp4`] },
+  ] as unknown as StoryboardScene[];
+
+  it("407 chapter-walls: drawn low over the host take, its plate starting 100 px below the beard", async () => {
+    const { filmLayoutOf } = await import("./graphics/apply");
+    const { placementFor } = await import("../graphics/src/plan/rules");
+    const { chapterBox } = await import("../graphics/src/overlays");
+    const placed = placementFor("ChapterLabel", { start: 115.333, end: 118.333 }, filmLayoutOf(sam, []));
+    expect(placed).toEqual({ low: true });
+    expect(chapterBox({}).top).toBeLessThan(690);
+    expect(chapterBox(placed).top).toBeGreaterThanOrEqual(790);
+  });
+
+  // 407 chapter-roof (67.87-72.37 s) is over b-roll: it keeps the designed place (what it covered
+  // there is the picture's subject — a separate matter, not the host).
+  it("407 chapter-roof over b-roll keeps the designed place", async () => {
+    const { placementFor } = await import("../graphics/src/plan/rules");
+    const layout = { scenes: [{ index: 14, narrationStartSec: 67.8766, narrationEndSec: 78.065 }], nameCardScenes: [] };
+    expect(placementFor("ChapterLabel", { start: 67.867, end: 72.367 }, layout)).toEqual({});
+  });
+});

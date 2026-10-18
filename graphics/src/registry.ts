@@ -55,6 +55,10 @@ export type TemplateDef = {
    * finishing step sets it for every cue over a split, so the words stay beside the host and never
    * run across the seam onto the picture. */
   panel?: boolean;
+  /** Its plate is drawn BELOW THE HOST'S CHIN over a host take (`props.low`, and `props.side`
+   * "right" while the name card holds the bottom-left — src/plan/rules.ts `placementFor`): drawn
+   * where it sits over b-roll, it crossed the face (job 407, the chapter label on scene 21). */
+  belowChin?: boolean;
   /** Darkens or blurs the whole frame: held to b-roll like a card, never over a host take. */
   dims?: boolean;
   /** A TITLE, not a caption (a chapter label): keeps its planned length instead of leaving when
@@ -152,6 +156,10 @@ export const TEMPLATES: TemplateDef[] = [
     id: "ChapterLabel",
     kind: "overlay",
     structural: true,
+    // Over a host take: below the chin, and inside the host's panel on a split (job 402's crossed the
+    // seam onto the picture).
+    panel: true,
+    belowChin: true,
     component: ChapterLabel,
     defaultProps: { durationSec: 5, kicker: "On the label · 1 of 3", number: 1, title: "The type" },
   },
