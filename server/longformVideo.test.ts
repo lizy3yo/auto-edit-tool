@@ -11766,3 +11766,77 @@ describe("blurred print swaps the no-writing rule for unreadable printing", asyn
     expect(withAllowedText(p, "HANDMADE", true)).toMatch(/exactly "HANDMADE"/);
   });
 });
+
+describe("a style bible loses only its printed-matter sentences (job 400)", async () => {
+  const { withoutPrintedMatterSentences, bibleWithoutPrintedMatter, BIBLE_ALL_PRINT_WARNING, brollDepictsBook } =
+    await import("./longformVideo");
+  const { groupJobWarnings } = await import("../shared/jobWarnings");
+  // Job 400's bible was never stored (it was dropped whole); this is its shape — a home base, the
+  // places the script travels to (first-century Rome among them), and one prop sentence naming
+  // the essay the film is about as a thing on the table.
+  const ESSAY_BIBLE =
+    "Home base: a quiet modern kitchen table at night in a small town, where a man past sixty sits with coffee. " +
+    "The script travels to: a pharmacy card aisle and its parking lot, a doctor's waiting room, a church pew, " +
+    "and first-century Rome — a senator's marble villa, grain warehouses at the port, a crowded street below the palace. " +
+    "Late autumn. Recurring props: a worn paperback of the essay with a cracked spine, a wall calendar, a wristwatch. " +
+    "The tone is unhurried and reflective.";
+
+  it("keeps the home base, the Rome places and the tone; leaves out the essay-as-a-thing sentence", () => {
+    expect(brollDepictsBook(ESSAY_BIBLE)).toBe(true); // what dropped the whole bible before
+    const r = bibleWithoutPrintedMatter(ESSAY_BIBLE);
+    expect(r.bible).toContain("first-century Rome — a senator's marble villa");
+    expect(r.bible).toContain("Home base: a quiet modern kitchen table");
+    expect(r.bible).toContain("Late autumn.");
+    expect(r.bible).toContain("The tone is unhurried and reflective.");
+    expect(r.bible).not.toMatch(/paperback|essay/);
+    expect(brollDepictsBook(r.bible!)).toBe(false);
+    expect(r.warning).toBe(
+      "Style bible: 1 sentence depicting printed matter left out, the rest kept " +
+        "(Recurring props: a worn paperback of the essay with a cracked spine, a wall calendar, a wristwatch.)"
+    );
+    expect(r.warning).not.toBe(BIBLE_ALL_PRINT_WARNING);
+    // On the card the left-out words go behind "Details", the sentence stays short.
+    const [row] = groupJobWarnings([r.warning!]);
+    expect(row.text).toBe("Style bible: 1 sentence depicting printed matter left out, the rest kept");
+    expect(row.details[0]).toMatch(/^Recurring props: a worn paperback/);
+  });
+
+  it("leaves a bible with no printed matter exactly as it was — jobs 397, 398 and 399, no warning", () => {
+    const bibles = [
+      "Home base: an uncluttered workshop garage in a temperate climate, where finished wood pieces lean against walls and the work bench holds salvaged tools and shop habits. The script travels to a Saturday craft fair or farmers market (impulse buyers at a table edge), an Etsy shopper's home three states away (personalized board discovery), and a driveway at pickup time (furniture buyer with truck). Early spring or fall, when markets run. Recurring materials: walnut and maple boards in various stages of sale-readiness, price tags, shop notes. The tone is methodical",
+      "Home base: a one-car garage workshop in a temperate climate, where projects are built, sanded, and finished on a workbench with hand tools and power tools. The script travels to a weekend craft market or vendor table where finished pieces are priced and sold. Late Saturday, ongoing. Recurring materials: pine screen molding, burnt wood scraps in a coffee can, sandpaper, lattice panels in various stages of completion. The tone is methodical and cost-conscious — each project weighed for time spent versus dollars earned.",
+      "Home base: the interior cabin of a commercial aircraft in flight, where the beverage and snack service happens—rows, aisles, seats, overhead bins, the galley at the front. The script travels to: a gate area or boarding bridge (boarding), a seat in row fourteen mid-flight (the repeated reference point), and the galley during service. Time of year is unspecified; the flight crosses U.S. airspace mid-continent. Recurring materials: beverage cans, plastic cups with ice, pretzel baskets, cookie packets, small liquor bottles. The tone is methodical and transactional—observing the quiet protocols of airline",
+    ];
+    for (const b of bibles) {
+      expect(bibleWithoutPrintedMatter(b)).toEqual({ bible: b });
+      expect(withoutPrintedMatterSentences(b)).toEqual({ kept: b, dropped: [] });
+    }
+  });
+
+  it("never splits inside an abbreviation, so dropping a neighbour keeps 'U.S. airspace' whole", () => {
+    const b =
+      "Home base: the cabin of a commercial aircraft in flight. Time of year is unspecified; the flight crosses U.S. airspace mid-continent. " +
+      "Recurring materials: an airline magazine in every seat pocket, plastic cups with ice.";
+    const r = withoutPrintedMatterSentences(b);
+    expect(r.dropped).toEqual(["Recurring materials: an airline magazine in every seat pocket, plastic cups with ice."]);
+    expect(r.kept).toBe(
+      "Home base: the cabin of a commercial aircraft in flight. Time of year is unspecified; the flight crosses U.S. airspace mid-continent."
+    );
+  });
+
+  it("drops a bible that is nothing but printed matter, with the old warning", () => {
+    const b = "Home base: a reading nook lined with old books. Recurring props: a leather journal and a dog-eared paperback.";
+    expect(bibleWithoutPrintedMatter(b)).toEqual({ warning: BIBLE_ALL_PRINT_WARNING });
+  });
+
+  it("a beat keeps its sentences that are not print (job 400's historical beat)", () => {
+    const beat =
+      "Historical context: Seneca's life as a wealthy, powerful man in Rome, buried under obligations. He writes the essay in a leather notebook.";
+    expect(withoutPrintedMatterSentences(beat).kept).toBe(
+      "Historical context: Seneca's life as a wealthy, powerful man in Rome, buried under obligations."
+    );
+    const plain = "A man in a pharmacy buying sympathy cards, walking to a parking lot with an unspoken calculation of remaining summers.";
+    expect(withoutPrintedMatterSentences(plain).kept).toBe(plain);
+    expect(withoutPrintedMatterSentences("An open guidebook on the seat.").kept).toBe("");
+  });
+});

@@ -7735,6 +7735,73 @@ export function brollDepictsBook(text: string): boolean {
   return BOOK_VISUAL_PATTERNS.some(re => re.test(t));
 }
 
+/**
+ * A sentence break in a style bible or beat: . ! or ? and a space, then a capital, a number or an
+ * opening quote. Stricter than the script splitter (`splitSentences`), so an abbreviation inside a
+ * sentence — job 399's bible: "the flight crosses U.S. airspace mid-continent" — stays one sentence
+ * and dropping its neighbour never leaves half of it behind.
+ */
+const DIRECTION_SENTENCE_BREAK = /(?<=[.!?]["'”’)\]]?)\s+(?=["'“‘(\[]?[A-Z0-9])/;
+
+/**
+ * Direction text (a style bible or a beat) with only its PRINTED-MATTER sentences taken out — the
+ * ones the book guard (`brollDepictsBook`) reads as a book, cover, page or a writer's work as an
+ * object. The guard used to drop the WHOLE bible on any such mention: job 400 was about an essay a
+ * Roman wrote, its bible was thrown away ("Style bible depicted printed matter — dropped"), and
+ * with no shared world the Rome pictures came back as glossy costume-drama stills beside a film of
+ * plain phone snapshots. One prop sentence naming the essay as a thing must not cost the home base,
+ * the places the script travels to and the tone. Text with nothing to drop comes back as it was,
+ * byte for byte; what is kept is re-checked whole, and anything still reading as print is dropped
+ * entirely (never trust the split). Pure — unit-tested.
+ */
+export function withoutPrintedMatterSentences(text: string): {
+  kept: string;
+  dropped: string[];
+} {
+  const src = text ?? "";
+  const sentences = src
+    .replace(/\s+/g, " ")
+    .trim()
+    .split(DIRECTION_SENTENCE_BREAK)
+    .map(s => s.trim())
+    .filter(Boolean);
+  const kept: string[] = [];
+  const dropped: string[] = [];
+  for (const s of sentences) (brollDepictsBook(s) ? dropped : kept).push(s);
+  if (!dropped.length) return { kept: src, dropped };
+  const rest = kept.join(" ");
+  return brollDepictsBook(rest)
+    ? { kept: "", dropped: sentences }
+    : { kept: rest, dropped };
+}
+
+/** What a style bible with nothing left after the printed-matter sentences says on the job. */
+export const BIBLE_ALL_PRINT_WARNING =
+  "Style bible depicted printed matter — dropped; b-roll world consistency degraded";
+
+/**
+ * A derived style bible made safe for the prompts: its printed-matter sentences left out and the
+ * rest kept, with the job warning that says so — the left-out words in a parenthesis, which the
+ * card moves behind "Details" when long (`groupJobWarnings`). A bible that is nothing but print is
+ * dropped with the old warning. Shared by both derivations (before the storyboard, and the late
+ * fallback in the enhance stage) so they cannot disagree. Pure — unit-tested.
+ */
+export function bibleWithoutPrintedMatter(bible: string): {
+  bible?: string;
+  warning?: string;
+} {
+  const { kept, dropped } = withoutPrintedMatterSentences(bible);
+  if (!dropped.length) return { bible };
+  if (!kept.trim()) return { warning: BIBLE_ALL_PRINT_WARNING };
+  const n = dropped.length;
+  return {
+    bible: kept,
+    warning:
+      `Style bible: ${n} sentence${n === 1 ? "" : "s"} depicting printed matter left out, ` +
+      `the rest kept (${dropped.join(" ")})`,
+  };
+}
+
 /** Calm, generic topic-neutral cutaway subjects — the LAST resort, used only when a CTA cutaway
  *  has no on-topic neighbor to borrow from AND the video has no usable subject line. */
 const GENERIC_CTA_BROLL: string[] = [
@@ -15664,17 +15731,15 @@ async function runUnifiedPipeline(
   // The one physical WORLD the whole video lives in (channel persona + full script), derived HERE —
   // before storyboarding — so the same world seeds every scene instead of only re-converging them
   // at the enhancer. Guard preserves an operator's persisted/hand-edited bible on regenerate (same
-  // intent as the beats pass below). brollDepictsBook stays at this call site (import cycle), so a
-  // book-mentioning bible never reaches the seeds.
+  // intent as the beats pass below). The book guard stays at this call site (import cycle), so a
+  // book-mentioning SENTENCE never reaches the seeds — only that sentence: job 400 lost its whole
+  // bible to one, and its Rome pictures lost their look with it (`bibleWithoutPrintedMatter`).
   if (!params.visualStyleBible) {
     const bible = await deriveStyleBible(params, spokenScript);
-    if (bible && brollDepictsBook(bible)) {
-      appendJobWarning(
-        jobId,
-        "Style bible depicted printed matter — dropped; b-roll world consistency degraded"
-      );
-    } else if (bible) {
-      params.visualStyleBible = bible;
+    if (bible) {
+      const safe = bibleWithoutPrintedMatter(bible);
+      if (safe.warning) appendJobWarning(jobId, safe.warning);
+      if (safe.bible) params.visualStyleBible = safe.bible;
     } else {
       appendJobWarning(
         jobId,
@@ -16570,18 +16635,17 @@ async function runUnifiedPipeline(
     // brollDepictsBook can't move into visualDirection.ts (import cycle), so the sweep is here.
     // Only adopt this pass's bible when the pre-storyboard pass produced none — never clobber the
     // world the scenes were already seeded with (or an operator's hand-edited one).
+    // Sentence by sentence, as before the storyboard: a printed-matter sentence goes, the rest of
+    // the bible and of each beat stays (job 400).
     if (!params.visualStyleBible) {
-      if (brollDepictsBook(direction.styleBible)) {
-        console.warn(
-          `[Longform ${jobId}] style bible depicted printed matter — dropped`
-        );
-      } else {
-        params.visualStyleBible = direction.styleBible;
-      }
+      const safe = bibleWithoutPrintedMatter(direction.styleBible);
+      if (safe.warning) console.warn(`[Longform ${jobId}] ${safe.warning}`);
+      if (safe.bible) params.visualStyleBible = safe.bible;
     }
     for (const s of scenes) {
       const beat = direction.beats[s.index];
-      if (beat && !brollDepictsBook(beat)) s.visualBeat = beat;
+      const kept = beat ? withoutPrintedMatterSentences(beat).kept : "";
+      if (kept.trim()) s.visualBeat = kept;
     }
   }
 
