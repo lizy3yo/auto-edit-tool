@@ -417,6 +417,99 @@ export const STAGED_RULE =
 export const STAGED_QUESTION = `\n\nQUESTION 7 — staged: ${STAGED_RULE}`;
 
 /**
+ * Words that NAME a picture's light: a dark hour, the low light of dusk or dawn, or a light source.
+ * Each is narrow on purpose, since a word used as a name lights nothing: a fire extinguisher or a
+ * fire alarm, a nightstand, glue left overnight, "evening out" a finish, dark walnut, dim sum, a
+ * stack of firewood. "tonight" is left out too — "so tonight we're treating that scene like
+ * footage" (job 405 scene 13) is a host talking, not a time of day.
+ */
+const NOT_A_COLOUR =
+  "(?![-\\s]+(?:green|blue|red|brown|gr[ae]y|black|wood|walnut|oak|cherry|mahogany|stain|finish|roast|colou?r)\\b)";
+const NAMED_LIGHT: RegExp[] = [
+  // A dark hour: night, midnight, the small hours, one to five in the morning, a late evening hour.
+  /\b(?:mid)?nights?(?:[- ]?time)?\b(?![-\s]+(?:stand|table|cream|gown|shirt|owl|guard|mode|serum|mask)s?\b)/gi,
+  /\b(?:small|wee) hours\b/gi,
+  /\b(?:[1-5]|12|one|two|three|four|five|twelve)(?:[:.]\d\d|[- ](?:thirty|fifteen|forty(?:[- ]five)?))?(?: o'clock)? in the morning\b/gi,
+  /\b(?:[1-5]|12|one|two|three|four|five|twelve)(?::\d\d)?\s?a\.?\s?m\.?(?!\w)/gi,
+  /\b(?:[7-9]|1[01]|seven|eight|nine|ten|eleven)(?::\d\d)?\s?p\.?\s?m\.?(?!\w)/gi,
+  // The low light at either end of the day.
+  /\bevenings?\b(?![-\s]+(?:out|up)\b)/gi,
+  /\b(?:dusk|dawn|pre-?dawn|daybreak|nightfall|twilight|sunset|sundown|sunrise|first light|last light)\b/gi,
+  // The dark itself, said of a place or a time — never of a colour or a wood ("in dark walnut").
+  new RegExp(`\\b(?:after|in|into) (?:the )?dark(?:ness)?\\b${NOT_A_COLOUR}`, "gi"),
+  new RegExp(
+    "\\b(?:house|home|room|bedroom|kitchen|street|sky|outside|world|everything|it)(?:'s|\\s+(?:is|was|" +
+      "has gone|had gone|goes|went|gets|got|grows|grew|turns|turned|is getting|was getting))\\s+" +
+      `(?:pitch\\s+)?dark\\b${NOT_A_COLOUR}`,
+    "gi"
+  ),
+  /\bdark (?:room|house|home|bedroom|kitchen|hall|hallway|study|garage|shed|barn|street|road|yard|sky|window|windows|cabin|tent)s?\b/gi,
+  /\bpitch[- ](?:dark|black)\b/gi,
+  /\bdim(?:ly)?(?:[- ]lit)?\b(?! sum\b)/gi,
+  /\blow light\b/gi,
+  /\b(?:power (?:outage|cut|failure)|blackout)s?\b/gi,
+  // A light source: a lamp, a candle, a fire, the moon, a screen in the dark.
+  /\b(?:head|street)?lamp(?:s|light|lit|-lit)?\b/gi,
+  /\bcandle(?:s|light|lit|-lit)?\b/gi,
+  /\blanterns?\b/gi,
+  /\b(?:flash|torch|moon|star|street|night)[- ]?lights?\b/gi,
+  /\bmoonlit\b/gi,
+  /(?<![\w-])(?:camp|bon|wild)?fires?(?:light|lit|place|places|side|pits?)?\b(?![-\s]+(?:extinguishers?|alarms?|trucks?|engines?|stations?|departments?|fighters?|safety|doors?|codes?|hazards?|escapes?|exits?|drills?|insurance|marshals?|chiefs?|hydrants?|blankets?|risks?|starters?|resistant|rated|proof|up|away)\b)/gi,
+  /\b(?:hearth|embers)\b/gi,
+  /\bflames?\b(?![-\s]+(?:retardant|resistant|proof)\b)/gi,
+  /\bglow of (?:a|an|the|her|his|their|your|my) (?:phone|screen|laptop|tablet|tv|television|monitor)\b/gi,
+  /\b(?:phone|screen|laptop|tablet|tv|television|monitor) glow\b/gi,
+];
+
+/**
+ * The words in a picture's narration line and its own description that name its light, in the
+ * order they appear, each once (a word inside a longer match — "night" in "night light" — is
+ * dropped). Empty when neither names any. Pure — unit-tested.
+ */
+export function namedLight(...texts: (string | undefined)[]): string[] {
+  const found: string[] = [];
+  for (const text of texts) {
+    if (!text) continue;
+    const spans: { at: number; end: number; words: string }[] = [];
+    for (const re of NAMED_LIGHT)
+      for (const m of Array.from(text.matchAll(re))) spans.push({ at: m.index!, end: m.index! + m[0].length, words: m[0].trim() });
+    spans.sort((a, b) => a.at - b.at || b.end - a.end);
+    for (const s of spans) {
+      if (spans.some(o => o !== s && o.at <= s.at && o.end >= s.end && o.end - o.at > s.end - s.at)) continue;
+      if (!found.some(f => f.toLowerCase() === s.words.toLowerCase())) found.push(s.words);
+    }
+  }
+  return found.slice(0, 6);
+}
+
+/**
+ * LIGHT THE WORDS NAME IS NOT STAGED (2026-10-18, the review of jobs 401-407). `STAGED_RULE` counts
+ * a glowing lamp, a candle or moody light with dark corners as staged, and the picture prompt
+ * already lets that light in when the shot names it (`amateurSettingClause`: "no glowing lamps,
+ * candles or fire unless the shot names them") — but the check was never told what the shot named,
+ * so it refused the very light the line asked for. Job 405's night bedroom ("a quiet bedroom at
+ * night", "the lamp glowing softly on the nightstand", scenes 13, 16, 18, 20), job 401 scene 11
+ * ("the kitchen table at two in the morning", "a dim lamp at night") and scene 22 ("writing on a
+ * scroll … by lamplight") were each called staged on both draws and shipped with the warning: a
+ * redraw from the same words draws the same night again, so the flag only cost a picture. The check
+ * is now told which words name the light, and judges only what does not come from them — the
+ * golden glow nobody asked for, the glossy advert finish — as the rule always has. Asked after the
+ * cached rulebook, like `SOFT_PRINT_QUESTION`; `STAGED_RULE` itself is unchanged.
+ */
+export function namedLightQuestion(named: string[], heading = "QUESTION 7 NOTE — staged"): string {
+  if (!named.length) return "";
+  const words = named.map(w => `"${w.replace(/"/g, "'")}"`).join(", ");
+  return (
+    `\n\n${heading}: the narrator's line or this picture's own description names its light ` +
+    `(${words}). Light that comes from that is what was asked for — a lamp, candle, fire or screen ` +
+    "glowing in a dark room, dim or low light with dark corners, dark windows, the low warm light of " +
+    "dusk or dawn — and is NEVER staged on its own. Judge everything else as before: answer true " +
+    "for a glossy, polished advertising finish, or for a golden glow or dramatic light that does not " +
+    "come from what those words name."
+  );
+}
+
+/**
  * QUESTION 6, asked only with the narration line: the frame is set where the line says.
  *
  * `rulesOut`: the picture's sentence rules something out (`scene.forbids`, QUESTION 8). A place such
@@ -561,6 +654,8 @@ export async function scanStillDefects(
         (line ? placeQuestion(line, !!ruledOut) : "") +
         (allowedText ? allowedTextQuestion(allowedText) : "") +
         (ruledOut ? forbiddenQuestion(ruledOut) : "") +
+        // Light the line or the picture's own description names is what was asked for, not staged.
+        namedLightQuestion(namedLight(line, expect)) +
         verdictShape(expect, line, askDetail, !!ruledOut),
       userMessage:
         "Is any text stamped over this frame, does it contain obviously impossible structure, " +

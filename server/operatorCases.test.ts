@@ -76,6 +76,8 @@ import {
 } from "./longformVideo";
 import {
   exactLookQuestion,
+  namedLight,
+  namedLightQuestion,
   requiredThingsQuestion,
   SOFT_PRINT_QUESTION,
   STAGED_QUESTION,
@@ -4051,5 +4053,53 @@ describe("only a tool that is SPLITTING goes into the end grain; a kitchen knife
     expect(TOOL_POSITION_CLAUSE).toMatch(/food on a cutting board/);
     // A plane's front hand is on the tool, ahead of its iron: the rule asks for the hand ON the tool.
     expect(TOOL_POSITION_CLAUSE).toMatch(/that hand is on the tool itself or holds the work behind the edge/);
+  });
+});
+
+/**
+ * LIGHT THE WORDS NAME IS NOT STAGED (2026-10-18, the review of jobs 401-407). The night and the
+ * lamplight a line or a picture's own description asks for were called "staged" on both draws and
+ * shipped with the warning — job 405's night bedroom, job 401's "kitchen table at two in the
+ * morning" and its writer "by lamplight". The check is now told the words that name the light;
+ * what they do not name (a glossy finish, a golden glow nobody asked for) is judged as before.
+ */
+describe("light the line or the description names is never staged (jobs 401, 405)", () => {
+  const noteFor = (s: StoryboardScene) => namedLightQuestion(namedLight(s.scriptText, s.showSubject));
+
+  it("the night and lamplight pictures are told their light was asked for", () => {
+    const named = [
+      // Job 401 scene 11 and scene 22.
+      pic(11, "the kitchen table at two in the morning when the house is too quiet.", "round wooden kitchen table with two chairs and a dim lamp at night"),
+      pic(22, "Two thousand years ago, a man named Lucius Annaeus Seneca wrote a short, furious, loving essay to a man named Paulinus,", "a Roman man in a toga writing on a scroll at a wooden desk by lamplight"),
+      // Job 405 scenes 13, 18, 21 and 26.
+      pic(13, "So tonight we’re treating that scene like footage. We’ll", "wide view of bedroom at night with cat on the bed"),
+      pic(18, "And by the end, you’ll have the one evening change that quietly takes the appointment off the books.", "a quiet bedroom at evening with the lamp glowing softly on the nightstand"),
+      pic(21, "There’s a stubborn old myth that cats are nocturnal,", "a small tabby cat sitting alert on a windowsill, dim dawn light glowing through the bedroom window"),
+      pic(26, "Think of her as a shift worker who moved into your home.", "an open grassy wild landscape at dusk, low golden light over scattered brush and distant hills"),
+    ];
+    for (const s of named) {
+      expect(noteFor(s)).toMatch(/QUESTION 7 NOTE — staged/);
+      expect(noteFor(s)).toMatch(/NEVER staged on its own/);
+    }
+    expect(noteFor(named[0])).toContain('"two in the morning"');
+    expect(noteFor(named[1])).toContain('"lamplight"');
+    expect(noteFor(named[2])).toContain('"night"');
+    expect(noteFor(named[2])).not.toContain("tonight");
+  });
+
+  it("pictures whose words name no light are judged by the rule alone", () => {
+    // Job 401 scenes 24 (the sunlit villa), 30 (the polished marble hall) and 15 (the bills): their
+    // staged flags were about the finish, not a light anyone asked for.
+    const unnamed = [
+      pic(24, "Seneca was no monk on a hillside. He was one of the richest men in the empire,", "a well dressed man standing near a grand desk in a study"),
+      pic(30, "the senator complains,", "a senator in robes standing in a stone hall"),
+      pic(15, "people carrying real questions about", "an older man at a kitchen table looking over a stack of household bills, seen from the side"),
+      // Dale's job 345: stacks in plain daylight — still never staged for content, and no note.
+      pic(1, "and every piece gets stacked and sorted by size,", "stacks of cutting boards and coasters sorted on a workbench"),
+    ];
+    for (const s of unnamed) expect(noteFor(s)).toBe("");
+    // The rule the check and the audit share is unchanged: an unnamed glowing lamp is still staged.
+    expect(STAGED_RULE).toMatch(/glowing lamp, candle or golden glow/);
+    expect(STAGED_QUESTION).toContain(STAGED_RULE);
   });
 });
