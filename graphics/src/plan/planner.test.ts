@@ -1295,9 +1295,38 @@ describe("a graphic that hides the picture is refused when it leaves a blink of 
     expect(out.resolved.map(c => [c.id, c.startFrame, c.endFrame])).toEqual([["boots-clear-quote", 4814, 4973]]);
   });
 
-  it("the planner is told the rule before it writes", () => {
+  // The reason named is the one that stops the hold. The same Statement read slower: its reading time
+  // (3.4 s) carries it to 127.63, "There is a stick in it." starts at 128.80 and the host comes in at
+  // 129.00. A new sentence starting that close to the change does not stop a hold (NEW_LINE_GRACE_SEC);
+  // the change coming 3.65 s after "fine." does — and that is what the repair round is told.
+  it("403, retimed: a new sentence starting right at the change is not named as the reason; the distance is", async () => {
+    const words = T(
+      "old.@123.51-123.69 The@124.35-124.45 toilet@124.49-124.81 is@124.85-124.93 fine.@125.01-125.35 There@128.80-128.94 is@128.98-129.06 a@129.10-129.14 stick@129.22-129.46 in@129.50-129.56 it.@129.64-129.74"
+    );
+    const statement: CueSpec = { id: "toilet-is-fine", template: "Statement", start: "The toilet is fine. There is", startPad: -0.15, end: "The toilet is fine", endPad: 0.3, props: { kicker: "The real cause", emphasis: ["fine."], headline: { text: "The toilet is fine.", words: true } } };
+    const film = { scenes: [scene(20, 124.236, 129.0), scene(21, 129.0, 134.203, { hostPresent: true })] };
+    const out = await planGraphics({ words, cuts: at([3542, 3727, 3870]), film, ask: asking([statement]).ask, ensureIcon: async () => true });
+    const [p] = out.rounds[0].problems;
+    expect(p.problem).toMatch(/^Statement hides the picture, and it leaves 1\.37 s of the shot alone before the picture changes at 2:09\.0/);
+    expect(p.problem).toContain("It may not stay to the change: that comes 3.65 s after its own sentence ends (at most 2 s).");
+    expect(p.problem).not.toContain("starts a new sentence first");
+  });
+
+  // A blink BEFORE it: the Versus card waits for its first side ("a traveler…", 83.36) and opens at
+  // 83.07, 1.27 s after a picture change at 81.80 — too far from its first word to open on that cut.
+  it("404, a cut placed earlier: a blink of the new picture before the card is refused, told to open with that shot", async () => {
+    // (the next change 1.5 s after it, so the shot after it plays on)
+    const out = await planGraphics({ words: robin, cuts: at([2411, 2454, 2685]), film: robinFilm, ask: asking([versus]).ask, ensureIcon: async () => true });
+    const [p] = out.rounds[0].problems;
+    expect(p.cue).toBe("versus-january-robin");
+    expect(p.problem).toMatch(/^Versus hides the picture, and it opens 1\.27 s after the shot changes at 1:21\.8: a blink of the new picture before it/);
+    expect(p.problem).toContain("its first shown words within about a second of the change");
+  });
+
+  it("the planner is told the rule before it writes — measured from where the graphic LEAVES, not from its last word", () => {
     const prompt = systemPrompt({ kept: false });
     expect(prompt).toContain("A graphic that HIDES the picture (a full-screen card, a window graphic, a Quote) leaves no blink");
-    expect(prompt).toContain("1.5 s or more pass (the shot plays on)");
+    expect(prompt).toContain("the change comes within 2 s of that sentence's end");
+    expect(prompt).toContain("the shot plays on 1.5 s or\n  more after it leaves (the change at least 2.3 s after its last word)");
   });
 });

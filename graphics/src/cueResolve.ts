@@ -412,8 +412,10 @@ export function endWithFilm(cues: ResolvedCue[], lastFrame: number, fps: number)
  */
 export const HANDOFF_GAP_SEC = 1.0;
 
-/** The most a graphic may stay after its own last word, even to leave with a picture cut: past it
- * the graphic reads as stale. An end snaps FORWARD onto a cut only within this. */
+/** The most a graphic may stay after its own words, even to leave with a picture cut: past it the
+ * graphic reads as stale. Measured from where its own sentence finished, as said (`ownSentenceEnd`) —
+ * the rest of a sentence it stayed up for is not lingering — so an end snaps FORWARD onto a cut only
+ * within this of that point, and QA (`stillUpAfterWords`) counts from the same point. */
 export const MAX_LINGER_SEC = 1.2;
 
 /**

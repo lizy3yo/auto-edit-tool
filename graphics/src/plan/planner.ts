@@ -20,7 +20,7 @@
 //
 // Pure apart from the two things it is handed: `ask` (the model call — metered by the app) and
 // `ensureIcon` (makes an emoji's image available).
-import { CueError, MIN_ON_SCREEN_SEC, MIN_SHOT_SEC, blinkBeside, findPhrase, findVerbatim, holdToCut, indexWords, ownSentenceEnd, parseSpokenNumber, resolveCues, tokens, tooShortToRead, type CueSpec, type ResolvedCue, type Word } from "../cueResolve";
+import { CARD_HOLD_MAX_SEC, CueError, LINGER_SEC, MIN_ON_SCREEN_SEC, MIN_SHOT_SEC, NEW_LINE_GRACE_SEC, blinkBeside, findPhrase, findVerbatim, holdToCut, indexWords, ownSentenceEnd, parseSpokenNumber, resolveCues, tokens, tooShortToRead, type CueSpec, type ResolvedCue, type Word } from "../cueResolve";
 import { resolveSets, templateById } from "../registry";
 import { FPS } from "../theme";
 import { MIN_GAP_SEC, checkRules, nameTagRange, type FilmLayout, type LayoutScene } from "./rules";
@@ -205,8 +205,9 @@ What every graphic must keep:
   b-roll stretch, with all their words inside that one stretch. Nothing in the call to action (CTA
   scenes). Nothing about the host's words under the name tag. ${MIN_GAP_SEC} s between graphics.
 - A graphic that HIDES the picture (a full-screen card, a window graphic, a Quote) leaves no blink of a
-  shot: between its last word and the picture change, either only the rest of its own sentence is said
-  (it stays to the change) or ${MIN_SHOT_SEC} s or more pass (the shot plays on). Otherwise show that line over the footage.
+  shot. Either it stays to the picture change — after its last word only the rest of its own sentence is
+  said, and the change comes within ${CARD_HOLD_MAX_SEC} s of that sentence's end — or the shot plays on ${MIN_SHOT_SEC} s or
+  more after it leaves (the change at least ${(LINGER_SEC + MIN_SHOT_SEC).toFixed(1)} s after its last word). Otherwise show that line over the footage.
 ${opts.kept ? `\nSOME GRAPHICS ARE ALREADY PLACED AND APPROVED (listed in the message). Keep them exactly; add every other\nmoment around them, never overlapping them.\n` : ""}
 Answer with JSON only: {"cues": [ ... ]} in film order, NEW graphics only. Each cue:
 {"id": "short-kebab-name", "template": "...", "start": "the exact spoken words it starts on (4-7 words, unique enough to find)",
@@ -811,14 +812,17 @@ export function blinkProblem(template: string, c: ResolvedCue, blink: { side: "a
   const glitch = `under ${MIN_SHOT_SEC} s, which reads as a glitch`;
   const over = `use a template that plays over the footage and leaves the picture in view (DimCaption, BigNumberOverlay, SmallLabel), or drop it`;
   if (blink.side === "before")
-    return `${template} hides the picture, and it opens ${blink.sec.toFixed(2)} s after the shot changes at ${mmss(cut)}: a blink of the new picture before it, ${glitch}. Start it where that shot starts, or ${over}`;
+    return `${template} hides the picture, and it opens ${blink.sec.toFixed(2)} s after the shot changes at ${mmss(cut)}: a blink of the new picture before it, ${glitch}. Put it on words said as that shot begins — its first shown words within about a second of the change — or ${over}`;
   const from = c.contentEnd ?? c.end;
   const { newLineAt } = ownSentenceEnd(words, from, cut);
   const hold = holdToCut(words, from, c.end, cut);
-  const opener = newLineAt === undefined ? [] : words.filter(w => w.start >= newLineAt - 1e-6 && w.start < cut).slice(0, 4);
+  // A new sentence said in the sliver is the reason to name. One that starts within NEW_LINE_GRACE_SEC
+  // of the change does not stop a hold (`holdToCut`), so there the reason is how long after its own
+  // sentence the change comes — to two places, as "2.0 s … (at most 2 s)" names no reason at all.
+  const opener = newLineAt === undefined || newLineAt >= cut - NEW_LINE_GRACE_SEC ? [] : words.filter(w => w.start >= newLineAt - 1e-6 && w.start < cut).slice(0, 4);
   const why = opener.length
     ? `It may not stay to the change: "${opener.map(w => w.text.trim()).join(" ")}…" starts a new sentence first.`
-    : `It may not stay to the change: that comes ${(cut - hold.spoken).toFixed(1)} s after its own sentence ends (at most ${hold.max} s).`;
+    : `It may not stay to the change: that comes ${(cut - hold.spoken).toFixed(2)} s after its own sentence ends (at most ${hold.max} s).`;
   return (
     `${template} hides the picture, and it leaves ${blink.sec.toFixed(2)} s of the shot alone before the picture changes at ${mmss(cut)}: ` +
     `a blink of footage between it and the next shot, ${glitch}. ${why} Put it on a line whose shot it can fill to the picture ` +
