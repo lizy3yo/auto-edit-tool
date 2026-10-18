@@ -111,6 +111,29 @@ describe("which memory picture is the one shown right before (rightBeforeToRecom
     expect(rightBeforeToRecompose([board, screen], screen)).toBeUndefined();
   });
 
+  it("397-28/29: the same board described anew right after its close-up is a new photo too, never told it is about something else", () => {
+    const board = [
+      pic(28, "", {
+        showSubject: undefined,
+        visualPrompt:
+          "Close-up of a striped cutting board—alternating dark walnut and pale maple—resting on the workshop bench, soft natural light catching the grain, with a few hand tools blurred at the edge.",
+        keyThing: "walnut and maple cutting board",
+      }),
+      pic(29, "the walnut and maple cutting board leaning against the garage wall", { keyThing: "walnut and maple cutting board" }),
+    ];
+    expect(rightBeforeToRecompose(board, board[1])).toBe(board[0]);
+    const clause = memoryClause({
+      ...board[1],
+      memoryRefUrls: ["https://r2/first.png", "https://r2/still-src-28.png"],
+      memoryView: MEMORY_VIEWS[0],
+      memoryRightBefore: 1,
+    });
+    expect(clause).toMatch(/Reference image 2 is the picture shown RIGHT BEFORE this one in the video: take ONLY how the walnut and maple cutting board looks/);
+    expect(clause).not.toMatch(/something else/);
+    // On the garage wall, where its words put it — not on the bench where the close-up had it.
+    expect(clause).toContain("in the same place unless this picture's own words put it somewhere else");
+  });
+
   it("a split's panel right after its memory picture, about something else, recomposes too", () => {
     const roll = pic(20, "a pale tan papyrus scroll rolled and tied with a thin brown cord", { keyThing: "scroll" });
     const split = pic(21, "the host speaking", {
@@ -157,10 +180,12 @@ describe("the memory says the picture right before lends only the look", () => {
     const clause = memoryClause(s17());
     expect(clause).toMatch(/The first reference image is the picture shown RIGHT BEFORE this one in the video/);
     expect(clause).toMatch(/take ONLY how the plastic cup looks from it, never the picture itself/);
-    expect(clause).toMatch(/never the same pose, the same hands or the same things at the same angles/);
+    expect(clause).toMatch(/never the same pose, the same hand positions or the same things at the same angles/);
     expect(clause).toMatch(/what THIS picture's own words are about fills the frame/);
     expect(clause).toContain("in the same place unless this picture's own words put it somewhere else");
     expect(clause).toMatch(/The last reference image is the host/);
+    // Other hand POSITIONS, never other hands: beside the host photo that would ask for someone else's.
+    expect(clause).not.toMatch(/same hands/);
     expect(buildStillPrompt(s17())).toContain(clause);
   });
 
@@ -278,8 +303,9 @@ describe("a copy drawn from words, and the picture it is compared with", () => {
 
   it("the same-thing check calls a new background with the same pose and hands a copy", () => {
     expect(SAME_THING_SYSTEM).toMatch(/A new background or setting alone does NOT make a new view/);
-    expect(SAME_THING_SYSTEM).toMatch(/the same pose, the same hands and the same things at the same angles/);
-    // …and still lets a real new view of the same thing pass.
+    expect(SAME_THING_SYSTEM).toMatch(/the same pose, the hands in the same positions and the same things at the same angles/);
+    // …and still lets a real new view of the same thing pass — the host's own hands in both is no copy.
     expect(SAME_THING_SYSTEM).toMatch(/A different camera position, distance, crop or light is fine/);
+    expect(SAME_THING_SYSTEM).not.toMatch(/same hands/);
   });
 });

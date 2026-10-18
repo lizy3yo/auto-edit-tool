@@ -105,7 +105,9 @@ const pictureWords = (s: StoryboardScene) =>
  * angle — only the background changed, one picture for 27 s. Told "the same cup, from another spot",
  * it kept everything but the spot. So when the picture shown right before `s` is one of `s`'s memory
  * pictures and is about something else, `s` is told to take only the thing's look from it
- * (`rightBeforeClause`), and the same-thing check compares `s` with THAT picture.
+ * (`rightBeforeClause`), and the same-thing check compares `s` with THAT picture. "Something else" is
+ * told by the words alone, so it also takes the same thing described anew (job 397 scenes 28-29: the
+ * board close up on the bench, then leaning against the wall) — where a new photo is right too.
  *
  * Returns that picture, or undefined: when the picture before is not one of its memories, when `s`
  * continues it (`sameShot`, or the same or nearly the same words — a continuation has its own view,

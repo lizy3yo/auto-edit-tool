@@ -2112,9 +2112,9 @@ describe("a picture drawn from the one right before it is a new photo, not that 
       memoryView: "a close view of one part of it, filling most of the frame",
       memoryRightBefore: 0,
     });
-    expect(clause).toMatch(/RIGHT BEFORE this one in the video, and it is about something else/);
+    expect(clause).toMatch(/RIGHT BEFORE this one in the video: take ONLY/);
     expect(clause).toMatch(/take ONLY how the plastic cup looks from it/);
-    expect(clause).toMatch(/never the same pose, the same hands or the same things at the same angles/);
+    expect(clause).toMatch(/never the same pose, the same hand positions or the same things at the same angles/);
   });
 
   it("399-17: a copy that survives its redraw is drawn from words with the cup's written look", async () => {
@@ -2141,5 +2141,31 @@ describe("a picture drawn from the one right before it is a new photo, not that 
     ];
     expect(memorySourcesFor(far, far[2])).toEqual([far[0]]);
     expect(rightBeforeToRecompose(far, far[2])).toBeUndefined();
+  });
+});
+
+describe("a picture drawn from the one right before it is told only to differ, never that it is about something else (job 397 scenes 28-29)", () => {
+  // The rule picks the picture before by its WORDS, and different words are as often the same thing
+  // described anew: the walnut and maple board close up on the bench, then leaning against the garage
+  // wall. A new photo is right for both; "it is about something else" was a false claim, and "never
+  // the same hands" beside the host photo asked for someone else's hands.
+  it("397-29: a new photo of the same board, by its own words, with no false claim and no other hands", async () => {
+    const { rightBeforeToRecompose } = await import("./pictureMemory");
+    const { SAME_THING_SYSTEM } = await import("./overlayTextScan");
+    const BOARD = "walnut and maple cutting board";
+    const closeUp = pic(28, "n", "", {
+      showSubject: undefined,
+      visualPrompt:
+        "Close-up of a striped cutting board—alternating dark walnut and pale maple—resting on the workshop bench, soft natural light catching the grain, with a few hand tools blurred at the edge.",
+      keyThing: BOARD,
+    });
+    const wall = pic(29, "n", "the walnut and maple cutting board leaning against the garage wall", { keyThing: BOARD });
+    expect(rightBeforeToRecompose([closeUp, wall], wall)).toBe(closeUp);
+    const clause = memoryClause({ ...wall, memoryRefUrls: ["https://r2/still-src-28.png"], memoryRightBefore: 0 });
+    expect(clause).toMatch(/RIGHT BEFORE this one in the video: take ONLY how the walnut and maple cutting board looks/);
+    expect(clause).toMatch(/the same hand positions/);
+    expect(clause).not.toMatch(/something else|same hands/);
+    expect(SAME_THING_SYSTEM).toMatch(/the hands in the same positions/);
+    expect(SAME_THING_SYSTEM).not.toMatch(/same hands/);
   });
 });

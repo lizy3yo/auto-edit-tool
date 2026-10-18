@@ -7249,6 +7249,11 @@ const namesInSentence = (names: string[]) =>
  * can into the same cup — on a new background. A picture the viewer has just seen is a reference for
  * how the thing looks and nothing else: another camera, framing and arrangement, and this picture's
  * own subject filling the frame. Empty for any other picture. Pure.
+ * It never says the picture before is about something else: the two only have different words, and
+ * that is as often the same thing described anew (job 397 scenes 28-29: the walnut and maple board
+ * close up on the bench, then leaning against the garage wall) — a new photo is right for both.
+ * And it asks for other hand POSITIONS, never other hands: the host's hands are the host's in every
+ * picture, and "never the same hands" beside the host photo asks for someone else's.
  */
 export function rightBeforeClause(scene: StoryboardScene): string {
   const n = scene.memoryRefUrls?.length ?? 0;
@@ -7261,11 +7266,11 @@ export function rightBeforeClause(scene: StoryboardScene): string {
   if (!names.length) return "";
   const which = n === 1 ? "The first reference image" : `Reference image ${p + 1}`;
   return (
-    ` ${which} is the picture shown RIGHT BEFORE this one in the video, and it is about something ` +
-    `else: take ONLY how the ${namesInSentence(names)} ${names.length > 1 ? "look" : "looks"} from it, ` +
-    `never the picture itself. This is a clearly different photo — another camera position, distance ` +
-    `and framing; never the same pose, the same hands or the same things at the same angles in the ` +
-    `same places — and what THIS picture's own words are about fills the frame.`
+    ` ${which} is the picture shown RIGHT BEFORE this one in the video: take ONLY how the ` +
+    `${namesInSentence(names)} ${names.length > 1 ? "look" : "looks"} from it, never the picture ` +
+    `itself. This is a clearly different photo — another camera position, distance and framing; never ` +
+    `the same pose, the same hand positions or the same things at the same angles in the same places ` +
+    `— and what THIS picture's own words are about fills the frame.`
   );
 }
 
