@@ -355,3 +355,60 @@ describe("deriveContinuitySheet asks once more, only for what is owed", () => {
     expect(mockInvoke.mock.calls[0][0].userMessage).not.toContain("THE HOST");
   });
 });
+
+describe("the merge keeps two people apart by their looks, and one person under two words together (review)", () => {
+  it("a sexless name for job 410's man is not the woman passenger: the man's look says he is someone else", () => {
+    const lines = { people: [`PERSON the passenger in the empty row: ${WOMAN_410}`], viewer: [] };
+    const merged = mergeRepairedPeople(lines, [], `PERSON the passenger in row fourteen: ${MAN_410}`);
+    expect(merged.added).toEqual(["the passenger in row fourteen"]);
+    // The same name with a woman's look is her again, renamed — never a second line.
+    expect(
+      mergeRepairedPeople(lines, [], "PERSON the passenger in row three: a woman in her eighties, white hair in a bun, a navy coat").added
+    ).toEqual([]);
+  });
+
+  it("one person under two words ('my mother' / 'my mom', 'neighbour' / 'neighbor') is never added twice", () => {
+    const mother = "PERSON my mother: a woman in her seventies, short grey curls, a lavender cardigan over a white blouse";
+    expect(mergeRepairedPeople({ people: [mother], viewer: [] }, [], `PERSON my mom: ${WOMAN_410}`).added).toEqual([]);
+    const neighbour = "PERSON the neighbour: a tall man in his seventies, thin white hair combed back, a faded green zip-up jacket";
+    expect(mergeRepairedPeople({ people: [neighbour], viewer: [] }, [], `PERSON the neighbor: ${MAN_410}`).added).toEqual([]);
+    // A different relation of the same sex is a second person.
+    expect(mergeRepairedPeople({ people: [mother], viewer: [] }, [], `PERSON my sister: ${WOMAN_410}`).added).toEqual(["my sister"]);
+  });
+
+  it("with what the check found missing, only those people are added — never a padded cast", () => {
+    const owedShe = [{ cue: "she", sex: "f" as const, sentences: [2, 3] }];
+    const reply = `PERSON the woman passenger: ${WOMAN_410}\nPERSON the man passenger: ${MAN_410}`;
+    expect(mergeRepairedPeople({ people: [], viewer: [] }, [], reply, { uncovered: owedShe }).added).toEqual(["the woman passenger"]);
+    // Job 410's two cues take both; one cue is covered once (a second woman is not added for it).
+    const owed410 = peopleOwed(SCRIPT_410, { people: [], viewer: [] }, { hostName: "Helena Hart" }).uncovered;
+    expect(mergeRepairedPeople({ people: [], viewer: [] }, [], reply, { uncovered: owed410 }).added).toEqual([
+      "the woman passenger",
+      "the man passenger",
+    ]);
+    // Two runs of "he" are two men; one man covers one run, so the second is still owed.
+    const twoHe = [
+      { cue: "he", sex: "m" as const, sentences: [0, 1, 2] },
+      { cue: "he", sex: "m" as const, sentences: [20, 21] },
+    ];
+    const twoMen = `PERSON the man in the card aisle: ${MAN_410}\nPERSON the essay writer: a man in his sixties, close-cropped grey hair, a plain white tunic`;
+    expect(mergeRepairedPeople({ people: [], viewer: [] }, [], twoMen, { uncovered: twoHe }).added).toEqual([
+      "the man in the card aisle",
+      "the essay writer",
+    ]);
+    const twoWomen = `PERSON the woman passenger: ${WOMAN_410}\nPERSON the flight attendant: a woman in her thirties, dark hair in a low bun, a navy dress`;
+    expect(mergeRepairedPeople({ people: [], viewer: [] }, [], twoWomen, { uncovered: owedShe }).added).toEqual(["the woman passenger"]);
+  });
+
+  it("the check reads one person under two words as one: 'my mom … my mother', and a 'neighbor' a 'neighbour' line covers", () => {
+    const story = "My mom kept every button in a tin. Forty years on, I still have it. My mother never threw a thing away.";
+    expect(followedPeople(story).find(f => f.cue === "mom")).toEqual({ cue: "mom", sex: "f", sentences: [0, 2] });
+    const neighbor = [{ cue: "neighbor", sentences: [1, 5] }];
+    expect(uncoveredPeople(neighbor, [{ name: "the neighbour", look: MAN_410 }])).toEqual([]);
+    expect(uncoveredPeople([{ cue: "mom", sex: "f" as const, sentences: [0, 2] }], [{ name: "my mother", look: WOMAN_410 }])).toEqual([]);
+  });
+
+  it("the prompt calls the host's words a block, never a line the list could echo", () => {
+    expect(CONTINUITY_SYSTEM).not.toMatch(/THE HOST line/);
+  });
+});

@@ -62,6 +62,33 @@ const PLAIN_ONE = new Set(["man", "woman", "lady", "gentleman", "guy"]);
 const BRINGS_SOMEONE_IN =
   /\b(?:the other|one of (?:them|us|those)|(?:a|an|the|this|that|one)\s+(?:[a-z'’-]+\s+)?(?:man|woman|lady|gentleman|guy|boy|girl))\b/i;
 
+/**
+ * One word for a role or relation the person-noun list spells two ways. A script's "my mom" against
+ * a PERSON line named "my mother", or "neighbor" against "the neighbour", is the same person: read
+ * as two, the check asked for a line the list already had, and the repair could add that person a
+ * second time under the other word with a second look.
+ */
+const SAME_ROLE: Record<string, string> = {
+  neighbour: "neighbor",
+  traveller: "traveler",
+  labourer: "laborer",
+  "co-worker": "coworker",
+  mother: "mom",
+  mum: "mom",
+  mama: "mom",
+  father: "dad",
+  grandmother: "grandma",
+  grandfather: "grandpa",
+  grandkid: "grandchild",
+  teenager: "teen",
+  infant: "baby",
+};
+/** A role or relation word in its one spelling (`SAME_ROLE`). Pure. */
+export function sameRole(word: string): string {
+  const w = word.toLowerCase();
+  return SAME_ROLE[w] ?? w;
+}
+
 /** A role or relation pointed at as one person in a sentence ("the neighbour", "my late husband"). */
 function rolesPointedAt(sentence: string): { lemma: string; sex?: "f" | "m" }[] {
   const tokens = sentence.match(/[A-Za-z]+(?:[-'’][A-Za-z]+)*/g) ?? [];
@@ -104,7 +131,9 @@ export function followedPeople(
   opts: { hostName?: string; hostTitle?: string } = {}
 ): FollowedPerson[] {
   const sentences = scriptSentences(script);
-  const selfRoles = new Set(selfRolesOf(hostOwnWords(script, opts).join(" "), opts.hostTitle, opts.hostName));
+  const selfRoles = new Set(
+    selfRolesOf(hostOwnWords(script, opts).join(" "), opts.hostTitle, opts.hostName).map(sameRole)
+  );
   const out: FollowedPerson[] = [];
   const bringsIn = (s: string) => BRINGS_SOMEONE_IN.test(s) || rolesPointedAt(s).length > 0;
   for (const [cue, sex, re] of [
@@ -121,10 +150,13 @@ export function followedPeople(
   const byRole = new Map<string, FollowedPerson>();
   sentences.forEach((s, i) => {
     for (const r of rolesPointedAt(s)) {
-      if (selfRoles.has(r.lemma)) continue;
-      const had = byRole.get(r.lemma);
-      if (had) had.sentences.push(i);
-      else byRole.set(r.lemma, { cue: r.lemma, ...(r.sex ? { sex: r.sex } : {}), sentences: [i] });
+      const role = sameRole(r.lemma);
+      if (selfRoles.has(role)) continue;
+      const had = byRole.get(role);
+      // "my mom … my mother" in ONE sentence is still one sentence.
+      if (had) {
+        if (had.sentences[had.sentences.length - 1] !== i) had.sentences.push(i);
+      } else byRole.set(role, { cue: r.lemma, ...(r.sex ? { sex: r.sex } : {}), sentences: [i] });
     }
   });
   for (const p of Array.from(byRole.values())) if (p.sentences.length >= 2) out.push(p);
@@ -145,8 +177,8 @@ export function uncoveredPeople(
     const named = namedPeople(p.name);
     return {
       sex: named?.sex ?? sexOfLook(p.look),
-      words: personKey(p.name).split(" "),
-      roles: (named?.people ?? []).map(x => x.noun),
+      words: personKey(p.name).split(" ").map(sameRole),
+      roles: (named?.people ?? []).map(x => sameRole(x.noun)),
     };
   };
   const facts = people.map(factOf);
@@ -154,7 +186,7 @@ export function uncoveredPeople(
   return followed.filter(f =>
     f.cue === "she" || f.cue === "he"
       ? !facts.some(x => x.sex === f.sex)
-      : !withViewer.some(x => x.words.includes(f.cue) || x.roles.includes(f.cue))
+      : !withViewer.some(x => x.words.includes(sameRole(f.cue)) || x.roles.includes(sameRole(f.cue)))
   );
 }
 

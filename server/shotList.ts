@@ -33,12 +33,14 @@ import {
   matchRecurringPeople,
   namesOnlyAnimal,
   personKey,
+  sexOfLook,
 } from "./hostLook";
 import { hostNameRanges, namesHostBefore } from "./hostIntro";
 import {
   followedPeople,
   hostOwnWords,
   lookGaps,
+  sameRole,
   scriptSentences,
   uncoveredPeople,
   type FollowedPerson,
@@ -2041,7 +2043,7 @@ export const CONTINUITY_SYSTEM =
   "speaks to \"you\" as someone the HOST'S OWN JOB SERVES — a nurse's " +
   "patient, a hairdresser's client, a waiter's diner, a tax adviser's client — add ONE last line " +
   "`VIEWER name: look`, so every picture of \"you\" shows that same ordinary person and never the " +
-  "host. Also when the host calls themself one of \"you\" but THE HOST line dresses them for the " +
+  "host. Also when the host calls themself one of \"you\" but THE HOST block dresses them for the " +
   "job that serves \"you\": the host in work clothes drawn as \"you\" reads as the worker. name is " +
   "1-4 plain words for the role the script gives \"you\" (the patient, the client, the diner); look " +
   // Job 412: the VIEWER look came back as "an adult of average build, wearing plain pajamas" — no
@@ -2237,15 +2239,18 @@ export function peopleRepairMessage(
  * The people lines after the repair's answer: an incomplete line takes the rewrite of the same
  * person (same name, or the one VIEWER line for the viewer) only when it leaves out less, keeping
  * its own kind and name, which every shot already uses; a new `PERSON` is added when it is nobody
- * already written (by name, or by the same role and sex) and says at least two of man or woman, age
- * and hair, up to `MAX_RECURRING_PEOPLE`. A `VIEWER` line is never added here — whether "you" is
- * someone the host serves is the props call's to say. Pure.
+ * already written (by name, or by the same role or relation — "my mom" is "my mother" — unless the
+ * two looks are a man and a woman) and says at least two of man or woman, age and hair, up to
+ * `MAX_RECURRING_PEOPLE`. Given `uncovered` (what `peopleOwed` found missing), a new line must
+ * cover one of those people: the repair is asked for them, not for anyone it can think of. A
+ * `VIEWER` line is never added here — whether "you" is someone the host serves is the props call's
+ * to say. Pure.
  */
 export function mergeRepairedPeople(
   lines: { people: string[]; viewer: string[] },
   incomplete: IncompletePeopleLine[],
   reply: string,
-  opts: { hostName?: string } = {}
+  opts: { hostName?: string; uncovered?: FollowedPerson[] } = {}
 ): { people: string[]; viewer: string[]; added: string[]; rewritten: string[] } {
   const replyLines = reply.split("\n").map(l => l.replace(/^[-*•\d.)\s]+/, "").trim());
   const newPeople = parseRecurringPeople(replyLines.filter(isPersonLine).join("\n"), opts);
@@ -2271,12 +2276,36 @@ export function mergeRepairedPeople(
   }
   const have = parseRecurringPeople(people.join("\n"), opts);
   const viewerNow = parseViewerPerson(viewer.join("\n"), opts);
+  // A person's sex as their name gives it, else their look; their roles in one spelling each.
+  const sexOf = (r: RecurringPerson) => namedPeople(r.name)?.sex ?? sexOfLook(r.look);
+  const rolesOf = (r: RecurringPerson) =>
+    (namedPeople(r.name)?.people ?? []).filter(x => x.kind === "role").map(x => sameRole(x.noun));
+  let owedNow = opts.uncovered;
   for (const p of newPeople) {
     if (used.has(p) || people.length >= MAX_RECURRING_PEOPLE || lookGaps(p.look).length > 1) continue;
     const key = personKey(p.name);
     if (have.some(h => personKey(h.name) === key) || (viewerNow && personKey(viewerNow.name) === key)) continue;
-    // The same role and sex as someone already written is them, renamed — never a second person.
-    if (matchRecurringPeople(p.name, 1, have).length) continue;
+    // Someone already written, renamed, is never a second person: matched the way a picture's
+    // label is, or the same role or relation in another word ("my mom" for "my mother"). But a
+    // look that says the other sex is someone else — "the passenger in row fourteen", a man, is
+    // not "the passenger in the empty row", a woman, though a sexless name matches by role alone.
+    const sex = sexOf(p);
+    const fits = (h: RecurringPerson) => {
+      const s = sexOf(h);
+      return !s || !sex || s === sex;
+    };
+    if (matchRecurringPeople(p.name, 1, have).some(fits)) continue;
+    const roles = rolesOf(p);
+    if (roles.length && have.some(h => fits(h) && rolesOf(h).some(r => roles.includes(r)))) continue;
+    // Only the people the check found missing — not a padded cast. A role is owed once; a "he" or
+    // "she" run is one person each, so a second run of "he" may still take a second man (job 400:
+    // the man in the card aisle, then the essay's author fourteen sentences on).
+    if (owedNow) {
+      const covers = owedNow.filter(f => !uncoveredPeople([f], [p]).length);
+      if (!covers.length) continue;
+      const pronoun = covers.find(f => f.cue === "she" || f.cue === "he");
+      owedNow = owedNow.filter(f => !covers.includes(f) || ((f.cue === "she" || f.cue === "he") && f !== pronoun));
+    }
     people.push(`PERSON ${p.name}: ${p.look}`);
     have.push(p);
     added.push(p.name);
@@ -2303,7 +2332,7 @@ async function repairPeopleLines(
       effort: planningEffort("PROPS_EFFORT"),
       step: "Props list (people)",
     });
-    const merged = mergeRepairedPeople(lines, owed.incomplete, r.text, opts);
+    const merged = mergeRepairedPeople(lines, owed.incomplete, r.text, { ...opts, uncovered: owed.uncovered });
     opts.onNote?.(
       `people lines asked for again (${[
         owed.uncovered.length ? `followed with no line: ${owed.uncovered.map(f => f.cue).join(", ")}` : "",

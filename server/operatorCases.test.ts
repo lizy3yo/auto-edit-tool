@@ -5818,3 +5818,30 @@ describe("the people the story follows keep one look, and 'you' is read from wha
     expect(peopleOwed(robins, { people: [], viewer: [sleeper] }, { hostName: "Walter Wren" })).toEqual({ uncovered: [], incomplete: [] });
   });
 });
+
+describe("the repair keeps job 410's man beside the woman passenger, and adds no one it was not asked for (review)", () => {
+  const woman = "a woman in her seventies, short white hair, a cream cardigan over a blue floral blouse, grey slacks";
+  const man = "a man in his seventies, balding grey hair, an olive-green jacket over a checked shirt, khaki trousers";
+
+  it("job 410: 'the passenger in row fourteen', a man, is added though his name matches her role", async () => {
+    const { mergeRepairedPeople } = await import("./shotList");
+    const merged = mergeRepairedPeople(
+      { people: [`PERSON the passenger in the empty row: ${woman}`], viewer: [] },
+      [],
+      `PERSON the passenger in row fourteen: ${man}`,
+      { uncovered: [{ cue: "he", sex: "m", sentences: [2, 3] }] }
+    );
+    expect(merged.added).toEqual(["the passenger in row fourteen"]);
+  });
+
+  it("clean: a line for someone the check did not find missing is never added", async () => {
+    const { mergeRepairedPeople } = await import("./shotList");
+    const merged = mergeRepairedPeople(
+      { people: [`PERSON the woman passenger: ${woman}`, `PERSON the man passenger: ${man}`], viewer: [] },
+      [],
+      "PERSON the flight attendant: a woman in her thirties, dark hair in a low bun, a navy dress",
+      { uncovered: [] }
+    );
+    expect(merged.added).toEqual([]);
+  });
+});
