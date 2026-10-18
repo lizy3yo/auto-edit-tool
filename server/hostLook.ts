@@ -643,9 +643,13 @@ const joinPeople = (phrases: string[]): string =>
  * The description's people with the planner's own words for the ones it named: the same noun first
  * ("a passenger" is the planner's "a male passenger"), then a plain person, a group or a planner's
  * proper name for anyone with no sex against it ("a man" is "a male passenger", "a woman" is never
- * one). The host by name or word is never matched to someone else. Pure.
+ * one). The host by name or word is never matched to someone else, and a role the host gives
+ * themself or an owner takes a planner's plain person only when no one else in the picture can: the
+ * planner's person is by definition someone else, so its "a man" beside "a flight attendant" and "a
+ * passenger" on an attendant's channel is the passenger, and the attendant is left to be the host.
+ * Pure.
  */
-function mergeCast(desc: NamedPerson[], planner: CastMember[]): CastMember[] {
+function mergeCast(desc: NamedPerson[], planner: CastMember[], selfRoles: string[] = []): CastMember[] {
   const used = new Set<number>();
   const out: CastMember[] = desc.map(d => ({ ...d, planner: false }));
   const take = (i: number, fits: (p: CastMember) => boolean) => {
@@ -657,11 +661,13 @@ function mergeCast(desc: NamedPerson[], planner: CastMember[]): CastMember[] {
     out[i] = out[i].count > planner[k].count ? { ...out[i], planner: true } : planner[k];
   };
   desc.forEach((d, i) => take(i, p => !!p.noun && p.noun === d.noun));
-  out.forEach((d, i) => {
-    if (d.planner || (d.kind === "self" && HOST_WORD.test(d.phrase))) return;
-    const plain = (k: CastMember["kind"]) => k === "generic" || k === "group";
-    take(i, p => !(p.sex && d.sex && p.sex !== d.sex) && (plain(d.kind) || plain(p.kind) || p.kind === "named"));
-  });
+  const plain = (k: CastMember["kind"]) => k === "generic" || k === "group";
+  const hostish = (d: CastMember) => d.kind === "self" || (d.kind === "role" && selfRoles.includes(d.noun));
+  for (const late of [false, true])
+    out.forEach((d, i) => {
+      if (hostish(d) !== late || d.planner || (d.kind === "self" && HOST_WORD.test(d.phrase))) return;
+      take(i, p => !(p.sex && d.sex && p.sex !== d.sex) && (plain(d.kind) || plain(p.kind) || p.kind === "named"));
+    });
   return out;
 }
 
@@ -669,10 +675,14 @@ function mergeCast(desc: NamedPerson[], planner: CastMember[]): CastMember[] {
  * Which one of a picture's people is the HOST: a role the host gives themself ("a plumber" on a
  * plumber's channel), else the host by name or word, else an owner, a vendor or a crafter (the
  * words `SELF_NOUNS` makes the host in a picture of one). Only one person, never a crowd of them,
- * never "another nurse", and never someone the planner named as someone else. -1 for nobody. Pure.
+ * never "another nurse", and never someone the planner named as someone else. Never someone whose
+ * words give a sex the host's look does not have: "a male flight attendant serving a woman
+ * passenger" on a woman attendant's channel is a colleague, and drawing him from her look would
+ * ask for a man with her hair and clothes. -1 for nobody. Pure.
  */
-function hostIn(members: CastMember[], selfRoles: string[] = []): number {
-  const one = (m: CastMember) => m.count === 1 && !m.planner && !ANOTHER_ONE.test(m.phrase);
+function hostIn(members: CastMember[], selfRoles: string[] = [], hostSex?: "f" | "m"): number {
+  const one = (m: CastMember) =>
+    m.count === 1 && !m.planner && !ANOTHER_ONE.test(m.phrase) && !(hostSex && m.sex && m.sex !== hostSex);
   const tiers: ((m: CastMember) => boolean)[] = [
     m => m.kind === "role" && selfRoles.includes(m.noun),
     m => m.kind === "self" && HOST_WORD.test(m.phrase),
@@ -726,7 +736,7 @@ export function castOfPicture(
         : named.people.map(p => ({ ...p, planner: true }));
     asWritten = { who: planner, count: Math.max(plannerCount, desc?.count ?? 1) };
     merged = !!desc && desc.count > plannerCount;
-    members = merged ? mergeCast(desc!.people, theirs) : theirs;
+    members = merged ? mergeCast(desc!.people, theirs, opts.selfRoles) : theirs;
   } else {
     const other = someoneElse(text, opts);
     if (other && !desc) return other;
@@ -736,7 +746,7 @@ export function castOfPicture(
     // a plumber's channel) are still two: one of them is someone else, never both from one photo.
     asWritten = other ?? { who: said(members), count: total(members) };
   }
-  const at = opts.hostLed && total(members) >= 2 ? hostIn(members, opts.selfRoles) : -1;
+  const at = opts.hostLed && total(members) >= 2 ? hostIn(members, opts.selfRoles, sexOfLook(opts.look)) : -1;
   if (at < 0) return merged ? { who: said(members), count: total(members) } : asWritten;
   const rest = members.filter((_, k) => k !== at);
   return { who: said(rest), count: total(rest), host: members[at].phrase };

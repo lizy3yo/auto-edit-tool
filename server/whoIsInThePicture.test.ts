@@ -568,4 +568,30 @@ describe("everyone in a picture of someone else gets a person clause (job 399 sc
     expect(s.otherPerson).toBe("an older woman");
     expect(s.showSubject).toBe("an older woman at the window, framed from the chin down");
   });
+
+  it("the host among others is never someone the words give the other sex, nor the planner's plain person when another fits", () => {
+    const nurse = { look: WOMAN, hostLed: true, selfRoles: ["nurse"] };
+    // A man in the host's own job on a woman's channel is a colleague: drawn from her look he would
+    // be a man with her hair and clothes.
+    expect(castOfPicture("a male nurse helping an older woman out of bed", "an older woman", nurse)).toEqual({
+      who: "a male nurse and an older woman",
+      count: 2,
+    });
+    const attendant = { look: WOMAN, hostLed: true, selfRoles: ["attendant"] };
+    expect(castOfPicture("a male flight attendant serving a woman passenger", undefined, attendant)?.host).toBeUndefined();
+    // The same job with no sex in its words, or the sex the host has, is still the host.
+    expect(castOfPicture("a nurse helping an older man out of bed", "an older man", nurse)).toEqual({ who: "an older man", count: 1, host: "a nurse" });
+    expect(castOfPicture("a woman nurse helping an older man out of bed", "an older man", nurse)?.host).toBe("a woman nurse");
+    // A look that gives no sex keeps no one out.
+    expect(castOfPicture("a male nurse helping an older woman out of bed", "an older woman", { ...nurse, look: "dark hair, navy scrubs" })?.host).toBe("a male nurse");
+    // The planner's plain "a man" is someone else, so it is the passenger, not the host's own job
+    // (job 399 scene 8 with a plainer planner): the attendant is left to be the host.
+    expect(castOfPicture("a flight attendant speaking quietly with a passenger in the aisle", "a man", attendant)).toEqual({
+      who: "a man",
+      count: 1,
+      host: "a flight attendant",
+    });
+    // With nobody else it could be, the host's job still takes the planner's person (it said so).
+    expect(castOfPicture("a flight attendant speaking with a man", "a woman", attendant)).toEqual({ who: "a woman and a man", count: 2 });
+  });
 });
