@@ -5667,3 +5667,184 @@ describe("the film never ends on a host shot under a second (the audit, 2026-10-
     expect(closingFoldTarget(notTail, 1)).toBe(-1);
   });
 });
+
+describe("the graphics planner sees the picture (round 13 verification films, 2026-10-18)", () => {
+  // The planner read each scene as "#22 1:40.7-1:49.9 B-ROLL: <words>": time, kind and words, never
+  // what the picture shows. 409: "Paulinus" (the man the essay was written TO, named over the picture)
+  // went on the still of Seneca writing, labelled "Seneca" 2 s earlier. 408: a full-screen Versus card
+  // hid the whole of scene 3, a paid video in production. 410: a full-screen StepCards card hid all
+  // three step pictures for 8.3 s. Plans, words and scenes are the stored ones (local DB, read only).
+  const words = (s: string) =>
+    s.split(" ").map(t => {
+      const [text, range] = t.split("@");
+      const [start, end] = range.split("-").map(Number);
+      return { text, start, end };
+    });
+  /** The model answers `first`, then repairs to `repaired` (the cues that passed — a repair returns
+   * the whole list), then adds nothing; what it was told is kept. */
+  const asking = (first: object[], repaired: object[] = []) => {
+    const told: string[] = [];
+    const ask = async (_system: string, messages: { content: string }[]) => {
+      told.push(messages[messages.length - 1].content);
+      return JSON.stringify({ cues: told.length === 1 ? first : told.length === 2 ? repaired : [] });
+    };
+    return { ask, told };
+  };
+  /** A storyboard scene as `filmLayoutOf` reads it, its picture through `pictureOf`. */
+  const shot = async (index: number, a: number, b: number, s: Record<string, unknown> = {}) => {
+    const { pictureOf } = await import("../graphics/src/plan/pictures");
+    return { index, narrationStartSec: a, narrationEndSec: b, hostPresent: !!s.hostPresent, cta: !!s.cta, split: false, hostOpener: false, ...pictureOf(s) };
+  };
+  /** The same film as the planner read it before: no picture fields. */
+  const blind = (film: { scenes: object[] }) => ({
+    scenes: film.scenes.map(s => {
+      const { shows: _a, person: _b, things: _c, video: _d, listItem: _e, ...rest } = s as Record<string, unknown>;
+      return rest as unknown as { index: number; narrationStartSec: number; narrationEndSec: number };
+    }),
+  });
+
+  // 409, 1:40.9-1:57.8, as heard.
+  const seneca = words(
+    "2,000@100.895-101.175 years@101.215-101.455 ago,@101.535-101.835 a@102.175-102.215 man@102.275-102.516 named@102.576-102.816 Lucius@102.916-103.456 Anaeus@103.616-104.036 Seneca@104.096-104.616 wrote@104.836-105.056 a@105.076-105.116 short,@105.256-105.596 furious,@105.976-106.597 loving@106.917-107.257 essay@107.417-107.797 to@107.877-107.997 a@108.057-108.097 man@108.157-108.377 named@108.437-108.677 Paulinus,@108.757-109.437 the@109.977-110.077 official@110.117-110.538 in@110.618-110.678 charge@110.738-111.038 of@111.078-111.138 Rome's@111.218-111.538 grain@111.598-111.918 supply,@111.958-112.438 busy,@112.978-113.358 important,@113.698-114.278 and@114.679-114.779 worn@114.859-115.219 down@115.279-115.539 to@115.599-115.719 the@115.739-115.839 rims.@115.959-116.299 Seneca@117.415-117.835"
+  );
+  const senecaFilm = async () => ({
+    scenes: [
+      await shot(21, 94.7266, 100.675, { stillImage: true, showSubject: "the host writing a short numbered list of seven lines on a notepad at his desk" }),
+      await shot(22, 100.675, 109.896, { stillImage: true, showSubject: "a man in an off-white wool toga draped over his left shoulder in deep folds, writing on a scroll with a reed pen by lamplight, seen from the side", otherPerson: "Seneca, a Roman writer" }),
+      await shot(23, 109.896, 117.23, { stillImage: true, showSubject: "a tired official in an off-white draped toga sitting among stacked scrolls beside sacks of grain, seen from the side", otherPerson: "a Roman grain official" }),
+      await shot(24, 117.23, 119.963, { hostPresent: true }),
+    ],
+  });
+  const senecaCuts = [94.7266, 100.675, 109.896, 117.23];
+  const senecaName = { id: "seneca-name", end: "Seneca wrote a short,", props: { at: "@Seneca", text: "Seneca" }, start: "Seneca wrote a short, furious, loving", endPad: 0.3, startPad: -0.15, template: "SmallLabel" };
+  const paulinus = { id: "paulinus-label", end: "a man named Paulinus,", props: { at: "@Paulinus", text: "Paulinus" }, start: "to a man named Paulinus,", endPad: 0.3, startPad: -0.15, template: "SmallLabel" };
+
+  it("409: the planner is told who the picture shows; 'Seneca' on Seneca is kept, 'Paulinus' on him is refused and the repair told why", async () => {
+    const { planGraphics, userPrompt } = await import("../graphics/src/plan/planner");
+    const film = await senecaFilm();
+    expect(userPrompt(film, [], seneca)).toContain(
+      "#22 1:40.7-1:49.9 B-ROLL STILL {shows: a man in an off-white wool toga draped over his left shoulder in deep folds, writing on a scroll with a reed pen by lamplight, seen from…; person: Seneca, a Roman writer}: "
+    );
+    const { ask, told } = asking([senecaName, paulinus], [senecaName]);
+    const out = await planGraphics({ words: seneca, cuts: senecaCuts, film, ask, ensureIcon: async () => true });
+    expect(out.cues.map(c => c.id)).toEqual(["seneca-name"]);
+    expect(out.rounds[0].problems).toEqual([{ cue: "paulinus-label", problem: expect.stringMatching(/^"Paulinus" is not what the picture under it shows — scene #22 shows "Seneca, a Roman writer"/) }]);
+    expect(told[1]).toContain('paulinus-label: "Paulinus" is not what the picture under it shows');
+  });
+
+  it("409 as the planner read it before (no picture fields): 'Paulinus' is still refused — one picture, one name", async () => {
+    const { planGraphics } = await import("../graphics/src/plan/planner");
+    const { ask } = asking([senecaName, paulinus], [senecaName]);
+    const out = await planGraphics({ words: seneca, cuts: senecaCuts, film: blind(await senecaFilm()), ask, ensureIcon: async () => true });
+    expect(out.cues.map(c => c.id)).toEqual(["seneca-name"]);
+    expect(out.rounds[0].problems).toEqual([{ cue: "paulinus-label", problem: expect.stringMatching(/^the picture of scene #22 is already labelled "Seneca" \(seneca-name\) — one picture, one name/) }]);
+  });
+
+  // 408, 0:02.4-0:21.8, as heard.
+  const bathroom = words(
+    "that@2.431-2.572 little@2.652-2.872 stretch@2.932-3.212 of@3.232-3.292 tile@3.392-3.752 between@3.812-4.092 the@4.132-4.212 bowl@4.272-4.572 and@4.652-4.752 the@4.772-4.852 wall.@4.892-5.192 In@5.832-5.912 most@5.972-6.172 American@6.232-6.632 bathrooms,@6.672-7.212 it@7.453-7.513 is@7.573-7.653 empty.@7.813-8.173 In@8.793-8.873 a@8.913-8.953 German@9.053-9.413 bathroom,@9.453-9.953 usually,@10.313-10.653 a@11.113-11.153 small@11.233-11.493 bin@11.573-11.833 stands@11.893-12.173 there,@12.233-12.454 with@12.714-12.834 a@12.894-12.934 lid.@12.974-13.234 It@13.894-13.954 is@13.994-14.054 the@14.094-14.194 answer@14.314-14.574 to@14.614-14.734 one@14.934-15.054 plain@15.154-15.474 sentence@15.554-16.014 the@16.054-16.174 water@16.214-16.514 utilities@16.594-17.074 in@17.155-17.215 Germany@17.255-17.675 have@17.715-17.855 repeated@17.895-18.375 for@18.455-18.575 years.@18.655-19.035 The@19.675-19.775 toilet@19.855-20.255 is@20.435-20.515 not@20.675-20.955 a@21.075-21.115 trash@21.175-21.475 can.@21.495-21.775"
+  );
+  const bin = "a small white plastic bin with a closed hinged lid on pale beige tile floor beside the base of a white porcelain toilet, water swirling in the bowl as it flushes";
+  const bathroomFilm = async (thirdIsStill = false) => ({
+    scenes: [
+      await shot(1, 0, 2.1165, { hostPresent: true }),
+      await shot(2, 2.1165, 7.28991, { objectMotion: true, showSubject: bin, keyThing: "bin", otherKeyThings: ["toilet"] }),
+      await shot(3, 7.28991, 13.7519, { objectMotion: true, stillImage: thirdIsStill, showSubject: `${bin}, a close-up of one detail of it filling the frame`, keyThing: "bin", otherKeyThings: ["toilet"] }),
+      await shot(4, 13.7519, 22.2734, { hostPresent: true }),
+    ],
+  });
+  const bathroomCuts = [2.1165, 7.28991, 13.7519];
+  const versus = {
+    id: "american-vs-german-floor",
+    end: "stands there, with a lid.",
+    props: {
+      left: { at: "@In most American bathrooms", say: "In most American bathrooms, it is empty", sub: "It is empty", title: "American bathroom" },
+      right: { at: "@In a German bathroom", say: "a small bin stands there, with a lid", sub: "A small bin, with a lid", title: "German bathroom" },
+      kicker: "Beside the toilet",
+      winner: "none",
+    },
+    start: "In most American bathrooms, it",
+    endPad: 0.3,
+    startPad: -0.15,
+    template: "Versus",
+  };
+
+  it("408: the Versus card that hid the whole of video scene 3 is refused; told it is a VIDEO, the repair is pointed over the footage", async () => {
+    const { planGraphics, userPrompt } = await import("../graphics/src/plan/planner");
+    const film = await bathroomFilm();
+    expect(userPrompt(film, [], bathroom)).toMatch(/#3 0:07\.3-0:13\.8 B-ROLL VIDEO \{shows: a small white plastic bin/);
+    const { ask, told } = asking([versus]);
+    const out = await planGraphics({ words: bathroom, cuts: bathroomCuts, film, ask, ensureIcon: async () => true });
+    expect(out.cues).toEqual([]);
+    expect(out.rounds[0].problems).toEqual([
+      { cue: "american-vs-german-floor", problem: expect.stringMatching(/^Versus hides the picture, and scene #3 is a moving VIDEO: it would be in view only 0\.00 s of its 6\.46 s \(at least 1\.5 s\)/) },
+    ]);
+    expect(told[1]).toContain("show the line over the footage");
+  });
+
+  it("408: the same card over the same words is kept when scene 3 is a still, and when the film does not say (as before)", async () => {
+    const { planGraphics } = await import("../graphics/src/plan/planner");
+    for (const film of [await bathroomFilm(true), blind(await bathroomFilm())]) {
+      const out = await planGraphics({ words: bathroom, cuts: bathroomCuts, film, ask: asking([versus]).ask, ensureIcon: async () => true });
+      expect(out.cues.map(c => c.id)).toEqual(["american-vs-german-floor"]);
+      expect(out.rounds[0].problems).toEqual([]);
+    }
+  });
+
+  // 410, 2:21.1-2:29.1, as heard: "So wait until everyone's been served, then catch a flight attendant
+  // as they pass or step back to the galley and phrase it as an offer." — one picture per step.
+  const snack = words(
+    "So@141.115-141.275 wait@141.355-141.555 until@141.595-141.875 everyone's@142.015-142.415 been@142.455-142.615 served,@142.675-143.115 then@143.496-143.716 catch@143.756-143.996 a@144.036-144.056 flight@144.096-144.336 attendant@144.356-144.736 as@144.796-144.876 they@144.916-145.056 pass@145.116-145.556 or@146.076-146.276 step@146.356-146.596 back@146.636-146.796 to@146.836-146.936 the@146.956-147.016 galley@147.056-147.477 and@147.757-147.857 phrase@147.917-148.197 it@148.257-148.317 as@148.417-148.497 an@148.537-148.597 offer.@148.737-149.057"
+  );
+  const snackFilm = async (steps = true) => ({
+    scenes: [
+      await shot(28, 128.869, 141.288, { stillImage: true, showSubject: "a flight attendant handing pretzel bags to passengers in the last rows of the cabin", otherPerson: "a flight attendant and passengers", keyThing: "pretzel bag" }),
+      await shot(29, 141.288, 143.286, { stillImage: true, listCut: steps, listKind: "steps", showSubject: "rows of passengers each holding a snack and a drink" }),
+      await shot(30, 143.286, 147.619, { stillImage: true, listCut: steps, listKind: "steps", showSubject: "an older passenger seen from behind standing at the galley speaking to a flight attendant", otherPerson: "an older passenger and a flight attendant" }),
+      await shot(31, 147.619, 149.553, { stillImage: true, listCut: steps, listKind: "steps", showSubject: "a flight attendant smiling and handing a cookie to an older passenger at the galley", otherPerson: "a flight attendant and an older passenger", keyThing: "cookie" }),
+      await shot(32, 149.553, 163.498, { hostPresent: true, cta: true }),
+    ],
+  });
+  const snackCuts = [128.869, 141.288, 143.286, 147.619, 149.553];
+  const stepCards = {
+    id: "snack-steps",
+    end: "phrase it as an offer.",
+    props: {
+      steps: [
+        { at: "@wait until everyone's been served", text: "Wait until all served" },
+        { at: "@then catch a flight attendant", text: "Ask in aisle or galley" },
+        { at: "@and phrase it as an offer", text: "Phrase it as offer" },
+      ],
+      kicker: "The second snack",
+    },
+    start: "wait until everyone's been served,",
+    endPad: 0.1,
+    startPad: -0.15,
+    template: "StepCards",
+  };
+
+  it("410: the step card over the three step pictures is refused, and the repair is pointed to StepLabels over the footage", async () => {
+    const { planGraphics, userPrompt } = await import("../graphics/src/plan/planner");
+    const film = await snackFilm();
+    expect(userPrompt(film, [], snack)).toContain(
+      "#30 2:23.3-2:27.6 B-ROLL STILL, STEP PICTURE {shows: an older passenger seen from behind standing at the galley speaking to a flight attendant; person: an older passenger and a flight attendant}: "
+    );
+    const { ask, told } = asking([stepCards]);
+    const out = await planGraphics({ words: snack, cuts: snackCuts, film, ask, ensureIcon: async () => true });
+    expect(out.cues).toEqual([]);
+    expect(out.rounds[0].problems).toEqual([
+      { cue: "snack-steps", problem: "StepCards hides the pictures of 3 spoken steps (scenes #29, #30, #31), each drawn for its own step. Show them over the footage, which leaves every picture in view — StepLabels for the steps, a DimCaption for a line — or drop it" },
+    ]);
+    expect(told[1]).toContain("StepLabels");
+  });
+
+  it("410: the same steps as StepLabels over those pictures are kept; the card is kept where the steps have no pictures of their own", async () => {
+    const { planGraphics } = await import("../graphics/src/plan/planner");
+    const labels = { ...stepCards, id: "snack-step-labels", template: "StepLabels", props: { steps: stepCards.props.steps } };
+    const over = await planGraphics({ words: snack, cuts: snackCuts, film: await snackFilm(), ask: asking([labels]).ask, ensureIcon: async () => true });
+    expect(over.rounds[0].problems).toEqual([]);
+    expect(over.cues.map(c => c.id)).toEqual(["snack-step-labels"]);
+    const card = await planGraphics({ words: snack, cuts: snackCuts, film: await snackFilm(false), ask: asking([stepCards]).ask, ensureIcon: async () => true });
+    expect(card.cues.map(c => c.id)).toEqual(["snack-steps"]);
+  });
+});

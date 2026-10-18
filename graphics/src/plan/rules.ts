@@ -25,6 +25,23 @@ export type LayoutScene = {
   hostPanel?: HostPanel;
   /** The locked cold open. Where the name tag goes when the film does not say (`nameTagRange`). */
   hostOpener?: boolean;
+  /**
+   * WHAT A B-ROLL PICTURE SHOWS (`pictureOf` in ./pictures.ts; unset on a host take, a CTA beat, and
+   * wherever the film does not say — the lab's older cached jobs, a test). The planner used to see
+   * only "B-ROLL" and the words, so job 409 put the label "Paulinus" — the man the essay was written
+   * TO, spoken over the picture — on the picture of Seneca writing, labelled "Seneca" 2 s earlier.
+   * `shows`: the shot list's subject (the picture's own description when it has none); `person`:
+   * the someone-else it shows; `things`: the key things it shows.
+   */
+  shows?: string;
+  person?: string;
+  things?: string[];
+  /** A MOVING clip (a paid video in production), not a still with a slow zoom: job 408's Versus card
+   * hid the whole of one. Unset where the film does not say. */
+  video?: boolean;
+  /** The picture of ONE item ("item") or ONE step ("step") of a spoken list, drawn for it alone:
+   * job 410's full-screen step card hid all three for 8.3 s. */
+  listItem?: "item" | "step";
 };
 export type FilmLayout = {
   scenes: LayoutScene[];

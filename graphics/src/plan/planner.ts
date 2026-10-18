@@ -24,6 +24,7 @@ import { CARD_HOLD_MAX_SEC, CueError, LINGER_SEC, MIN_ON_SCREEN_SEC, MIN_SHOT_SE
 import { resolveSets, templateById } from "../registry";
 import { FPS } from "../theme";
 import { MIN_GAP_SEC, checkRules, nameTagRange, type FilmLayout, type LayoutScene } from "./rules";
+import { VIDEO_MIN_SEEN_SEC, pictureNote, pictureProblem } from "./pictures";
 
 /** The longest a graphic may sit still between one of its words and the next (Hank's job 382: a
  * number graphic opened on "But the one I was proudest of" and waited 9 s for the number). */
@@ -125,12 +126,12 @@ EVERY GRAPHIC AND THE MOMENT THAT CALLS FOR IT
 Each line below is "Template — appears whenever the script…: props". Use a template EVERY time its
 moment happens, as often as the script allows. Nothing here is limited to once.
 
-Full-screen cards — replace the picture, so ONLY inside a b-roll stretch:
+Full-screen cards — replace the picture, so ONLY inside a b-roll stretch, never hiding a whole VIDEO or a list's own pictures:
 - Statement — sums up a point in one short line, or lands a punchline: {"kicker": "2-4 word label", "headline": ONE WHOLE SENTENCE as said (4-12 words), "emphasis"}
 - MythTruth — states what people believe, then corrects it: {"myth": ONE WHOLE SENTENCE (≤14 words), "truth": ONE WHOLE SENTENCE (≤14 words), "emphasis"}
 - Versus — compares two kinds or options: {"kicker", "left": {"icon" (optional),"title" (1-3 words),"sub" (≤6 words),"say","at"}, "right": {same}, "winner": "left"|"right"|"none"}
 - BigNumber — says a number that matters (a time, an amount, a count): {"kicker", "prefix": "$" (a currency sign, if any), "value": number, "unit": "1-2 words", "at": "@the spoken number", "line": phrase, "countSec": 0.6 for small numbers}. Start it on the sentence that holds the number, not sentences before.
-- StepCards — gives 2-4 steps the viewer should do: {"kicker", "steps": [{"text" (≤4 words), "icon" (optional), "at": "@words"}]}
+- StepCards — gives 2-4 steps the viewer should do, when the steps have no pictures of their own (over STEP PICTURE scenes, StepLabels): {"kicker", "steps": [{"text" (≤4 words), "icon" (optional), "at": "@words"}]}
   (steps are done ONE AFTER ANOTHER: a choice the line offers — "…, or …", "alternatively" — is part of the
   step before it, never a step of its own: "Call the office, or send an email" is ONE step, "Call or email")
 - BeforeAfter — an old way or state replaced by a new one: {"kicker", "before": {"icon" (optional),"label","at"}, "after": {"icon" (optional),"label","at"}}
@@ -165,7 +166,7 @@ On top of the footage:
 - IconLabels — names 1-3 right things to look for or buy: {"items": [{"icon" (optional),"text" (1-3 words),"say","at"}]}
 - IconCallout — makes one short point that one object says well, ONLY when one emoji IS that object (else a
   DimCaption) (over b-roll): {"icon" (required), "phrase": phrase (≤8 words), "emphasis"}
-- SmallLabel — names the thing in the picture when the line names it (over b-roll): {"text": "1-4 words as said", "at": "@words"}
+- SmallLabel — names the thing or person the picture SHOWS (its shows / person / thing) when the line names it, one name per picture (over b-roll): {"text": "1-4 words as said", "at": "@words"}
 - NumberLabel — says two values together: two compared, a range, or one for each of two things (over b-roll): {"kicker", "a": {"label","value","at"}, "b": {"label","value","at"}, "compare": true (optional)}
   ("compare": true draws "vs" between the two, ONLY when the line weighs one value against the other — then
   and now, what was planned and what it took, this one against that one. A range ("$20 to $50"), two values
@@ -212,6 +213,15 @@ What every graphic must keep:
   shot. Either it stays to the picture change — after its last word only the rest of its own sentence is
   said, and the change comes within ${CARD_HOLD_MAX_SEC} s of that sentence's end — or the shot plays on ${MIN_SHOT_SEC} s or
   more after it leaves (the change at least ${(LINGER_SEC + MIN_SHOT_SEC).toFixed(1)} s after its last word). Otherwise show that line over the footage.
+- WHAT THE PICTURE SHOWS. Each b-roll scene in the list says whether its picture is a STILL or a moving
+  VIDEO, whether it is the picture of ONE list item or step, and {what it shows}. A SmallLabel names what
+  ITS picture shows (its shows / person / thing), never a name the line says while the picture shows
+  someone or something else — that name goes on words said over the picture that shows it, or nowhere —
+  and one picture takes one name. A full-screen card or a Quote never hides a VIDEO whole: leave at least
+  ${VIDEO_MIN_SEEN_SEC} s of it in view (half of a shorter one), or show the line over the footage. A spoken list or steps
+  whose items each have their own picture (LIST ITEM / STEP PICTURE scenes) goes OVER the footage —
+  StepLabels for steps, a ListWindow, Checklist or IconLabels for things — never a full-screen card that
+  hides those pictures.
 ${opts.kept ? `\nSOME GRAPHICS ARE ALREADY PLACED AND APPROVED (listed in the message). Keep them exactly; add every other\nmoment around them, never overlapping them.\n` : ""}
 Answer with JSON only: {"cues": [ ... ]} in film order, NEW graphics only. Each cue:
 {"id": "short-kebab-name", "template": "...", "start": "the exact spoken words it starts on (4-7 words, unique enough to find)",
@@ -264,7 +274,10 @@ export function userPrompt(film: FilmLayout, kept: ResolvedCue[], words: Word[] 
   const layout = film.scenes
     .map((s, k) => {
       const tagUp = nameTag && s.narrationStartSec < nameTag[1] && s.narrationEndSec > nameTag[0] ? " [NAME TAG UP]" : "";
-      return `#${s.index} ${mmss(s.narrationStartSec)}-${mmss(s.narrationEndSec)} ${kindOf(s)}${tagUp}: ${said[k]}`;
+      // What a b-roll picture is and shows (`pictureNote`): job 409's "Paulinus" label went on the
+      // picture of Seneca because the planner read "B-ROLL" and the words, nothing more.
+      const kind = kindOf(s);
+      return `#${s.index} ${mmss(s.narrationStartSec)}-${mmss(s.narrationEndSec)} ${kind}${kind === "B-ROLL" ? pictureNote(s) : ""}${tagUp}: ${said[k]}`;
     })
     .join("\n");
   // Stretches of consecutive b-roll (no host, no CTA): where cards and picture graphics go.
@@ -284,7 +297,8 @@ export function userPrompt(film: FilmLayout, kept: ResolvedCue[], words: Word[] 
   const keptNote = kept.length
     ? `\n\nALREADY PLACED AND APPROVED (keep; do not repeat them; add around them):\n${kept.map(c => `${mmss(c.start)}-${mmss(c.end)} ${c.template} "${c.id}"`).join("\n")}`
     : "";
-  return `THE FILM, scene by scene (time, what is on screen, what is said):
+  return `THE FILM, scene by scene (time, what is on screen, what is said). A b-roll picture says whether it is a STILL
+or a moving VIDEO, whether it is the picture of ONE spoken list item or step, and {what it shows}:
 ${layout}
 
 B-ROLL STRETCHES (where cards, window graphics and graphics about the picture go):
@@ -1198,6 +1212,17 @@ export async function planGraphics(input: PlanInput): Promise<PlanResult> {
       if (blink) {
         undo();
         bad(blink[0] === spec.id ? blinkProblem(spec.template, mine, blink[1], words) : `would leave a blink of footage beside ${blink[0]} (${blink[1].sec.toFixed(2)} s of a shot alone) — move it or drop it`);
+        continue;
+      }
+      // THE PICTURE UNDER IT (`pictureProblem`): a label names what its picture shows, one name to a
+      // picture (job 409's "Paulinus" on the picture of Seneca, labelled "Seneca" 2 s before); a card
+      // never hides a video whole (job 408's Versus over scene 3) nor a spoken list's own pictures
+      // (job 410's StepCards over its three step pictures). Asked here, where the repair round can
+      // still move it or choose a template over the footage.
+      const onPicture = pictureProblem(mine, next, film, words);
+      if (onPicture) {
+        undo();
+        bad(onPicture);
         continue;
       }
       const unsaid = shownNumbers(spec).filter(n => !saidNear(n, mine.start, mine.end));
