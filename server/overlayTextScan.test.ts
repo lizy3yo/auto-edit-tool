@@ -573,6 +573,8 @@ describe("nobody behind the big QR card — the person verdict (job 402 scene 33
     expect(QR_BACKDROP_PERSON_QUESTION).toMatch(/hand, finger\s+or thumb/);
     expect(QR_BACKDROP_PERSON_QUESTION).toMatch(/even small, partly, or at an edge/);
     expect(QR_BACKDROP_PERSON_QUESTION).toMatch(/glove, sleeve, coat or shoe with nobody in it is not a person/);
+    // The prompt sends a worn thing to a stand or a dress form: that is no person to redraw for.
+    expect(QR_BACKDROP_PERSON_QUESTION).toMatch(/neither is a dress form or\s+display stand holding something worn/);
     // General: the wording names no channel's things.
     expect(QR_BACKDROP_PERSON_QUESTION).not.toMatch(/cookie|packet|passenger|attendant|cabin/i);
     expect(SHIPPED).toMatch(/hands/);

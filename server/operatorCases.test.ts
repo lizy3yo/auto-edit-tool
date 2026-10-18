@@ -3980,3 +3980,40 @@ describe("job 405 scene 33: a sleeper's shoulder asked for behind the big QR car
     expect(withoutSomeone(qr.visualPrompt)).toBe(qr.visualPrompt);
   });
 });
+
+describe("the picture behind the big QR card: a worn thing off the body, the words never a fragment", () => {
+  // The review of M6 on the stored films. Job 380's jewellery scan window asked for a chain "resting on
+  // bare collarbone and skin"; job 357's dog film for "A dog's dark, damp nose inches from a person's
+  // pant leg", which the first cut left as "A dog's dark, late afternoon light …".
+  const qr = (visualPrompt: string): StoryboardScene =>
+    ({ index: 16, cta: true, qrHero: true, stillImage: true, visualPrompt }) as StoryboardScene;
+
+  it("job 380: the chain stays, the bare collarbone goes, and the prompt puts it on a stand", async () => {
+    const { QR_BACKDROP_CLAUSE } = await import("./longformVideo");
+    const chain = qr(
+      "A slim gold chain, twenty-eight to thirty-two inches, hanging past the chest in one unbroken vertical line, resting on bare collarbone and skin in a bright airy dressing room with a large mirror and soft sheer-curtained window."
+    );
+    expect(guardPitchVisuals([chain])).toEqual([16]);
+    expect(chain.visualPrompt).toBe(
+      "A slim gold chain, twenty-eight to thirty-two inches, hanging past the chest in one unbroken vertical line."
+    );
+    expect(QR_BACKDROP_CLAUSE).toMatch(/jewellery, clothing, shoes — lies flat, hangs, or sits on a stand or dress form/);
+    expect(buildStillPrompt(chain)).toContain(QR_BACKDROP_CLAUSE);
+  });
+
+  it("job 357: a picture of a person's leg is swapped whole, never cut to a fragment", async () => {
+    const { withoutSomeone } = await import("./longformVideo");
+    const words =
+      "A dog's dark, damp nose inches from a person's pant leg at the entry threshold, late afternoon light soft across worn fabric, the dog's breathing steady and unhurried, the moment suspended in calm attention.";
+    expect(withoutSomeone(words)).toBeUndefined();
+    const nose = qr(words);
+    const scenes = [{ index: 15, narration: "n", stillImage: true, visualPrompt: "A dog's water bowl by the back door" } as StoryboardScene, nose];
+    guardPitchVisuals(scenes);
+    expect(nose.visualPrompt).toBe("A dog's water bowl by the back door");
+  });
+
+  it("a woodwork backdrop that only names a joint or a way of making keeps its picture", () => {
+    const box = qr("Close-up of a walnut box with tight finger joints at the corner, dovetails cut by hand, resting on the bench.");
+    expect(guardPitchVisuals([box])).toEqual([]);
+  });
+});

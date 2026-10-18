@@ -2702,8 +2702,40 @@ describe("the picture behind the big QR card shows nobody (job 402 scene 33)", (
     expect(withoutSomeone("a beverage cart in the galley — a passenger reaching for a cup")).toBe(
       "a beverage cart in the galley"
     );
+    // A sentence led by someone goes whole: "the lamp on" was his lamp, a fragment on its own.
     expect(withoutSomeone("The cat sits on the sill. A man reads beside it, the lamp on.")).toBe(
-      "The cat sits on the sill. The lamp on."
+      "The cat sits on the sill."
+    );
+  });
+
+  it("never leaves a fragment of the words (jobs 357, 366, 385 — the stored films)", () => {
+    // Job 357 scene 24: the lead runs on past "dark," — a list of describing words, not a clause —
+    // and it is the dog's nose AT the person's leg: nothing of it is a picture of nobody. Cut at the
+    // comma it read "A dog's dark, late afternoon light soft across worn fabric, …".
+    expect(
+      withoutSomeone(
+        "A dog's dark, damp nose inches from a person's pant leg at the entry threshold, late afternoon light soft across worn fabric, the dog's breathing steady and unhurried, the moment suspended in calm attention."
+      )
+    ).toBeUndefined();
+    // Job 366 scene 23: the last sentence is the man, his hands with him; the full stop stays.
+    expect(
+      withoutSomeone(
+        "Dog's dark nose pressed against the shoe in a home entryway, seen from waist-down angle. Soft early-evening light from a window. Man standing still, hands relaxed at sides. Calm, intimate moment of arrival ritual."
+      )
+    ).toBe(
+      "Dog's dark nose pressed against the shoe in a home entryway, seen from waist-down angle. Soft early-evening light from a window. Calm, intimate moment of arrival ritual."
+    );
+    // Job 385 scene 23: a doing word opens its own clause, so only the hands go.
+    expect(
+      withoutSomeone(
+        "Close-up of a round white smoke alarm's back label, held in bare hands in a bedroom at night, showing the manufacture date printed clearly on the plastic surface."
+      )
+    ).toBe(
+      "Close-up of a round white smoke alarm's back label, showing the manufacture date printed clearly on the plastic surface."
+    );
+    // A sentence whose LAST clause went keeps its full stop.
+    expect(withoutSomeone("A kettle on the stove, a woman's hand on the lid. Steam rises.")).toBe(
+      "A kettle on the stove. Steam rises."
     );
   });
 
@@ -2752,6 +2784,29 @@ describe("the picture behind the big QR card shows nobody (job 402 scene 33)", (
     const corner = film({ qrHero: undefined, qrCorner: true, namedLook: undefined });
     await enhanceBrollPrompts(corner, baseParams, [33]);
     expect((mockInvoke.mock.calls[0][0] as any).userMessage).not.toContain(QR_BACKDROP_DIRECTIVE);
+  });
+
+  it("takes a worn thing off the body and keeps a thing only named for a finger (job 380, review)", () => {
+    // Job 380's scan window asked for a chain on a person: the clause with the collarbone goes, and
+    // the prompt sends the chain to a stand or a dress form (the cutaway guard's worn-things rule
+    // went with NO_FIGURES_SUFFIX, so the backdrop says it again).
+    const CHAIN =
+      "A slim gold chain, twenty-eight to thirty-two inches, hanging past the chest in one unbroken vertical line, resting on bare collarbone and skin in a bright airy dressing room with a large mirror and soft sheer-curtained window.";
+    const chain = film({ visualPrompt: CHAIN, keyThing: "chain", namedLook: undefined });
+    expect(guardPitchVisuals(chain)).toEqual([33]);
+    expect(chain[3].visualPrompt).toBe(
+      "A slim gold chain, twenty-eight to thirty-two inches, hanging past the chest in one unbroken vertical line."
+    );
+    expect(chain[3].keyThing).toBe("chain");
+    expect(buildStillPrompt(chain[3])).toMatch(/stand or dress form, never filled out as if someone wore it/);
+    expect(QR_BACKDROP_DIRECTIVE).toMatch(/stand or dress form/);
+    // A woodwork backdrop that only names a joint for the fingers is a picture of nobody: kept.
+    const BOX =
+      "Close-up of a walnut box with tight finger joints at the corner, dovetails cut by hand, resting on the bench.";
+    const box = film({ visualPrompt: BOX, keyThing: "walnut box", namedLook: undefined });
+    expect(guardPitchVisuals(box)).toEqual([]);
+    expect(box[3].visualPrompt).toBe(BOX);
+    expect(box[3].keyThing).toBe("walnut box");
   });
 
   it("names no channel's things in the wording", () => {

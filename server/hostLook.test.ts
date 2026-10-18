@@ -379,3 +379,38 @@ describe("someone in the words, narrowly — the picture behind the big QR card 
     expect(showsPerson("a coffee can full of nails on the workbench")).toBe(true);
   });
 });
+
+describe("someone in the words — never a thing named for a hand or a finger (review of M6)", () => {
+  // On the backdrop behind the big QR card a false hit swaps a good picture for a borrowed one, so
+  // the craft and clock words that only NAME a hand or a finger must not count.
+  it("never counts a joint, a way of making, a clock's hand or a fastener", () => {
+    for (const words of [
+      "Close-up of a walnut box with tight finger joints at the corner, on the bench",
+      "a finger-jointed cedar box on the bench",
+      "a cherry box with dovetails cut by hand, resting on the workbench",
+      "a quilt stitched by hand folded over a chair",
+      "spare blades kept on hand by the door",
+      "a pocket watch with its hour hand on two",
+      "the second hand ticking past twelve on a kitchen clock",
+      "a brass thumb screw on the jig",
+      "a plate of fish fingers on a table",
+      "a five-finger mitt on a shelf",
+      // Job 362's scan window: a dress form has a collarbone too; only BARE skin is a person's.
+      "A plain knit sweater draped on a dress form. A simple gold chain rests at the collarbone.",
+    ])
+      expect(namesSomeone(words)).toBe(false);
+  });
+
+  it("still counts a person's hand, finger, thumb and bare skin", () => {
+    for (const words of [
+      "one hand extending it toward a second hand reaching to receive it",
+      "a ring on her hand",
+      "a mug in hand by the window",
+      "a thumb resting on the trigger",
+      "a 9-volt battery held between bare fingertips",
+      // Job 380's scan window: a chain on a person's collarbone behind the card.
+      "A slim gold chain resting on bare collarbone and skin in a bright airy dressing room",
+    ])
+      expect(namesSomeone(words)).toBe(true);
+  });
+});

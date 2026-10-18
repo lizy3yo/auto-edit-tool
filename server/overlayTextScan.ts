@@ -467,14 +467,17 @@ export function forbiddenQuestion(forbids: string): string {
  * 401-407): job 402 scene 33's backdrop had a passenger's hand holding a packet where the card sits,
  * the fingers round the card's edge, so for 19.6 s a hand held the QR code — and the check, asked
  * only about the packet's exact look, passed it. Nothing else asks whether a picture is person-free:
- * the cutaway rule lets bare hands in, so this question is for this picture alone.
+ * the cutaway rule lets bare hands in, so this question is for this picture alone. A dress form is no
+ * person: the prompt sends worn things to one (`QR_BACKDROP_CLAUSE`), and a necklace on a stand must
+ * not be redrawn for it.
  */
 export const QR_BACKDROP_PERSON_QUESTION =
   "\n\nQUESTION 9 — person: this picture is the backdrop behind a large card laid over its middle, " +
   "and it must show NOBODY. Is a person or any part of one — a face, head, body, arm, hand, finger " +
   "or thumb, a leg or a foot — visible anywhere in the frame, even small, partly, or at an edge? A " +
-  "glove, sleeve, coat or shoe with nobody in it is not a person, and neither is a picture or " +
-  "statue of one. Answer false when no part of a person is there.";
+  "glove, sleeve, coat or shoe with nobody in it is not a person, and neither is a dress form or " +
+  "display stand holding something worn, or a picture or statue of one. Answer false when no part " +
+  "of a person is there.";
 
 /** The JSON shape, listing every question asked (`detail` only beside `missing`). */
 export function verdictShape(

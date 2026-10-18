@@ -5857,17 +5857,22 @@ export const QR_BACKDROP_DIRECTIVE =
   "IMPORTANT: this picture is the BACKDROP behind a large scan card laid over its middle — it must " +
   "be OBJECT / SETTING ONLY, with NO people, NO hands, NO fingers, arms or body parts of any kind, " +
   "even when the topic context's pictures show someone at work. Nothing is held, offered or reached " +
-  "for: the thing rests on its own, unattended, in its place.";
+  "for: the thing rests on its own, unattended, in its place. Something worn (jewellery, clothing, " +
+  "shoes) lies flat, hangs, or sits on a stand or dress form — never on a neck, wrist or body.";
 
 /**
  * The same rule in the scan-window picture's own image prompt (`buildStillPrompt`), with
  * `NO_PEOPLE_SUFFIX` in place of `NO_FIGURES_SUFFIX` — the cutaway guard lets bare hands in, and on
- * this picture a hand left at the card's edge reads as holding the code (job 402 scene 33).
+ * this picture a hand left at the card's edge reads as holding the code (job 402 scene 33). Losing
+ * that guard also lost its rule for worn things, which a jewellery film's scan window needs most —
+ * job 380's chain "resting on bare collarbone", job 387's necklace "at her collarbone" — so it is
+ * said here again.
  */
 export const QR_BACKDROP_CLAUSE =
   "This picture is the backdrop behind a large card set over its middle: nobody is in it — no " +
   "person, no hand, finger or arm anywhere, not even at an edge — and nothing is held, offered or " +
-  "reached for; whatever it shows rests on its own.";
+  "reached for; whatever it shows rests on its own. Anything worn — jewellery, clothing, shoes — " +
+  "lies flat, hangs, or sits on a stand or dress form, never filled out as if someone wore it.";
 /** With `QR_BACKDROP_CLAUSE` when the picture is drawn from earlier pictures of its thing. */
 export const QR_BACKDROP_REFERENCE_NOTE =
   "Take only the thing from the reference images, never a person or a hand holding it.";
@@ -8266,35 +8271,66 @@ export function guardPitchVisuals(
 }
 
 /**
+ * A word that opens a clause of its own after a comma — an article, a possessive, a number, a
+ * preposition, a joining word, a doing word — never the next of a list of describing words ("dark,
+ * damp nose", "soft, neutral background"). Pure.
+ */
+const OPENS_A_CLAUSE =
+  /^(?:a|an|the|its|his|her|their|our|my|your|this|that|these|those|some|each|every|both|no|one|two|three|four|five|six|seven|eight|nine|ten|several|\d\S*|with|without|beside|near|next|on|in|at|under|over|behind|against|from|by|above|below|across|around|along|through|into|onto|while|as|and|or|but|where|which|who|whose|so|then|held|set|laid|left|lit|hung|seen|shown|cut|made|built|kept|sat|stood|spread|caught|shot|taken|[a-z]{3,}(?:ing|ed))$/i;
+
+/**
  * The words with every clause that names someone taken out (`namesSomeone`), when the lead clause —
  * what the picture is OF — names nobody: job 405 scene 33's scan window, "A small tabby cat standing
  * on the bed at 3 a.m., one front paw extended mid-step across grey bedding, ears alert, the sleeping
  * person's shoulder barely visible at frame edge, bedroom dark and still", keeps its cat and loses
  * the shoulder. Undefined when the lead itself is someone or their hands (job 402 scene 33's "A
  * flight attendant's hands holding a small packet …"): nothing of it is then a picture of nobody.
- * Pure.
+ * NEVER A FRAGMENT (the review of this rule on the stored films): a sentence's lead runs on past a
+ * comma inside a list of describing words — job 357 scene 24's "A dog's dark, damp nose inches from a
+ * person's pant leg …" was cut to "A dog's dark, late afternoon light …", and is a picture of the
+ * person's leg, so it is undefined — and a later sentence whose lead names someone goes whole: what is
+ * left of it is about whoever went (job 366 scene 23's "Man standing still, hands relaxed at sides."
+ * — the hands are his). A sentence that lost its last clause keeps its full stop. Pure.
  */
 export function withoutSomeone(text: string | undefined): string | undefined {
   const t = (text ?? "").trim();
-  // Clauses and the separators between them, alternating: [clause, sep, clause, sep, clause…].
+  // Clauses and the separators between them, alternating: [clause, sep, clause, sep, clause…],
+  // gathered into sentences (a separator with no comma, semicolon or dash is a sentence break).
   const parts = t.split(/(\s*[,;]\s+|\s+[—–]\s+|(?<=[.!?])\s+(?=[A-Z]))/);
-  if (!parts[0]?.trim() || namesSomeone(parts[0])) return undefined;
-  let out = parts[0];
-  // A dropped clause takes the separator after the clause before it along; the next kept one gets it.
-  let pending: string | undefined;
-  for (let k = 2; k < parts.length; k += 2) {
-    const sep = parts[k - 1];
-    if (namesSomeone(parts[k])) {
-      pending ??= sep;
-      continue;
-    }
-    const use = pending ?? sep;
-    pending = undefined;
-    const sentence = !/[,;—–]/.test(use);
-    out += use + (sentence ? parts[k].charAt(0).toUpperCase() + parts[k].slice(1) : parts[k]);
+  const sentences: { text: string; sep: string }[][] = [];
+  for (let k = 0; k < parts.length; k += 2) {
+    const clause = { text: parts[k], sep: k ? parts[k - 1] : "" };
+    if (!k || !/[,;—–]/.test(clause.sep)) sentences.push([clause]);
+    else sentences[sentences.length - 1].push(clause);
   }
-  out = out.replace(/[,;\s]+$/, "");
-  return /[.!?]$/.test(t) && !/[.!?]$/.test(out) ? `${out}.` : out;
+  const wordCount = (c: string) => c.trim().split(/\s+/).length;
+  const opens = (c: string) => OPENS_A_CLAUSE.test(c.trim().split(/\s+/)[0]?.replace(/^\W+|\W+$/g, "") ?? "");
+  for (const s of sentences)
+    while (s.length > 1 && (wordCount(s[0].text) < 4 || !opens(s[1].text))) {
+      s[0] = { text: s[0].text + s[1].sep + s[1].text, sep: s[0].sep };
+      s.splice(1, 1);
+    }
+  if (!sentences[0][0].text.trim() || namesSomeone(sentences[0][0].text)) return undefined;
+  let out = "";
+  for (const s of sentences) {
+    if (out && namesSomeone(s[0].text)) continue;
+    // A dropped clause hands its separator to the next kept one.
+    let kept = "";
+    let pending: string | undefined;
+    for (const c of s) {
+      if (kept && namesSomeone(c.text)) {
+        pending ??= c.sep;
+        continue;
+      }
+      kept += kept ? (pending ?? c.sep) + c.text : c.text;
+      pending = undefined;
+    }
+    kept = kept.replace(/[,;\s—–]+$/, "");
+    const stop = /[.!?]$/.exec(s[s.length - 1].text)?.[0];
+    if (stop && !/[.!?]$/.test(kept)) kept += stop;
+    out += out ? s[0].sep + kept.charAt(0).toUpperCase() + kept.slice(1) : kept;
+  }
+  return out;
 }
 
 /**
