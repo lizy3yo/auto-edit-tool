@@ -1021,3 +1021,27 @@ describe("a list window is a list the narrator says, in his own words (round 10 
     expect(prompt).toContain(`never clipped like a headline, "Seat by window"`);
   });
 });
+
+describe("a row takes back only the article or possessive that opens its own noun phrase (review of A7)", () => {
+  // restoreRowGrammar used to take back EVERY article, possessive or "own" said before a row's first
+  // word, so a "say" with the verb before it came back broken: "tell her the truth" made "Her the
+  // truth", "if you own a truck" made "Own a truck".
+  it("the words before the row open its noun phrase: one article or possessive, or a possessive and its 'own'", () => {
+    expect(restoreRowGrammar("Second bag of pretzels", "a second bag of pretzels")).toBe("A second bag of pretzels"); // Helena's job 399
+    expect(restoreRowGrammar("Rest of the can", "ask her for the rest of the can")).toBe("The rest of the can");
+    expect(restoreRowGrammar("Life", "would be ordered to end his own life")).toBe("His own life");
+    expect(restoreRowGrammar("Terms", "on her own terms")).toBe("Her own terms");
+    expect(restoreRowGrammar("Grandmother's sewing box", "her grandmother's sewing box")).toBe("Her grandmother's sewing box");
+    expect(restoreRowGrammar("Sewing box", "a quilt, and her sewing box")).toBe("Her sewing box");
+    expect(restoreRowGrammar("Coffee", "pour her a coffee")).toBe("A coffee");
+  });
+
+  it("never a second article or possessive, never 'own' the verb, never 'her' the object", () => {
+    expect(restoreRowGrammar("The truth", "tell her the truth")).toBe("The truth");
+    expect(restoreRowGrammar("A truck", "if you own a truck")).toBe("A truck");
+    expect(restoreRowGrammar("Flowers", "give her flowers")).toBe("Flowers");
+    expect(restoreRowGrammar("The price", "ask her the price")).toBe("The price");
+    // between the row's own words, the spoken words always go back in: they are said in a row
+    expect(restoreRowGrammar("Ask the price", "ask her the price")).toBe("Ask her the price");
+  });
+});

@@ -540,6 +540,25 @@ const GRAMMAR_WORD = /^(?:a|an|the|his|her|its|their|my|your|our|own)$/;
 const HANGING_WORD = /^(?:a|an|the|his|her|its|their|my|your|our|own|of|in|on|at|to|for|from|with|by|into|onto|and|or|but|that|who|which|where|when)$/;
 /** A row's first letter in capitals. */
 const capitalized = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+/** An article or a possessive: one opens a noun phrase, and two never stack ("her the truth"). */
+const DETERMINER_WORD = /^(?:a|an|the|his|her|its|their|my|your|our)$/;
+/** The possessives, the only words an "own" follows ("his own life"). */
+const POSSESSIVE_WORD = /^(?:his|her|its|their|my|your|our)$/;
+
+/**
+ * Where a row starting at spoken word `i` starts once the article or possessive said right before
+ * it is taken back ("a | second bag of pretzels", "his own | life"): one of them, or a possessive and
+ * its "own" — never one before a row that opens on its own ("tell her | the truth" is not "Her the
+ * truth"), never "own" the verb ("if you own | a truck"), and "her" only where it cannot be the
+ * object of the verb before it ("pour her | coffee", "give her | flowers"): as the first word said,
+ * after "and"/"or"/a comma, or before "own". Pure.
+ */
+function leadIn(s: string[], spoken: string[], i: number): number {
+  if (DETERMINER_WORD.test(s[i])) return i;
+  const from = i > 1 && s[i - 1] === "own" && POSSESSIVE_WORD.test(s[i - 2]) ? i - 2 : i > 0 && DETERMINER_WORD.test(s[i - 1]) ? i - 1 : i;
+  if (from === i || s[from] !== "her" || s[from + 1] === "own") return from;
+  return from === 0 || /^(?:and|or|plus|then)$/.test(s[from - 1]) || /[,;:]$/.test(spoken[from - 1]) ? from : i;
+}
 
 /**
  * An item as a list row: its spoken words with their grammar ("A waiting room", never "Waiting
@@ -560,7 +579,7 @@ function rowText(item: string): string {
  * (2:03) showed "One step from throne" for "an advisor standing one step from the throne" and
  * "Ordered to end life" for "…would be ordered to end his own life". Those words go back in — and an
  * article or possessive said right before the row's first word ("Second bag of pretzels" → "A second
- * bag of pretzels") — when the row still fits `ROW_MAX_WORDS`. A row in the planner's own words (it
+ * bag of pretzels", `leadIn`) — when the row still fits `ROW_MAX_WORDS`. A row in the planner's own words (it
  * left out a word that is not grammar, added one, or wrote a spoken number in digits) is its short
  * version and is kept as written: "Buried under obligations" for "buried under exactly the kind of
  * obligations…". Returns the row to show. Pure.
@@ -582,9 +601,7 @@ export function restoreRowGrammar(text: string, say: string): string {
       j = n;
     }
     if (k < r.length) continue;
-    let from = i;
-    while (from > 0 && GRAMMAR_WORD.test(s[from - 1])) from--;
-    const words = spoken.slice(from, j + 1);
+    const words = spoken.slice(leadIn(s, spoken, i), j + 1);
     if (words.length === row.length || words.length > ROW_MAX_WORDS) return text;
     return capitalized(words.join(" ").replace(/[,;:]+$/, ""));
   }
