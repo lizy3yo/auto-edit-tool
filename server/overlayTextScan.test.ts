@@ -503,3 +503,29 @@ describe("what the line rules out — the forbidden verdict (R5, the audit, 2026
     expect(parseStillDefectVerdict('{"forbidden":"yes"}').forbidden).toBeUndefined();
   });
 });
+
+describe("a picture drawn from outside on purpose is not missing its inside (job 403)", () => {
+  it("adds the note only when told, after the missing question", async () => {
+    const { INSIDE_PART_NOTE } = await import("./cutOpen");
+    mockInvoke.mockReset();
+    mockInvoke.mockResolvedValue({ text: '{"overlay":false,"broken":false,"writing":false,"missing":false,"what":""}' } as any);
+    const subject = "close-up of the smooth white curved S-shaped porcelain channel, water flowing up and over its curve";
+    const args = [undefined, undefined, undefined, ["toilet trapway"], undefined, undefined, undefined] as const;
+    await scanStillDefects(await imageOf(1280, 720), subject, ...args, true);
+    const told = mockInvoke.mock.calls[0][0].systemSuffix as string;
+    expect(told).toContain(INSIDE_PART_NOTE);
+    expect(told.indexOf(INSIDE_PART_NOTE)).toBeGreaterThan(told.indexOf("QUESTION 4"));
+    mockInvoke.mockClear();
+    await scanStillDefects(await imageOf(1280, 720), subject, ...args, false);
+    expect(mockInvoke.mock.calls[0][0].systemSuffix).not.toContain(INSIDE_PART_NOTE);
+    // A plain check with nothing to show is never told it.
+    mockInvoke.mockClear();
+    await scanStillDefects(await imageOf(1280, 720), undefined, ...args, true);
+    expect(mockInvoke.mock.calls[0][0].systemSuffix).not.toContain(INSIDE_PART_NOTE);
+  });
+
+  it("the rulebook names a cut-open thing as broken", async () => {
+    const { CUT_OPEN_BROKEN } = await import("./cutOpen");
+    expect(STILL_DEFECT_SYSTEM).toContain(CUT_OPEN_BROKEN);
+  });
+});

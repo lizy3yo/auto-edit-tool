@@ -85,6 +85,13 @@ import {
   shippedFlaws,
 } from "../shared/pictureFlaws";
 import { scanNearCopy, scanSameHost, scanSameThing, scanStillDefects } from "./overlayTextScan";
+import {
+  cutOpenFault,
+  drawnFromOutside,
+  NOTHING_CUT_OPEN_RULE,
+  SEEN_FROM_OUTSIDE_CLAUSE,
+  withoutCutaway,
+} from "./cutOpen";
 import { padSentenceEnds } from "./sentencePauses";
 import {
   assignScreenSetups,
@@ -5696,6 +5703,9 @@ export const STILL_BROLL_ENHANCER_SYSTEM =
   `- ${FIGURE_OF_SPEECH_RULE}\n` +
   `- ${RULED_OUT_RULE}\n` +
   `- ${NO_NARRATION_TEXT_RULE}\n` +
+  // Job 403 scene 16: "Cutaway view of the white porcelain S-shaped trapway channel behind a toilet
+  // bowl" — the prompt writer kept the cutaway it was handed, and the fixture was drawn sawn open.
+  `- ${NOTHING_CUT_OPEN_RULE} Never write the words cutaway, cross-section, x-ray or see-through.\n` +
   "- SAY IT, SHOW IT: when a MUST SHOW line is given, the frame's hero subject is exactly that " +
   "thing, named plainly first in your prompt and framed CLOSE — taking up much of the frame, the " +
   "first thing the eye lands on, though casually framed like a real phone photo rather than dead " +
@@ -6685,7 +6695,9 @@ export function softenVisualPrompt(text: string): string {
     (s, [re, rep]) => s.replace(re, rep),
     stripPromptArtifacts(text)
   );
-  return scrubLegibleWriting(stripAtmosphericWisps(softened));
+  // No prompt ever asks for a cut view (`withoutCutaway`): job 403 scene 16's "Cutaway view of the
+  // white porcelain S-shaped trapway channel" reached the picture maker word for word.
+  return withoutCutaway(scrubLegibleWriting(stripAtmosphericWisps(softened)));
 }
 
 /**
@@ -6855,7 +6867,9 @@ export function buildStillPrompt(
   // the host away (`facingTheCamera`): a film drawn before the rule still says "face turned away".
   const lipsCut = !aggressive && hostLipsCut(scene);
   const facing = (t: string) => (lipsCut ? facingTheCamera(t) : t);
-  const shown = scene.showSubject ? facing(scene.showSubject) : undefined;
+  // The framing clause repeats the subject's own words, so a cut view is taken out of them too (job
+  // 403 scene 16: "a close shot where cutaway close-up of the white porcelain S-shaped channel").
+  const shown = scene.showSubject ? facing(withoutCutaway(scene.showSubject)) : undefined;
   const angleSuffix = shown
     ? heroFramingClause(shown)
     : scene.shotAngle && SHOT_ANGLE_SUFFIX[scene.shotAngle]
@@ -6900,8 +6914,12 @@ export function buildStillPrompt(
   // ITS KEY THING'S LOOK, when no earlier picture of it is there to follow (`keyThingLookClause`);
   // a named kind's exact look wins. Not on a content-policy fallback, which no longer shows it.
   const look = !visualOverride ? scrubLegibleWriting(keyThingLookClause(scene)) : "";
+  // A PART HIDDEN INSIDE IS SEEN FROM OUTSIDE (`drawnFromOutside`): job 403 drew its trapway sawn open
+  // on every picture that named it ("close view of the toilet's internal porcelain S-shaped trapway
+  // channel") or was about it ("close-up of the smooth white curved S-shaped porcelain channel").
+  const outside = !visualOverride && drawnFromOutside(scene) ? ` ${SEEN_FROM_OUTSIDE_CLAUSE}` : "";
   return withAllowedText(
-    `${lead}${visual}${scrubLegibleWriting(namedLookClause(scene))}${look}${item}${angleSuffix}${personSuffix}${memory}${app} ${amateurIphoneLook(subject, motion)} ${framing} ${noFigures} ${NO_BOOK_SUFFIX}`,
+    `${lead}${visual}${scrubLegibleWriting(namedLookClause(scene))}${look}${outside}${item}${angleSuffix}${personSuffix}${memory}${app} ${amateurIphoneLook(subject, motion)} ${framing} ${noFigures} ${NO_BOOK_SUFFIX}`,
     scene.pictureText,
     scene.blurPrint
   );
@@ -7348,9 +7366,10 @@ export function promptFromWords(prompt: string, memory: string, look: string): s
 /**
  * A FIRST PICTURE THAT MISSED IS NEVER COPIED: a picture whose last check said what it must show is
  * not in it still ships, but is no memory for later pictures (`memoryUnfit`). Stored films copied 22
- * first pictures that failed their last check into 122 later pictures. Only `missing` counts: a staged
- * look or readable writing leaves the thing itself right (Dale's job 369: the keepsake-box group
- * shot, last check "writing", is the box's memory still). Mutates `scene`.
+ * first pictures that failed their last check into 122 later pictures. Only `missing` counts — and a
+ * frame seen cut open (`ValidatedStill.cutOpen`, job 403), whose thing is not the real one either: a
+ * staged look or readable writing leaves the thing itself right (Dale's job 369: the keepsake-box
+ * group shot, last check "writing", is the box's memory still). Mutates `scene`.
  */
 export function markMemoryFit(scene: StoryboardScene, missing: boolean | undefined): void {
   if (missing) scene.memoryUnfit = true;
@@ -9499,7 +9518,7 @@ export function buildClipChain(
   // rather than relying on Claude's implicit framing choices.
   const angleSuffix =
     !scene.hostPresent && scene.showSubject
-      ? heroFramingClause(facing(scene.showSubject))
+      ? heroFramingClause(facing(withoutCutaway(scene.showSubject)))
       : !scene.hostPresent && scene.shotAngle && SHOT_ANGLE_SUFFIX[scene.shotAngle]
         ? `, ${SHOT_ANGLE_SUFFIX[scene.shotAngle]}`
         : "";
@@ -9791,7 +9810,14 @@ export function stillRetryDelayMs(error: string, attempt: number): number {
  * (`scene.memoryUnfit`). `flaws`: what the checks still named on the frame that shipped
  * (`shared/pictureFlaws.ts`) — absent on a frame that passed.
  */
-export type ValidatedStill = { buffer: Buffer; mimeType?: string; missing?: boolean; flaws?: string[] };
+export type ValidatedStill = {
+  buffer: Buffer;
+  mimeType?: string;
+  missing?: boolean;
+  /** The check saw a thing cut open on the frame that shipped (`cutOpenFault`): it is no memory. */
+  cutOpen?: boolean;
+  flaws?: string[];
+};
 
 /**
  * `drawValidatedStill`, but a video's SCREEN pictures (`scene.screenSetup`) are drawn one at a time
@@ -9851,6 +9877,8 @@ async function drawValidatedStill(
   // Frames whose check said what they must show is not in them: whichever frame ships says so
   // (`ValidatedStill.missing`), so it is never made the memory of later pictures.
   const missed = new WeakSet<Buffer>();
+  // …and frames the check saw cut open (`cutOpenFault`): no later picture is drawn from one either.
+  const cutOpenFrames = new WeakSet<Buffer>();
   // Every frame carries what the checks named on it (its own `pictureChecks` entry), so a frame that
   // ships with a fault says which (`ValidatedStill.flaws`) — whichever path ships it.
   type Drawn = { buffer: Buffer; mimeType?: string; flags: string[] };
@@ -9860,6 +9888,7 @@ async function drawValidatedStill(
       buffer: f.buffer,
       mimeType: f.mimeType,
       missing: missed.has(f.buffer),
+      ...(cutOpenFrames.has(f.buffer) ? { cutOpen: true } : {}),
       ...(flaws.length ? { flaws } : {}),
     };
   };
@@ -10046,9 +10075,19 @@ async function drawValidatedStill(
         // to the thing's look as well (`lookToHold`): a miss takes the `missing` redraw below.
         visualOverride ? undefined : lookToHold(scene),
         // What its sentence rules out, as the line check wrote it — asked only of those pictures.
-        scene.forbids
+        scene.forbids,
+        // Drawn from outside on purpose: a whole fixture is not "missing" the channel inside it.
+        drawnFromOutside(scene)
       );
       if (defects.missing) missed.add(buffer);
+      // A THING SEEN CUT OPEN (`cutOpenFault`) is drawn from outside from then on, every redraw built
+      // again included, and a frame that ships cut open is no memory for later pictures — job 403's
+      // sawn-open trapway (scene 11) was what scenes 13, 16, 17 and the lifted toilet at 23 copied.
+      if (defects.broken && cutOpenFault(defects.what)) {
+        cutOpenFrames.add(buffer);
+        scene.seenFromOutside = true;
+        if (!prompt.includes(SEEN_FROM_OUTSIDE_CLAUSE)) prompt = `${prompt} ${SEEN_FROM_OUTSIDE_CLAUSE}`;
+      }
       const check = recordPictureCheck(
         scene,
         visualOverride ?? (square ? scene.splitVisual : undefined) ?? scene.visualPrompt ?? "",
@@ -10500,7 +10539,7 @@ export async function generateSceneStillClip(
     // A key thing seen before is drawn from its earlier pictures (`server/pictureMemory.ts`). A
     // split's panel (square) gets its memory from the caller, off the host scene.
     if (!square) Object.assign(scene, memoryFields(await memoryFor(scene), memoryView(scene)));
-    const { buffer, mimeType, missing, flaws } = await generateValidatedStill(
+    const { buffer, mimeType, missing, cutOpen, flaws } = await generateValidatedStill(
       scene,
       4,
       referenceImageUrl,
@@ -10519,7 +10558,7 @@ export async function generateSceneStillClip(
     scene.pictureUrl = imageUrl;
     notePictureFlaws(jobId, scene, flaws, square);
     if (!square) {
-      markMemoryFit(scene, missing);
+      markMemoryFit(scene, missing || cutOpen);
       pictureSettled(scene);
     }
   }
@@ -10625,7 +10664,7 @@ export async function generateBrollKeyframe(
   if (!referenceImageUrl) blurUnsaidPrint(scene);
   // A key thing seen before is drawn from its earlier pictures (`server/pictureMemory.ts`).
   await attachKeyframeMemory(scene, clipIdx);
-  const { buffer: src, mimeType, missing, flaws } = await generateValidatedStill(
+  const { buffer: src, mimeType, missing, cutOpen, flaws } = await generateValidatedStill(
     scene,
     4,
     referenceImageUrl,
@@ -10642,7 +10681,7 @@ export async function generateBrollKeyframe(
   const { url } = await storagePut(key, buf, mime);
   if (clipIdx === 0) {
     scene.pictureUrl = url;
-    markMemoryFit(scene, missing);
+    markMemoryFit(scene, missing || cutOpen);
     notePictureFlaws(jobId, scene, flaws, false);
     pictureSettled(scene);
   }

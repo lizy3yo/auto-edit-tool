@@ -38,6 +38,7 @@
  */
 import sharp from "sharp";
 import { invokeClaude, type ClaudeImage } from "./claude";
+import { CUT_OPEN_BROKEN, INSIDE_PART_NOTE } from "./cutOpen";
 import { safeParseJSON } from "./jsonRepair";
 
 /**
@@ -119,6 +120,7 @@ export const STILL_DEFECT_SYSTEM =
   "- a head turned further round than a neck can turn, or facing a different way from the " +
   "shoulders; more than two arms or hands on one person\n" +
   "- a mirror that does not reflect what is in front of it\n" +
+  CUT_OPEN_BROKEN +
   "Answer false for everything else: unusual but possible products or craftsmanship, odd " +
   "compositions, shallow depth of field, soft focus, plain or boring frames, imperfect " +
   "staging, and any small detail you cannot clearly resolve at this size. This is AI-generated " +
@@ -510,7 +512,12 @@ export async function scanStillDefects(
    * parameter, never `line`: the line feeds the place question, and a neighbour's words there would
    * hold this picture to a place another picture names.
    */
-  forbids?: string
+  forbids?: string,
+  /**
+   * The picture is drawn from the OUTSIDE on purpose (`drawnFromOutside`, job 403) — adds
+   * `INSIDE_PART_NOTE`, so a whole fixture is not called missing for not showing the channel in it.
+   */
+  fromOutside?: boolean
 ): Promise<StillDefectVerdict> {
   try {
     const mustShow = expect && required?.length ? required : undefined;
@@ -541,6 +548,7 @@ export async function scanStillDefects(
         (expect ? missingQuestion(expect) : "") +
         (expect && exactLook ? exactLookQuestion(exactLook) : "") +
         (mustShow ? requiredThingsQuestion(mustShow, requiredLook) : "") +
+        (expect && fromOutside ? INSIDE_PART_NOTE : "") +
         (expect && softPrint ? SOFT_PRINT_QUESTION : "") +
         (askDetail ? detailQuestion(expect!) : "") +
         (line ? placeQuestion(line, !!ruledOut) : "") +

@@ -21,6 +21,7 @@
  */
 import type { BuildStage, KeyThing, RecurringPerson, StoryboardScene } from "@shared/types";
 import { invokeClaude } from "./claude";
+import { NOTHING_CUT_OPEN_RULE } from "./cutOpen";
 import { safeParseJSON } from "./jsonRepair";
 import { SHOWS_PERSON, showsPerson, namedPeople, namesOnlyAnimal, personKey } from "./hostLook";
 
@@ -1562,7 +1563,7 @@ export function settleShots(
 
 // ─── The two LLM calls ──────────────────────────────────────────────────────────────
 
-const SHOT_LIST_SYSTEM =
+export const SHOT_LIST_SYSTEM =
   "You are the editor of a YouTube documentary, cutting b-roll to a narration that is already " +
   "recorded. For each numbered BEAT you get its exact words. Return the shots that play under it.\n\n" +
   "RULES\n" +
@@ -1627,6 +1628,9 @@ const SHOT_LIST_SYSTEM =
   'keep" = the finished pieces).\n' +
   "5d. A BODY PART NEVER LOOKS CUT OFF: hair, a hand, a foot or a face is shown on the person, or on what really holds it — a wig on a mannequin head or wig stand, a practice hand, extensions in their packet. A few loose strands that really fall (in a brush, on a comb or towel, in a drain) are fine. Never hair still shaped like a head or a hairstyle with no head inside it, and never a hand, foot or face on its own. To show a colour or texture, show it on the person's own head or hands.\n" +
   "5e. SHOW EXACTLY WHAT THE LINE POINTS AT: when a line points at a specific thing, or a specific part, side or detail of a thing (the box it comes in, its label, the battery door on the back, the dial, the date on the bottom, the hem), the picture is a close-up of exactly that — never the video's main thing somewhere else, never a plain version without it. What the script says that part shows (the words printed on it, a number, a setting) is shown exactly as the script says it.\n" +
+  // Job 403: "Here is the part nobody sees. Inside the porcelain…" was planned as a cutaway close-up
+  // of the channel inside the fixture, and the picture maker sawed the fixture open to draw it.
+  `5f. ${NOTHING_CUT_OPEN_RULE} It holds over rule 5e: a close-up of a hidden part is a close-up of where it opens or comes out.\n` +
   "5c. WRITING ONLY WHEN SAID. A picture may show readable writing ONLY when the line itself says " +
   "the exact words or number printed on a thing (\"the tag says HANDMADE\" = the tag with HANDMADE " +
   "on it): set text to exactly those words, spelled as spoken. Never invent any: when a line talks " +
@@ -1911,6 +1915,12 @@ export const CONTINUITY_SYSTEM =
   "animal's paw, a machine's dial, a garment's collar — its look STARTS with the whole it belongs " +
   "to (what kind it is, its colour, size and markings) and then describes the part, so every " +
   "picture of the whole shows the same one. " +
+  // Job 403's MAIN line was "toilet trapway: the toilet's internal porcelain passage behind the
+  // bowl": a look no camera can see, so every picture drawn by it cut the fixture open.
+  "A part HIDDEN INSIDE something — a channel inside a fixture, the pipes or wires inside a wall, " +
+  "the works inside a machine — is never a line of its own, and never the MAIN thing: list the " +
+  "whole thing it is inside, with how it looks from the OUTSIDE, because no picture can show the " +
+  "inside. " +
   EXACT_KIND_RULE +
   "6-14 lines. Plain words, no brands, no people in these lines. NOTHING WITH MARKS ON IT: " +
   "never list a chalk tally, a chalkboard, a sign, a price tag, a label, a calendar, a notebook, a " +
@@ -2129,6 +2139,7 @@ it (show the thing); a warning about a danger (show the safe way, never the dang
 line says does NOT happen or is NOT there (never draw it happening).
 It is WRONG when it does not show what the line points at. SHOW EXACTLY WHAT THE LINE POINTS AT: when a line points at a specific thing, or a specific part, side or detail of a thing (the box it comes in, its label, the battery door on the back, the dial, the date on the bottom, the hem), the picture is a close-up of exactly that — never the video's main thing somewhere else, never a plain version without it. What the script says that part shows (the words printed on it, a number, a setting) is shown exactly as the script says it.
 It is WRONG when a body part looks cut off. A BODY PART NEVER LOOKS CUT OFF: hair, a hand, a foot or a face is shown on the person, or on what really holds it — a wig on a mannequin head or wig stand, a practice hand, extensions in their packet. A few loose strands that really fall (in a brush, on a comb or towel, in a drain) are fine. Never hair still shaped like a head or a hairstyle with no head inside it, and never a hand, foot or face on its own. To show a colour or texture, show it on the person's own head or hands.
+It is WRONG when it shows a solid thing cut open, see-through or from inside — even as the close-up a line points at. ${NOTHING_CUT_OPEN_RULE}
 A picture marked "FIRST of the MAIN thing" must show the main thing IN USE when it is naturally used
 with smoke, steam, a flame or water (lit, steaming, burning, running) — otherwise it is WRONG. A picture is RIGHT when it shows the thing the line is
 about — even when the line only says "it", "this one" or "the one that…" (use the KEY THINGS and the
@@ -3216,6 +3227,7 @@ still moment from ONE spot: the main thing being done or shown, plus at most one
 background. Never "or", never a sequence of actions ("painting, then hanging it"), never two
 places. If every
 picture in the group shows the host doing the work, the new picture shows that work too. Keep exact names of kinds (a herringbone path, a dovetail joint).
+${NOTHING_CUT_OPEN_RULE}
 
 Answer with JSON only:
 {"groups":[{"ids":[12,13,14],"show":"..."}]}

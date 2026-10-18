@@ -18,6 +18,7 @@
  */
 import type { KeyThing, StoryboardScene } from "@shared/types";
 import { invokeClaude } from "./claude";
+import { NOTHING_CUT_OPEN_RULE } from "./cutOpen";
 import { safeParseJSON } from "./jsonRepair";
 import { showsPerson } from "./hostLook";
 import { blurredPrint, matchKeyThing, planningEffort, settleVideoKind } from "./shotList";
@@ -116,6 +117,9 @@ A BODY PART NEVER LOOKS CUT OFF: hair, a hand, a foot or a face is shown on the 
 2. A PART OF A KEY THING. When a picture's line is about ONE PART or detail of a key thing (one block
 on the quilt, a knob on the stove, one joint of the frame), name that key thing as part_of: the
 picture is then a close-up of just that part, never the whole thing again.
+
+${NOTHING_CUT_OPEN_RULE} A part hidden inside is never a close-up of its inside: its "show" is where
+it opens or comes out.
 
 3. For every picture you name a kind or a part for, write "show": a short, plain description of the
 picture — what fills the frame, close up when it is a part — using the exact look, one thing only.

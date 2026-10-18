@@ -3771,3 +3771,95 @@ describe("a living thing is drawn as its exact kind (job 404 scene 4)", () => {
     expect(buildStillPrompt(old, false, undefined, undefined, true)).not.toContain("holly shrubs");
   });
 });
+
+describe("a picture never cuts a solid thing open (job 403, the review of 2026-10-18)", () => {
+  // "Here is the part nobody sees. Inside the porcelain…" — five pictures in 45 s were the same sawn-
+  // open fixture, and memory carried the cut into the host lifting a sliced toilet (scene 23).
+  const TRAPWAY_LOOK =
+    "the toilet's internal porcelain passage behind the bowl, a smooth curved S-shaped channel molded white, climbing upward before descending";
+  const things: KeyThing[] = [
+    { name: "toilet trapway", main: true, look: TRAPWAY_LOOK },
+    { name: "plunger", look: "red rubber cup on a wooden handle, standing upright in a corner" },
+  ];
+  const film = () => [
+    pic(
+      11,
+      "Today we go through all nine, one at a time, and look at what the German habit does instead. So. We will go the way the water goes.",
+      "close view of the toilet's internal porcelain S-shaped trapway channel with water rushing through it",
+      { keyThing: "toilet trapway" }
+    ),
+    pic(12, "Flush,", "water swirling down the white toilet bowl mid-flush", { listCut: true }),
+    pic(13, "and follow.", "close-up of the smooth white curved S-shaped porcelain channel, water flowing up and over its curve", {
+      keyThing: "toilet trapway",
+      partOf: "toilet trapway",
+      listCut: true,
+    }),
+    pic(
+      16,
+      "Here is the part nobody sees. Inside the porcelain, the water does not fall straight down.",
+      "cutaway close-up of the white porcelain S-shaped channel behind the bowl, water climbing up and over the curve before descending",
+      {
+        keyThing: "toilet trapway",
+        partOf: "toilet trapway",
+        visualPrompt:
+          "Cutaway view of the white porcelain S-shaped trapway channel behind a toilet bowl, water climbing up and over the curve before descending.",
+      }
+    ),
+    pic(
+      23,
+      "If it will not come, the toilet has to come up off the floor, and that is a fair place to stop and call someone.",
+      "toilet lifted off the floor in the small German bathroom, pipe opening exposed",
+      { keyThing: "toilet trapway", humanPresent: true }
+    ),
+  ];
+
+  it("scene 16: the prompt never says cutaway, and says to show it from outside", async () => {
+    const { SEEN_FROM_OUTSIDE_CLAUSE } = await import("./cutOpen");
+    const p = buildStillPrompt(film()[3]);
+    expect(p).toContain("View of the white porcelain S-shaped trapway channel behind a toilet bowl");
+    expect(p).not.toMatch(/cutaway (?:view|close-up)/i);
+    expect(p).toContain(SEEN_FROM_OUTSIDE_CLAUSE);
+  });
+
+  it("scene 23: the lifted toilet is drawn from outside, by no inside look and from no cutaway", async () => {
+    const { SEEN_FROM_OUTSIDE_CLAUSE } = await import("./cutOpen");
+    const { attachMemory } = await import("./pictureMemory");
+    const b = film();
+    attachMemory(b, [], things);
+    expect(keyThingLookFor(b[4], things, false)).toBeUndefined();
+    expect(memorySourcesFor(b, b[4])).not.toContain(b[0]);
+    expect(memorySourcesFor(b, b[4])).not.toContain(b[3]);
+    const p = buildStillPrompt(b[4]);
+    expect(p).toContain(SEEN_FROM_OUTSIDE_CLAUSE);
+    expect(p).not.toContain("internal porcelain passage");
+  });
+
+  it("scene 12: the bowl looked into is an ordinary photo — no clause", async () => {
+    const { SEEN_FROM_OUTSIDE_CLAUSE } = await import("./cutOpen");
+    expect(buildStillPrompt(film()[1])).not.toContain(SEEN_FROM_OUTSIDE_CLAUSE);
+  });
+
+  it("the door frames too: Norbert's \"cutaway view of the pine door frame\" (job 232 scene 9)", async () => {
+    const { SEEN_FROM_OUTSIDE_CLAUSE } = await import("./cutOpen");
+    const door = pic(
+      9,
+      "Those little factory screws only reach the soft pine.",
+      "a cutaway view of the pine door frame showing the gap and wooden stud behind it, with the short factory screws falling short",
+      {
+        visualPrompt:
+          "Cutaway view of pale pine door frame, exposing the gap behind it and the squared wooden stud set back in that gap.",
+      }
+    );
+    const p = buildStillPrompt(door);
+    expect(p).toContain("View of pale pine door frame, exposing the gap behind it");
+    expect(p).toContain(SEEN_FROM_OUTSIDE_CLAUSE);
+  });
+
+  it("the still check calls a cut-open thing broken, and the prompt writer is told the rule", async () => {
+    const { CUT_OPEN_BROKEN, NOTHING_CUT_OPEN_RULE } = await import("./cutOpen");
+    const { STILL_BROLL_ENHANCER_SYSTEM } = await import("./longformVideo");
+    expect(STILL_DEFECT_SYSTEM).toContain(CUT_OPEN_BROKEN);
+    expect(STILL_DEFECT_SYSTEM).toMatch(/QUESTION 2 — broken[\s\S]*shown CUT OPEN[\s\S]*QUESTION 3/);
+    expect(STILL_BROLL_ENHANCER_SYSTEM).toContain(NOTHING_CUT_OPEN_RULE);
+  });
+});

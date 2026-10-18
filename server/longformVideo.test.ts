@@ -12262,3 +12262,100 @@ describe("a style bible loses only its printed matter (job 400)", async () => {
     expect(withoutPrintedMatter("An open guidebook on the seat.").kept).toBe("");
   });
 });
+
+describe("a thing seen cut open is drawn from outside, and is no memory (job 403)", () => {
+  const pngOf = (bg: string) =>
+    sharp({ create: { width: 8, height: 8, channels: 3, background: bg } }).png().toBuffer();
+  const verdict = (over: Record<string, unknown> = {}) => ({ overlay: false, broken: false, what: "", ...over }) as any;
+  const drawsOf = (...frames: Buffer[]) => {
+    const fn = vi.fn();
+    for (const f of frames) fn.mockResolvedValueOnce({ success: true, fileData: f });
+    return fn;
+  };
+  const checks = (...vs: Record<string, unknown>[]) => {
+    mockScanStillDefects.mockReset();
+    for (const v of vs) mockScanStillDefects.mockResolvedValueOnce(verdict(v));
+    mockScanStillDefects.mockResolvedValue(verdict());
+  };
+  afterEach(() => {
+    mockScanStillDefects.mockReset();
+    mockScanStillDefects.mockResolvedValue(verdict());
+  });
+
+  // Job 403 scene 13: no inside in its own words, drawn sawn open from the trapway's memory.
+  const scene13 = () =>
+    ({
+      index: 13,
+      scriptText: "and follow.",
+      showSubject: "close-up of the smooth white curved S-shaped porcelain channel, water flowing up and over its curve",
+      visualPrompt:
+        "Close-up of the smooth white curved S-shaped porcelain trapway channel inside a toilet bowl, water flowing up and over the curve.",
+    }) as any;
+
+  it("job 403 scene 13: a frame the check saw cut open is redrawn told to show it from outside", async () => {
+    const { SEEN_FROM_OUTSIDE_CLAUSE } = await import("./cutOpen");
+    const [a, b] = await Promise.all([pngOf("#911"), pngOf("#2c2")]);
+    checks({ broken: true, what: "toilet cut open, inner channel exposed" });
+    const genImage = drawsOf(a, b);
+    const scene = scene13();
+    const out = await generateValidatedStill(scene, 4, undefined, genImage);
+    const [p1, p2] = genImage.mock.calls.map(c => c[0].prompt as string);
+    expect(p1).not.toContain(SEEN_FROM_OUTSIDE_CLAUSE);
+    expect(p2).toContain(SEEN_FROM_OUTSIDE_CLAUSE);
+    expect(scene.seenFromOutside).toBe(true);
+    // The second check is told it is drawn from outside on purpose.
+    expect((mockScanStillDefects.mock.calls[1] as any[])[9]).toBe(true);
+    expect(out.buffer.equals(b)).toBe(true);
+    expect(out.cutOpen).toBeUndefined();
+  });
+
+  it("job 403 scene 13: a frame that ships cut open says so, and is no memory", async () => {
+    const { markMemoryFit } = await import("./longformVideo");
+    const [a, b, c] = await Promise.all([pngOf("#a11"), pngOf("#a22"), pngOf("#a33")]);
+    checks(
+      { broken: true, what: "porcelain sawn open, cut open channel" },
+      { broken: true, what: "cut open toilet" },
+      { broken: true, what: "cut open toilet" }
+    );
+    const scene = scene13();
+    const out = await generateValidatedStill(scene, 4, undefined, drawsOf(a, b, c));
+    expect(out.cutOpen).toBe(true);
+    markMemoryFit(scene, out.missing || out.cutOpen);
+    expect(scene.memoryUnfit).toBe(true);
+  });
+
+  it("a broken frame that is not cut open keeps its same-prompt redraw (job 352 scene 147)", async () => {
+    const [a, b] = await Promise.all([pngOf("#b11"), pngOf("#2d2")]);
+    checks({ broken: true, what: "blade through the fence" });
+    const genImage = drawsOf(a, b);
+    const scene = {
+      index: 147,
+      scriptText: "Crosscut to length last.",
+      showSubject: "a rough oak board crosscut to length on a table saw",
+      visualPrompt: "A rough oak board being crosscut to length on a table saw.",
+    } as any;
+    const out = await generateValidatedStill(scene, 4, undefined, genImage);
+    const [p1, p2] = genImage.mock.calls.map(c => c[0].prompt as string);
+    expect(p2).toBe(p1);
+    expect(scene.seenFromOutside).toBeUndefined();
+    expect((mockScanStillDefects.mock.calls[0] as any[])[9]).toBe(false);
+    expect(out.cutOpen).toBeUndefined();
+  });
+
+  it("job 403 scene 11: a picture whose own words ask for an inside is checked as drawn from outside", async () => {
+    const [a] = await Promise.all([pngOf("#c11")]);
+    checks();
+    await generateValidatedStill(
+      {
+        index: 11,
+        scriptText: "So. We will go the way the water goes.",
+        showSubject: "close view of the toilet's internal porcelain S-shaped trapway channel with water rushing through it",
+        visualPrompt: "Close view of the toilet's internal white porcelain S-shaped trapway channel.",
+      } as any,
+      4,
+      undefined,
+      drawsOf(a)
+    );
+    expect((mockScanStillDefects.mock.calls[0] as any[])[9]).toBe(true);
+  });
+});

@@ -606,8 +606,17 @@ export interface StoryboardScene {
    * The picture's last check said what it must show is not in it (`missing`), so no later picture is
    * drawn from it (`memorySourcesFor`): stored films had 22 first pictures copied after failing
    * their last check. Never set for a staged look or readable writing alone — the thing is there.
+   * Set too when the frame that shipped was seen cut open (`cutOpenFault`, job 403).
    */
   memoryUnfit?: true;
+  /**
+   * Drawn from the OUTSIDE on purpose (`server/cutOpen.ts`): a key thing in it is a part hidden inside
+   * something — its props-list look describes an inside no camera sees (job 403: "the toilet's
+   * internal porcelain passage behind the bowl") — set by `attachMemory`; or the check saw this
+   * picture cut open (`cutOpenFault`). Its prompt then carries `SEEN_FROM_OUTSIDE_CLAUSE` and its
+   * check `INSIDE_PART_NOTE`. A picture whose own words ask for an inside view gets both without it.
+   */
+  seenFromOutside?: true;
   /**
    * The exact look of the specific named kind this picture shows ("churn dash block: a 3×3 block…"),
    * written by `describeNamedLooks` so the picture maker can draw what it cannot know by name.

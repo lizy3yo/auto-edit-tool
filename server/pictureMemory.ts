@@ -12,6 +12,7 @@
  * EARLIER scene, and the dispatcher hands scenes out in film order, so the earliest waiting scene's
  * memory is always already running: nothing can wait on itself.
  */
+import { insideView } from "./cutOpen";
 import { PART_VIEW } from "./namedLooks";
 import type { KeyThing, StoryboardScene } from "@shared/types";
 import { REDRAW_CAMERAS } from "./pictureVariety";
@@ -84,10 +85,22 @@ export function memorySourcesFor(
   // the cord) from a finished bowl filed under the tin of squares.
   // …nor a picture whose own check said the thing is not in it (`memoryUnfit`): stored films had 22
   // first pictures copied after failing their last check, 122 later pictures drawn from them.
+  // …nor a picture whose description asks to see a solid thing from inside or cut open
+  // (`insideView`): job 403's trapway was first asked for as "close view of the toilet's internal
+  // porcelain S-shaped trapway channel", came back a fixture sawn in half, and every later picture of
+  // it was drawn from that cut — the host lifting a sliced toilet off its flange (scene 23), an auger
+  // pushed through the cut wall (scene 22). A cutaway is never what a real-world shot copies.
   const before = scenes
     .slice(0, i)
     .filter(
-      x => source(x) && !isScreen(x) && !(s.listCut && x.listCut) && !laterStage(x, s) && !x.memoryUnfit
+      x =>
+        source(x) &&
+        !isScreen(x) &&
+        !(s.listCut && x.listCut) &&
+        !laterStage(x, s) &&
+        !x.memoryUnfit &&
+        !insideView(x.showSubject) &&
+        !insideView(x.visualPrompt)
     );
   const out: StoryboardScene[] = [];
   const add = (x: StoryboardScene | undefined) => {
@@ -679,13 +692,30 @@ export function keyThingLookFor(
 ): string | undefined {
   const own = ownKeyThing(s);
   const thing = own ? things?.find(k => k.name === own) : undefined;
-  if (!thing?.look?.trim()) return undefined;
+  // A look that describes an INSIDE (`insideView`) is no look a camera can hold: job 403's main thing
+  // was written "the toilet's internal porcelain passage behind the bowl, a smooth curved S-shaped
+  // channel", and a picture drawn by it — the toilet lifted off the floor included — was told to show
+  // that channel. Such a picture is drawn from outside instead (`hiddenInside`, `seenFromOutside`).
+  if (!thing?.look?.trim() || insideView(thing.look)) return undefined;
   const mode = beforeFinished(s)
     ? "colourMaterial"
     : makes && thing.main && s.buildStage !== "done"
       ? "noStage"
       : "full";
   return pictureLook(thing.look, mode) || undefined;
+}
+
+/**
+ * Whether a key thing in `s` — its own or one beside it — is a part HIDDEN INSIDE something: its
+ * props-list look describes an inside (`insideView`). Job 403's main thing, "toilet trapway: the
+ * toilet's internal porcelain passage behind the bowl", was on 12 scenes; "close-up of the smooth
+ * white curved S-shaped porcelain channel, water flowing up and over its curve" (scene 13) names no
+ * inside in its own words, and came back sawn open like the rest. Such a picture is drawn from the
+ * outside (`seenFromOutside`). Pure.
+ */
+export function hiddenInside(s: StoryboardScene, things: KeyThing[] | undefined): boolean {
+  const names = [s.keyThing, ...(s.otherKeyThings ?? [])].filter(Boolean);
+  return !!things?.some(k => names.includes(k.name) && insideView(k.look));
 }
 
 /**
@@ -933,6 +963,8 @@ export function attachMemory(
     ownSourcesOf.set(s, sources.filter(x => x === set || (!!s.keyThing && shows(x, s.keyThing))));
     viewOf.set(s, memoryViewFor(board, s));
     lookOf.set(s, keyThingLookFor(s, keyThings, makes));
+    // Never cleared here: the still loop sets it too, on a picture the check saw cut open.
+    if (hiddenInside(s, keyThings)) s.seenFromOutside = true;
     panelLookOf.set(s, panelNamedLook(board, s));
     const re = recomposeFrom(board, s, sources);
     rightBeforeOf.set(s, re?.from);
