@@ -963,6 +963,58 @@ describe("a host take stops mid-sentence only at a natural break (job 400)", () 
     expect(r.scenes[1].narrationEndSec).toBe(9);
   });
 
+  // The introduction hands over only once the WHOLE name is said. Asked of the kept words alone,
+  // "…I'm Hank" read as an introduction, and with the host minutes spent the walk back from a cut
+  // at no break handed over between the two words of the name.
+  const intro = (hostText: string) => {
+    const s = cut(
+      film([
+        ["P", 5, sentence(1)],
+        ["H", 6, hostText],
+        ["P", 6, "talking to you from my garage today about a box."],
+        ["H", 5, sentence(2)],
+      ]),
+      1,
+      2
+    );
+    s[1].hostIntro = true;
+    return s;
+  };
+
+  it("never hands the introduction over between the two words of the host's name", () => {
+    for (const [hostName, text] of [
+      ["Hank Hardwood", "So before we get going on any of it, I'm Hank Hardwood"],
+      ["Sawdust Sam", "So before we get going on any of it, I'm Sawdust Sam"],
+    ]) {
+      const r = enforcePlanRules(intro(text), { ...params, hostName }, { budgetSec: 11 });
+      expect(r.scenes[1].scriptText, hostName).toBe(text);
+      expect(r.scenes[2].scriptText, hostName).toBe("talking to you from my garage today about a box.");
+    }
+  });
+
+  it("hands the introduction over after the name — said whole, or by its last word (job 407)", () => {
+    for (const [hostName, text, kept] of [
+      [
+        "Hank Hardwood",
+        "Before anything else, I'm Hank Hardwood, and today we start with the",
+        "Before anything else, I'm Hank Hardwood,",
+      ],
+      ["Sawdust Sam", "Before anything else, I am Sam, and today we start with the", "Before anything else, I am Sam,"],
+    ]) {
+      const r = enforcePlanRules(intro(text), { ...params, hostName }, { budgetSec: 11 });
+      expect(r.scenes[1].scriptText, hostName).toBe(kept);
+      expect(r.scenes[2].scriptText, hostName).toMatch(/^and today we start with the talking/);
+    }
+    // Never before the name: with no comma after it, the last clause mark is "today," — where the
+    // name is not yet said — so the hand-off comes later, after "I am Sam".
+    const r = enforcePlanRules(
+      intro("Before we get going on any of it today, I am Sam and we start with the"),
+      { ...params, hostName: "Sawdust Sam" },
+      { budgetSec: 11 }
+    );
+    expect(r.scenes[1].scriptText).toMatch(/^Before we get going on any of it today, I am Sam\b/);
+  });
+
   it("a stretch without the host never takes a picture that stops at no break as its check-in", () => {
     const rows = (a: string, b: string): [("H" | "P" | "M"), number, string][] => [
       ["H", 5, sentence(1)],
@@ -1065,5 +1117,173 @@ describe("a natural break, read on the films' own hand-offs (review of the job 4
     expect(r.scenes.map(s => s.scriptText).join(" ")).toContain(
       "But the jump from number two to number one is the biggest jump on this whole list."
     );
+  });
+});
+
+describe("the host comes back after the book cover on the whole number, never inside it (job 406)", () => {
+  // Gary's practice film, 3:00: the cover ended on the storyboard's cut, "…Garage to Profit Bible,",
+  // and the gate let it finish its sentence, "…working people actually run.", with the host coming
+  // back on "Three hundred seventy pages". The cut came out at 180.69 — after "Three hundred", the
+  // middle of a transcript gap that sat wholly after the real 0.74 s pause (179.42-180.16): the word
+  // before heard running on over the pause and the number heard late, as one token, "370".
+  /** The film's own words as heard, 171-198 s (the graphics step's transcript of job 406). */
+  const HEARD =
+    "That@171.165-171.345 pattern@171.405-171.745 fills@171.785-172.005 a@172.065-172.105 digital@172.165-172.525 book@172.565-172.765 called@172.825-173.085 the@173.105-173.165 Garage@173.205-173.666 to@173.686-173.766 Profit@173.826-174.206 Bible,@174.246-174.606 put@174.846-175.006 together@175.046-175.406 under@175.486-175.646 this@175.686-175.846 channel's@175.886-176.267 name@176.307-176.547 from@176.607-176.747 the@176.767-176.867 honest@176.987-177.307 arithmetic@177.367-177.947 working@178.027-178.347 people@178.387-178.688 actually@178.888-179.308 run.@179.368-179.528 370@180.528-180.768 pages,@181.269-181.689 101@182.209-182.61 numbered@182.77-183.27 hustles@183.31-183.69 across@183.791-184.111 13@184.351-184.671 chapters,@184.731-185.212 each@185.752-185.912 one@186.032-186.152 printed@186.232-186.552 with@186.612-186.733 its@186.793-186.893 real@187.013-187.253 dollar@187.313-187.613 range@187.653-187.973 and@188.114-188.194 a@188.234-188.254 Know@188.334-188.534 Your@188.554-188.714 Limit@188.774-189.014 panel@189.054-189.374 that@189.434-189.575 states@189.635-189.935 the@189.975-190.095 downside@190.135-190.715 flat.@190.956-191.296 Tonight@191.936-192.256 covers@192.296-192.577 17@192.597-193.317 under@193.437-194.218 $500.@194.258-194.618 The@195.319-195.419 book@195.439-195.619 runs@195.659-195.879 the@195.939-196.039 same@196.099-196.339 math@196.399-196.639 on@196.72-196.78 the@196.8-196.9 other@196.98-197.16 84.@197.22-197.72";
+  const heard = () =>
+    HEARD.split(" ").map(tok => {
+      const [, word, start, end] = /^(.*)@([\d.]+)-([\d.]+)$/.exec(tok)!;
+      return { word, start: Number(start), end: Number(end) };
+    });
+  /** The words the cut was made from: "run." heard on over the pause, "370" heard late. */
+  const voiced = () =>
+    heard().map(x =>
+      x.word === "run." ? { ...x, end: 180.619 } : x.word === "370" ? { ...x, start: 180.768, end: 181.0 } : x
+    );
+  /** The job's real pauses (`masterSilences`) over the same stretch. */
+  const silences = [
+    [172.608, 172.733], [174.458, 174.783], [178.597, 178.719], [178.85, 179.028], [179.423, 180.162],
+    [181.513, 181.944], [184.013, 184.173], [184.836, 184.97], [185.039, 185.626], [186.716, 186.842],
+    [189.766, 189.913], [190.603, 190.914], [191.117, 191.853], [193.498, 193.653], [194.431, 195.244],
+    [197.287, 197.433], [197.594, 198.311],
+  ].map(([start, end]) => ({ start, end }));
+
+  type Kind = "H" | "B" | "Q" | "P";
+  const beat = (index: number, kind: Kind, from: number, to: number, text: string, cta = true) =>
+    ({
+      index,
+      scriptText: text,
+      narration: text,
+      visualPrompt: `picture ${index}`,
+      narrationStartSec: from,
+      narrationEndSec: to,
+      audioDuration: to - from,
+      audioUrl: `https://example.com/${index}.mp3`,
+      hostPresent: kind === "H",
+      stillImage: kind !== "H",
+      coverHero: kind === "B" ? true : undefined,
+      qrHero: kind === "Q" ? true : undefined,
+      qrTail: kind === "Q" ? true : undefined,
+      qrCorner: kind === "H" && cta ? true : undefined,
+      cta: cta ? true : undefined,
+      ctaIndex: cta ? 0 : undefined,
+      hostProtected: kind === "H" && cta ? true : undefined,
+    }) as StoryboardScene;
+  /** Job 406's scenes 30-34 as the gate got them. */
+  const block = () => [
+    beat(1, "P", 156.74, 164.46, "The downside is real: some mowers are just done, and you’ll eat a couple of corpses learning to tell the difference.", false),
+    beat(2, "H", 164.46, 171.023, "Three businesses in, and you can already see the pattern: the money lives in the math, not the hype."),
+    beat(3, "B", 171.023, 174.62, "That pattern fills a digital book called The Garage to Profit Bible,"),
+    beat(
+      4,
+      "H",
+      174.62,
+      198.271,
+      "put together under this channel’s name from the honest arithmetic working people actually run. Three hundred seventy pages, a hundred and one numbered hustles across thirteen chapters, each one printed with its real dollar range and a Know Your Limit panel that states the downside flat. Tonight covers seventeen under five hundred dollars; the book runs the same math on the other eighty-four."
+    ),
+    beat(
+      5,
+      "Q",
+      198.271,
+      219.76,
+      "There’s a QR code on your screen — aim your phone’s camera at it, and the page opens on its own. If it’s gone before you look up, the first line of this video’s description lands in the same place."
+    ),
+  ];
+  const cut = (words: { word: string; start: number; end: number }[]) => {
+    const r = enforcePlanRules(block(), params, { words, silences });
+    const cover = r.scenes.find(s => s.coverHero)!;
+    const host = r.scenes[r.scenes.indexOf(cover) + 1];
+    expect(cover.scriptText).toMatch(/working people actually run\.$/);
+    expect(host.scriptText).toMatch(/^Three hundred seventy pages,/);
+    expect(host.narrationStartSec).toBeCloseTo(cover.narrationEndSec!, 5);
+    return cover.narrationEndSec!;
+  };
+
+  it("on the words the cut was made from, it lands in the pause before the sentence, not at 180.69", () => {
+    const at = cut(voiced());
+    expect(at).toBeGreaterThanOrEqual(179.423);
+    expect(at).toBeLessThanOrEqual(180.162);
+  });
+
+  it("on the film's own words it stays where it was: the part of the pause after 'run.'", () => {
+    expect(cut(heard())).toBeCloseTo((179.528 + 180.162) / 2, 5);
+  });
+
+  it("a cut after a comma stays in the heard gap: a silence inside a heard word may be its own closure", () => {
+    // Mae's glimpse (job 205): "It takes me about ten minutes apiece, | and the cost is nothing…".
+    // A silence inside "apiece," (its "p" closure, 25.80-25.95) must not take the hand-off — only a
+    // sentence break reaches past the heard words to the pause.
+    const line =
+      "It takes me about ten minutes apiece, and the cost is nothing at all, because it's yarn I'd already paid for.";
+    const scenes = film([
+      ["H", 5, sentence(1)],
+      ["P", 9, sentence(2)],
+      ["P", 9, sentence(3)],
+      ["P", 8, line],
+      ["P", 9, sentence(4)],
+      ["P", 9, sentence(5)],
+      ["H", 5, sentence(6)],
+    ]);
+    const words: { word: string; start: number; end: number }[] = [];
+    let t = 23.1;
+    line.split(/\s+/).forEach((w, i) => {
+      const sec = i < 6 ? 0.38 : w === "apiece," ? 0.6 : 0.28;
+      if (i === 7) t = 26.5; // the gap after "apiece,"
+      words.push({ word: w, start: t, end: t + sec });
+      t += sec + 0.02;
+    });
+    const r = enforcePlanRules(scenes, params, {
+      budgetSec: 14,
+      words,
+      silences: [{ start: 25.8, end: 25.95 }],
+    });
+    const glimpse = r.scenes.find(s => s.hostPresent && s.scriptText?.startsWith("It takes"))!;
+    expect(glimpse.scriptText).toBe("It takes me about ten minutes apiece,");
+    expect(glimpse.narrationEndSec!).toBeGreaterThanOrEqual(words[6].end);
+    expect(glimpse.narrationEndSec!).toBeLessThanOrEqual(words[7].start);
+  });
+
+  it("a pause in the heard gap keeps the cut, even with a longer one past a word the transcript lost", () => {
+    // Job 404's own words and pauses (3:06-3:27): "…tap it. Or scroll down…" — the transcript lost
+    // "Or". The first pause after "it." (192.77-193.12) is the sentence's; the longer one after it
+    // (193.55-194.06) comes after "Or". Taking the longest pause within reach cut at 193.80 and gave
+    // "Or" to the picture finishing the sentence before.
+    const words404 = (
+      "The@180.601-180.701 robin@180.761-181.082 has@181.142-181.322 its@181.402-181.502 own@181.642-181.782 profile,@181.862-182.463 so@182.843-183.003 when@183.083-183.203 yours@183.243-183.504 slip@183.544-183.784 off@183.844-183.984 the@184.024-184.124 lawn,@184.144-184.505 you'll@184.705-184.925 know@184.965-185.105 what@185.145-185.285 draws@185.325-185.605 them@185.645-185.786 back.@185.826-186.126 " +
+      "If@186.906-186.967 your@186.987-187.127 phone's@187.167-187.427 within@187.487-187.767 reach,@187.867-188.168 point@188.468-188.668 its@188.708-188.828 camera@188.868-189.248 at@189.288-189.368 the@189.388-189.489 code@189.549-189.789 in@189.809-189.869 this@189.909-190.049 video,@190.109-190.569 and@190.79-190.89 when@190.91-191.07 a@191.11-191.13 link@191.19-191.41 shows@191.43-191.69 on@191.75-191.83 the@191.851-191.931 phone,@191.971-192.251 tap@192.511-192.771 it.@192.851-192.911 " +
+      "scroll@194.284-194.585 down@194.625-194.785 to@194.845-194.945 the@194.985-195.045 description@195.086-195.586 below@195.646-195.967 the@196.007-196.067 video@196.127-196.548 and@196.688-196.788 it's@196.828-196.949 on@196.989-197.049 the@197.089-197.169 very@197.229-197.469 first@197.529-197.79 line.@197.85-198.15 Today,@198.812-199.232 next@199.573-199.793 week,@199.873-200.654 or@200.675-200.715 once@200.835-201.015 the@201.075-201.155 snow@201.195-201.436 flies,@201.496-201.896 any@202.417-202.558 of@202.598-202.638 those@202.698-202.878 works@202.958-203.179 just@203.259-203.459 as@203.519-203.599 well.@203.659-203.92 " +
+      "Back@204.701-204.881 to@204.901-205.001 the@205.021-205.082 robins,@205.142-205.582 who've@205.843-206.043 picked@206.083-206.304 up@206.344-206.424 some@206.464-206.624 company.@206.684-207.085"
+    )
+      .split(" ")
+      .map(tok => {
+        const [, word, start, end] = /^(.*)@([\d.]+)-([\d.]+)$/.exec(tok)!;
+        return { word, start: Number(start), end: Number(end) };
+      });
+    const pauses404 = [
+      [179.869, 180.487], [182.437, 182.686], [186.106, 186.762], [188.218, 188.382], [190.528, 190.681],
+      [192.225, 192.431], [192.774, 193.116], [193.548, 194.057], [198.078, 198.72], [201.938, 202.228],
+      [203.867, 204.613], [205.621, 205.784], [205.887, 206.009], [207.058, 207.215],
+    ].map(([start, end]) => ({ start, end }));
+    // Laid out as a book cover finishing its sentence before the host comes back — the path that
+    // made job 406's cut.
+    const scenes = [
+      beat(1, "H", 180.487, 186.722, "The robin has its own profile, so when yours slip off the lawn, you’ll know what draws them back."),
+      beat(2, "B", 186.722, 192.45, "If your phone’s within reach, point its camera at the code in this video, and when a link shows on the phone,"),
+      beat(
+        3,
+        "H",
+        192.45,
+        204.2,
+        "tap it. Or scroll down to the description below the video, and it’s on the very first line. Today, next week, or once the snow flies, any of those works just as well."
+      ),
+      beat(4, "Q", 204.2, 207.1, "Back to the robins, who’ve picked up some company."),
+    ];
+    const r = enforcePlanRules(scenes, params, { words: words404, silences: pauses404 });
+    const cover = r.scenes.find(s => s.coverHero)!;
+    const host = r.scenes[r.scenes.indexOf(cover) + 1];
+    expect(cover.scriptText).toMatch(/tap it\.$/);
+    expect(host.scriptText).toMatch(/^Or scroll down/);
+    expect(cover.narrationEndSec!).toBeGreaterThanOrEqual(192.911);
+    expect(cover.narrationEndSec!).toBeLessThanOrEqual(193.116);
+    expect(host.narrationStartSec).toBeCloseTo(cover.narrationEndSec!, 5);
   });
 });

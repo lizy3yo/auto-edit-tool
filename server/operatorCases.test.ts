@@ -38,7 +38,7 @@ import {
   otherPersonOf,
   parseContextGroups,
 } from "./shotList";
-import { keepOwnWords } from "./narrationAlignment";
+import { assignSceneRanges, keepOwnWords } from "./narrationAlignment";
 import {
   ANON_PERSON_SUFFIX,
   APP_SCREEN_CLAUSE,
@@ -95,7 +95,7 @@ import {
   WORN_ON_BODY,
 } from "./hostLook";
 import { tooShortToRead, type ResolvedCue, type Word } from "../graphics/src/cueResolve";
-import { wordsSaidOver } from "../graphics/src/plan/planner";
+import { missingListCues, wordsSaidOver } from "../graphics/src/plan/planner";
 import { plannerForJob } from "./graphics/apply";
 import { makeReadable, type Reading } from "./graphics/readable";
 import { checkScript } from "@shared/scriptCheck";
@@ -2366,7 +2366,9 @@ describe("a general head before its examples is no list item (job 400 at 0:47, '
     const r = await findSpokenLists(`Maybe you have done that arithmetic. ${LINE}`, {
       ask: async () => '{"lists":[{"sentence":1,"kind":"things","items":["some ordinary place","a waiting room","a church pew"]}]}',
     });
-    expect(r.lists).toEqual([{ sentence: 1, items: ["a waiting room", "a church pew"] }]);
+    // The model left out the third place; the sentence shape holds it (job 401), so the list is three.
+    const PLACES = ["a waiting room", "a church pew", "the kitchen table at two in the morning"];
+    expect(r.lists).toEqual([{ sentence: 1, items: PLACES }]);
     const scenes = [
       pic(1, "Maybe you have done that arithmetic.", "an older man at a pharmacy counter"),
       pic(2, "Most people past sixty have — usually in silence, usually in some ordinary place, a waiting room, a church pew,", "an older man alone on a grey padded chair"),
@@ -2379,11 +2381,11 @@ describe("a general head before its examples is no list item (job 400 at 0:47, '
       ["Most people past sixty have — usually in silence, usually in some ordinary place,", false],
       ["a waiting room,", true],
       ["a church pew,", true],
-      ["the kitchen table at two in the morning when the house is too quiet.", false],
+      ["the kitchen table at two in the morning when the house is too quiet.", true],
       ["And the math always presents itself as the problem.", false],
     ]);
     // The shape rules agree when the call fails.
-    expect(spokenListsByShape([LINE])).toEqual([{ sentence: 0, items: ["a waiting room", "a church pew"] }]);
+    expect(spokenListsByShape([LINE])).toEqual([{ sentence: 0, items: PLACES }]);
   });
 
   it("a real first thing stays item 1: job 110's porch, and 'some glue'", () => {
@@ -4327,5 +4329,404 @@ describe("light the line or the description names is never staged (jobs 401, 405
     // The rule the check and the audit share is unchanged: an unnamed glowing lamp is still staged.
     expect(STAGED_RULE).toMatch(/glowing lamp, candle or golden glow/);
     expect(STAGED_QUESTION).toContain(STAGED_RULE);
+  });
+});
+
+describe("split panels are checked against their lines and name one thing (round 11, jobs 401 and 406)", async () => {
+  // The line check ran before any split existed and never read a panel, so a split's picture half
+  // shipped whatever its old cutaway or the panel rewrite said: job 401 scene 26 an empty chair for
+  // "I pull my chair in closer", job 406 scene 19 "a guided sharpening system or belt sander setup".
+  const { applyPanelFixes, oneThingPanels, parsePanelFixes, parsePictureFixes } = await import("./shotList");
+  const HOST = "the channel's host, exactly as in their host photo, seated in a chair talking directly to the camera";
+  const split = (index: number, line: string, panelWords: string, o: Partial<StoryboardScene> = {}) =>
+    ({ index, narration: line, scriptText: line, hostPresent: true, visualPrompt: HOST, splitVisual: panelWords, ...o }) as StoryboardScene;
+  const garage: KeyThing[] = [
+    { main: true, name: "sharpening system", look: "a tabletop guided knife sharpener, black plastic base with metal guide rods, clamps to bench edge" },
+    { name: "belt sharpening setup", look: "a benchtop machine with a spinning abrasive belt, metal frame, bolted to the garage workbench" },
+  ];
+
+  it("job 406 scene 19: the panel draws one thing, and is drawn from that thing's pictures", () => {
+    const s = split(
+      19,
+      "A guided sharpening system or a belt setup runs a hundred to three hundred dollars, and that’s the whole buy-in.",
+      "A guided sharpening system or belt sander setup sitting on a garage workshop bench, viewed from a step back, with hand tools and wall storage visible at the edges.",
+      { keyThing: "belt sharpening setup", otherKeyThings: ["sharpening system"] }
+    );
+    expect(oneThingPanels([s], garage)).toBe(1);
+    const drawn = buildSplitRightScene(s);
+    expect(drawn.showSubject).not.toMatch(/\bor\b/);
+    expect(drawn.showSubject).toMatch(/^A guided sharpening system sitting on a garage workshop bench/);
+    expect(s.keyThing).toBe("sharpening system");
+    expect(s.visualPrompt).toBe(HOST);
+  });
+
+  it("job 401 scene 26: a figure of speech the check rewrote is the panel; the host take is untouched", () => {
+    const line = "When a man like that sits down to write about time, I pull my chair in closer.";
+    const s = split(26, line, "A wooden chair pulled close to a desk in a quiet study, positioned as if just moved nearer.", { keyThing: "chair" });
+    const scenes = [s];
+    const answer = JSON.stringify({
+      pictures: [{ id: 0, about: "a man writing about time", shows_it: false, show: "a half-unrolled scroll and a reed pen on a wooden desk", thing: null }],
+    });
+    // The line check proper still never reads a panel; the panel pass does.
+    expect(parsePictureFixes(answer, scenes)).toEqual([]);
+    expect(applyPanelFixes(scenes, parsePanelFixes(answer, scenes), [{ name: "chair", look: "a wooden chair with a curved back" }])).toBe(1);
+    expect(buildSplitRightScene(s).showSubject).toBe("a half-unrolled scroll and a reed pen on a wooden desk");
+    expect(s.keyThing).toBeUndefined();
+    expect(s.visualPrompt).toBe(HOST);
+    expect(s.scriptText).toBe(line);
+  });
+
+  it("a panel the check says is right, and a panel with one thing, stay exactly as they were", () => {
+    const words = "A tabletop knife sharpener clamped to a garage workbench, a dull kitchen knife laid in its guide slot.";
+    const s = split(16, "Number one: knife and tool sharpening.", words, { keyThing: "sharpening system" });
+    const fixes = parsePanelFixes(JSON.stringify({ pictures: [{ id: 0, about: "knife sharpening", shows_it: true }] }), [s]);
+    expect(applyPanelFixes([s], fixes, garage)).toBe(0);
+    expect(oneThingPanels([s], garage)).toBe(0);
+    expect(s.splitVisual).toBe(words);
+    expect(s.keyThing).toBe("sharpening system");
+  });
+
+  it("a panel offering a choice is cut to one thing without gluing the halves together (job 150, a split panel)", () => {
+    // The first cut read "lined" as where the pouch sits and drew "a pot holder lined pouch" beside the host.
+    const s = split(
+      97,
+      "that code on your screen. Or look just below this video, and you'll find it right at the top.",
+      "A finished quilted pot holder or small lined pouch resting flat on the wooden sewing table by the window, morning light soft across its stitched surface, empty and at rest."
+    );
+    expect(oneThingPanels([s], undefined)).toBe(1);
+    expect(buildSplitRightScene(s).showSubject).toBe(
+      "A finished quilted pot holder resting flat on the wooden sewing table by the window, morning light soft across its stitched surface, empty and at rest."
+    );
+    // A describing word gives way to the other one, never leaving the name behind (job 154 scene 32's
+    // description, the same shape: "a simple wooden in a modest room").
+    const rail = split(32, "and now and again an English lady who wants a bit of handwork to hang over a rail.", "A small hand-pieced quilt draped over a simple wooden or metal rail in a modest room.");
+    oneThingPanels([rail], undefined);
+    expect(rail.splitVisual).toBe("A small hand-pieced quilt draped over a simple metal rail in a modest room.");
+  });
+});
+
+describe("a line with nothing to see never falls back to the main thing; a sound shows what makes it (round 11, jobs 401 and 404)", async () => {
+  // Job 401: the opening story's sympathy card (the main thing) came back under "Your problem is
+  // theft…" and "Then he turns the whole thing over in a single motion: life is not short" — the
+  // same blank card each time. Job 404 scene 20: 15 s of an empty storm window under the winter
+  // robin's soft clucking. The rules go to the shot list and the line check; these are the rewrites.
+  const { applyPictureFixes, FIT_SYSTEM, parsePictureFixes } = await import("./shotList");
+  const essay: KeyThing[] = [
+    { main: true, name: "sympathy card", look: "a plain cream card with a simple embossed border, held or resting on the desk" },
+    { name: "kitchen table", look: "a round wooden table with two chairs, a single dim lamp" },
+  ];
+  const birds: KeyThing[] = [
+    { main: true, name: "robin", look: "a plump songbird, brown-grey back, bright orange-red breast, white eye ring" },
+    { name: "storm window", look: "a clear glass pane in a white aluminum frame, closed tight through winter" },
+  ];
+
+  it("the line check holds an idea and a sound to what they are about", () => {
+    expect(FIT_SYSTEM).toMatch(/A LINE WITH NOTHING TO SEE/);
+    expect(FIT_SYSTEM).toMatch(/"The whole thing",\s+"all of it" or "that", summing up what was just said, point at the idea/);
+    expect(FIT_SYSTEM).toMatch(/Two lines\s+with nothing to see never share a picture/);
+    expect(FIT_SYSTEM).toMatch(/A SOUND\. A line about a sound/);
+    // The cases' own words never reach the rulebook.
+    expect(FIT_SYSTEM).not.toMatch(/sympathy|robin|storm window|clucking|theft/i);
+  });
+
+  it("job 401 scene 33: the card under an idea becomes a moment that carries it", () => {
+    const s = pic(33, "Then he turns the whole thing over in a single motion: life is not short.", "a cream sympathy card resting on the wooden desk in the study", { keyThing: "sympathy card" });
+    const fixes = parsePictureFixes(
+      JSON.stringify({
+        pictures: [
+          {
+            id: 0,
+            about: "the writer reversing the claim that life is short",
+            shows_it: false,
+            show: "a man in a toga at a lamplit desk, turning a papyrus scroll over in his hands, seen from the side",
+            thing: null,
+            other: "a Roman writer",
+          },
+        ],
+      }),
+      [s]
+    );
+    expect(applyPictureFixes([s], fixes, essay)).toBe(1);
+    expect(s.showSubject).not.toMatch(/card/);
+    expect(s.keyThing).toBeUndefined();
+    expect(s.otherPerson).toBe("a Roman writer");
+  });
+
+  it("job 404 scene 20: the robin the line is about, the window only where it is seen from", () => {
+    const line =
+      "Once nesting season is over, that job is done, and through the winter a robin hardly sings at all. Mostly you’ll hear a low, soft clucking, a bit like somebody tutting under their breath, and that’s easy to miss with the storm windows shut.";
+    const s = pic(20, line, "a closed storm window pane viewed from inside the kitchen", { keyThing: "storm window" });
+    const fixes = parsePictureFixes(
+      JSON.stringify({
+        pictures: [
+          {
+            id: 0,
+            about: "the robin, quiet in winter",
+            shows_it: false,
+            show: "a robin puffed up on the snowy lawn, beak closed, seen through the closed storm window from the kitchen",
+            thing: "robin",
+          },
+        ],
+      }),
+      [s]
+    );
+    expect(applyPictureFixes([s], fixes, birds)).toBe(1);
+    expect(s.keyThing).toBe("robin");
+    expect(s.otherKeyThings).toEqual(["storm window"]);
+  });
+});
+
+describe("one picture, one subject: two sentences about different things are two pictures (round 11, job 407 scene 20)", async () => {
+  // Job 407 scene 20: one still of hands steadying a log bolt in a forked stump ran 16.6 s, and for
+  // its first 8.5 s the voice talked about cabin roofs held down with heavy poles — the roof was never
+  // shown. The roof sentence's pieces had been joined, the riving sentence joined on as the same
+  // topic, and the line check could only split at a comparison and never a joined picture. It now
+  // splits where a sentence about a different thing starts, every part 3 s or more.
+  const { applyPictureFixes, applyPictureSplits, FIT_SYSTEM, parsePictureFixes } = await import("./shotList");
+  const cabin: KeyThing[] = [
+    { name: "heavy roof poles", look: "long round timber poles laid across the roof boards to weigh them down without nails" },
+    { name: "log bolts", look: "short round sections cut from a white oak or chestnut log, pale grey bark with cream-colored inner wood" },
+  ];
+  const roof = "The oldest cabins held long boards down with heavy poles laid across each course, so the roof went on without a nail.";
+  const rive = "When you rive, the bolt sits in a fork or against a stump, never in your hand.";
+  const bolt = "a log bolt wedged into a forked stump in the woodlot, hands steadying it from the side, a close-up of one detail of it filling the frame";
+
+  it("the line check is told to split there, and never a joined sentence inside", () => {
+    expect(FIT_SYSTEM).toMatch(/ONE PICTURE, ONE SUBJECT/);
+    expect(FIT_SYSTEM).toMatch(/A picture marked "joined" may be split this way, where a sentence starts/);
+    expect(FIT_SYSTEM).not.toMatch(/cabin|log bolt|woodlot|\bstump/i);
+  });
+
+  it("scene 20: the roof over the roof sentence, the bolt over the riving one", () => {
+    const s = pic(20, `${roof} ${rive}`, bolt, { joinedLine: true, keyThing: "log bolts", humanPresent: true, wordCut: true });
+    const fixes = parsePictureFixes(
+      JSON.stringify({
+        pictures: [
+          {
+            id: 0,
+            about: "heavy poles holding the roof boards down",
+            shows_it: false,
+            show: "long round timber poles laid across overlapping courses of pale oak boards on an old cabin roof",
+            thing: "heavy roof poles",
+            split: [{ from: "When you rive", show: "a log bolt wedged upright in a forked stump, hands steadying it from the side", thing: "log bolts" }],
+          },
+        ],
+      }),
+      [s]
+    );
+    applyPictureFixes([s], fixes, cabin);
+    const r = applyPictureSplits([s], fixes, cabin, () => 16.55);
+    expect(r.scenes.map(x => [x.scriptText, x.keyThing])).toEqual([
+      [roof, "heavy roof poles"],
+      [rive, "log bolts"],
+    ]);
+    // Read in 5 s, the riving sentence would be a ~2 s flash: the line stays one picture.
+    const quick = pic(20, `${roof} ${rive}`, bolt, { joinedLine: true });
+    expect(applyPictureSplits([quick], fixes, cabin, () => 5).split).toBe(0);
+  });
+
+  it("job 399 scene 16: the viewer's half of a split is never drawn as the crew member who pours", () => {
+    // The person changes where the sentence does: the check answering nobody else for the new picture
+    // is kept, not replaced by the line's someone-else.
+    const pour =
+      "airlines, the flight attendant pours your soda into a plastic cup packed with ice, fills it about halfway, and the rest of the can rolls off down the aisle on the cart.";
+    const ask = "On many of those carriers, you can have the whole thing just by asking.";
+    const s = pic(16, `${pour} ${ask}`, "hands pouring soda into an ice-filled plastic cup at the cart", {
+      joinedLine: true,
+      humanPresent: true,
+    });
+    const fixes = parsePictureFixes(
+      JSON.stringify({
+        pictures: [
+          {
+            id: 0,
+            about: "the flight attendant pouring",
+            shows_it: true,
+            who: "a flight attendant",
+            split: [{ from: "On many of those carriers", show: "hands holding a full unopened soda can on a tray table", other: null }],
+          },
+        ],
+      }),
+      [s]
+    );
+    applyPictureFixes([s], fixes, []);
+    const r = applyPictureSplits([s], fixes, [], () => 14.45);
+    expect(r.scenes.map(x => x.otherPerson)).toEqual(["a flight attendant", undefined]);
+  });
+});
+
+describe("the host introduced by one word of a two-word channel name (job 407)", () => {
+  // Sawdust Sam's "I am Sam, and this one is for anybody…" played as a split screen, with no name
+  // card, and the audit counted no introduction: only "Sawdust Sam" and "Sawdust" were looked for.
+  // "I'm Brenda" on Backyard Brenda's channel would have missed the same way.
+  const params = { faceImageUrl: "https://example.com/host.jpg", hostName: "Sawdust Sam" } as any;
+  const film = () => [
+    pic(8, "That steel is why the last skill on this list held the other twenty-four together.", "an axe head on a stump", {
+      stillImage: true,
+    }),
+    host(
+      9,
+      "I am Sam, and this one is for anybody who has wondered how a family got through a mountain winter on a woodlot and very little cash.",
+      { splitVisual: "a woodlot at the edge of a clearing" }
+    ),
+    pic(10, "The title says lost, which is too strong, since folk schools still teach plenty of these", "a folk school bench", {
+      stillImage: true,
+    }),
+  ];
+
+  it("the introduction is found, put on camera full frame, and counted by the audit", async () => {
+    const { markHostIntroductions } = await import("./longformVideo");
+    const { checkPlan } = await import("./planGate");
+    const scenes = film();
+    expect(checkPlan(scenes, params).stats.introductions).toBe(1);
+    expect(checkPlan(scenes, params).findings.filter(f => f.rule === 6).map(f => f.scene)).toEqual([9]);
+    markHostIntroductions(scenes, params.hostName, true);
+    expect(scenes[1]).toMatchObject({ hostPresent: true, hostIntro: true });
+    expect(scenes[1].splitVisual).toBeUndefined();
+    expect(checkPlan(scenes, params).findings.filter(f => f.rule === 6)).toEqual([]);
+    expect(scenes[0].hostIntro || scenes[2].hostIntro).toBeFalsy();
+  });
+
+  it("the same for 'I'm Brenda' — and a name's ordinary-word half is never the host", async () => {
+    const { introducesHost } = await import("./longformVideo");
+    expect(introducesHost("I'm Brenda, and if you keep a small yard, this one's for you.", "Backyard Brenda")).toBe(true);
+    expect(introducesHost("Look at the backyard here, after the rain.", "Backyard Brenda")).toBe(false);
+    expect(introducesHost("Sweep up the sawdust here, before it spreads.", "Sawdust Sam")).toBe(false);
+    expect(introducesHost("It's sterling silver, not plate.", "Scarlett Sterling")).toBe(false);
+    expect(introducesHost("You can see the Carolina Wren here, on the feeder.", "Walter Wren")).toBe(false);
+    // A sign-on after a greeting's comma or a dash is found however it goes on.
+    expect(introducesHost("Hi folks, Hank here in the shop today.", "Hank Hardwood")).toBe(true);
+    expect(introducesHost("Howdy — Sam here, back at the bench.", "Sawdust Sam")).toBe(true);
+  });
+
+  it("the plan gate never hands the introduction over between the two words of the name", async () => {
+    // With the host minutes spent, the gate walked back from a cut at no break and asked only the
+    // kept words whether they named the host — "…I'm Sawdust" did, so the take ended there and
+    // "Sam talking to you…" went under a picture. The name is now asked of the whole line.
+    const { enforcePlanRules } = await import("./planGate");
+    let t = 0;
+    const timed = (s: StoryboardScene, sec: number) => {
+      Object.assign(s, { narrationStartSec: t, narrationEndSec: t + sec, audioDuration: sec });
+      t += sec;
+      return s;
+    };
+    const scenes = [
+      timed(pic(1, "That steel is why the last skill held the other twenty-four together.", "an axe head", { stillImage: true }), 5),
+      timed(host(2, "So before we get going on any of it, I'm Sawdust Sam", { hostIntro: true, wordCut: true }), 6),
+      timed(pic(3, "talking to you from my shop today about a winter.", "a woodlot", { stillImage: true, wordCut: true }), 6),
+      timed(host(4, "Now, back to the cabin."), 5),
+    ];
+    const r = enforcePlanRules(scenes, params, { budgetSec: 11 });
+    expect(r.scenes[1].scriptText).toBe("So before we get going on any of it, I'm Sawdust Sam");
+    expect(r.scenes[2].scriptText).toMatch(/^talking to you/);
+  });
+});
+
+describe("the host comes back after the book cover on the whole number, never inside it (job 406)", () => {
+  // Gary's practice film at 3:00: the voice says "…working people actually run." — a 0.74 s pause
+  // (179.42-180.16) — "Three hundred seventy pages", and the picture changed from the book cover to
+  // the host at 180.69, after "Three hundred". The transcript heard the number as one late token,
+  // "370", and the word before it running on over the pause, and the cut was placed between those
+  // two heard edges. A cut made from text now lands in the pause before a sentence, and before a
+  // number its sound's start, not the transcriber's guess.
+  const HEARD =
+    "working@178.027-178.347 people@178.387-178.688 actually@178.888-179.308 run.@179.368-180.619 370@180.768-181.0 pages,@181.269-181.689 101@182.209-182.61 numbered@182.77-183.27 hustles@183.31-183.69 across@183.791-184.111 13@184.351-184.671 chapters,@184.731-185.212";
+  const words = HEARD.split(" ").map(tok => {
+    const [, word, start, end] = /^(.*)@([\d.]+)-([\d.]+)$/.exec(tok)!;
+    return { word, start: Number(start), end: Number(end) };
+  });
+  const silences = [
+    [174.458, 174.783], [177.95, 178.0], [178.597, 178.719], [178.85, 179.028], [179.423, 180.162],
+    [181.513, 181.944], [184.013, 184.173], [185.25, 185.6],
+  ].map(([start, end]) => ({ start, end }));
+  const NUMBER = "Three hundred seventy pages, a hundred and one numbered hustles across thirteen chapters.";
+  const cta = (s: StoryboardScene, from: number, to: number) =>
+    Object.assign(s, { cta: true, ctaIndex: 0, narrationStartSec: from, narrationEndSec: to, audioDuration: to - from });
+
+  it("the cover finishes its sentence and the host comes back in the pause, before 'Three hundred'", async () => {
+    const { enforcePlanRules } = await import("./planGate");
+    const scenes = [
+      cta(host(1, "Three businesses in, and you can already see the pattern.", { qrCorner: true, hostProtected: true }), 165, 171.023),
+      cta(
+        pic(2, "That pattern fills a digital book called The Garage to Profit Bible, put together under this channel’s name from the honest arithmetic", "the book", { coverHero: true, stillImage: true }),
+        171.023,
+        177.975
+      ),
+      cta(host(3, `working people actually run. ${NUMBER}`, { qrCorner: true, hostProtected: true }), 177.975, 185.4),
+      cta(pic(4, "There’s a QR code on your screen — aim your phone’s camera at it, and the page opens on its own.", "a garage bench", { qrHero: true, qrTail: true, stillImage: true }), 185.4, 199),
+    ];
+    const r = enforcePlanRules(scenes, { faceImageUrl: "https://example.com/host.jpg" } as any, { words, silences });
+    const cover = r.scenes.find(s => s.coverHero)!;
+    const back = r.scenes[r.scenes.indexOf(cover) + 1];
+    expect(cover.scriptText).toMatch(/working people actually run\.$/);
+    expect(back.scriptText).toBe(NUMBER);
+    expect(cover.narrationEndSec!).toBeGreaterThanOrEqual(179.423);
+    expect(cover.narrationEndSec!).toBeLessThanOrEqual(180.162);
+    expect(back.narrationStartSec).toBeCloseTo(cover.narrationEndSec!, 5);
+  });
+
+  it("the cut the aligner places from the scene text lands in the same pause, even with the number heard late", () => {
+    const late = words.map(x => (x.word === "run." ? { ...x, end: 179.528 } : x.word === "370" ? { ...x, start: 180.95, end: 181.19 } : x));
+    const fine = [...silences, { start: 180.665, end: 180.722 }].sort((a, b) => a.start - b.start);
+    const scenes = [pic(1, "working people actually run.", "the book", { coverHero: true }), host(2, NUMBER)];
+    const ranges = assignSceneRanges(scenes, late, 185.4, silences, fine);
+    expect(ranges[0].endSec).toBeGreaterThanOrEqual(179.423);
+    expect(ranges[0].endSec).toBeLessThanOrEqual(180.162);
+  });
+});
+
+describe("the list graphic shows every place the voice names, the last one too (job 401 at 0:49)", () => {
+  // Gideon's practice film: the voice says "…a waiting room, a church pew, the kitchen table at two in
+  // the morning when the house is too quiet." The list window "Some ordinary place" showed only
+  // "1 A waiting room / 2 A church pew" and closed as the table was said; the table played as a picture
+  // outside the list. The last item runs on into the sentence's closing clause with no comma or "and".
+  const SCRIPT =
+    "Maybe you have done that arithmetic. Most people past sixty have — usually in silence, usually in some ordinary place, a waiting room, a church pew, the kitchen table at two in the morning when the house is too quiet. And the math always presents itself as the problem.";
+  const PLACES = ["a waiting room", "a church pew", "the kitchen table at two in the morning"];
+  // What the voice was heard saying (job 401's transcript, 49.4-55.3 s).
+  const HEARD =
+    "A@49.395-49.435 waiting@49.475-49.775 room.@49.835-50.115 A@50.475-50.515 church@50.595-50.895 pew.@50.975-51.315 The@51.775-51.875 kitchen@51.915-52.215 table@52.275-52.636 at@52.696-52.776 2@52.936-53.016 in@53.056-53.116 the@53.136-53.216 morning@53.276-53.636 when@53.796-53.936 the@53.956-54.056 house@54.096-54.376 is@54.456-54.536 too@54.596-54.776 quiet.@54.876-55.276";
+  const heard: Word[] = HEARD.split(" ").map(tok => {
+    const [, text, start, end] = /^(.*)@([\d.]+)-([\d.]+)$/.exec(tok)!;
+    return { text, start: Number(start), end: Number(end) };
+  });
+
+  it("the list found is three places, whether the model left the third out or the call failed", async () => {
+    // The model's answer as job 400 gave it: the head and two places.
+    const r = await findSpokenLists(SCRIPT, {
+      ask: async () => '{"lists":[{"sentence":1,"kind":"things","items":["some ordinary place","a waiting room","a church pew"]}]}',
+    });
+    expect(r.lists).toEqual([{ sentence: 1, items: PLACES }]);
+    const failed = await findSpokenLists(SCRIPT, { ask: async () => "not json" });
+    expect(failed.lists).toEqual([{ sentence: 1, items: PLACES }]);
+  });
+
+  it("the table is the list's third picture and its graphic's third row", async () => {
+    const { lists: found } = await findSpokenLists(SCRIPT, { ask: async () => '{"lists":[]}' });
+    const scenes = [
+      pic(8, "Maybe you have done that arithmetic. Most people past sixty have — usually in silence, usually in some ordinary place,", "an older man sitting alone on a bench"),
+      pic(9, "a waiting room,", "empty waiting room with cushioned chairs under fluorescent light", { listCut: true }),
+      pic(10, "a church pew,", "empty polished wooden church pew with light through tall windows", { listCut: true }),
+      pic(11, "the kitchen table at two in the morning when the house is too quiet.", "round wooden kitchen table with two chairs and a dim lamp at night"),
+      host(12, "And the math always presents itself as the problem.", { splitVisual: "a desk in a study" }),
+    ];
+    const cut = applySpokenLists(scenes, found);
+    expect(cut.scenes.map(s => [s.scriptText, !!s.listCut])).toEqual([
+      ["Maybe you have done that arithmetic. Most people past sixty have — usually in silence, usually in some ordinary place,", false],
+      ["a waiting room,", true],
+      ["a church pew,", true],
+      // Before: no list mark, and the list window closed as these words began.
+      ["the kitchen table at two in the morning when the house is too quiet.", true],
+      ["And the math always presents itself as the problem.", false],
+    ]);
+    const film = {
+      scenes: [
+        { index: 9, narrationStartSec: 49.25, narrationEndSec: 50.35, scriptText: "a waiting room,", hostPresent: false, cta: false },
+        { index: 10, narrationStartSec: 50.35, narrationEndSec: 51.69, scriptText: "a church pew,", hostPresent: false, cta: false },
+        { index: 11, narrationStartSec: 51.69, narrationEndSec: 55.8, scriptText: "the kitchen table at two in the morning when the house is too quiet.", hostPresent: false, cta: false },
+      ],
+    };
+    const [graphic] = missingListCues([], heard, film as never, found);
+    expect((graphic.props.items as { say: string }[]).map(i => i.say)).toEqual(PLACES);
   });
 });

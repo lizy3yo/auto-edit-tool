@@ -15,9 +15,12 @@
  *     of examples ("some ordinary place, a waiting room, a church pew") is never an item
  *     (`withoutGeneralHead`), and a parallel series keeps its last member when it is said differently
  *     ("the farmer complains, the senator complains, and the young are already rehearsing the
- *     complaint", `withLastSeriesMember`). When the call fails,
+ *     complaint", `withLastSeriesMember`), and a last item that runs on into a clause of when, where
+ *     or why is its words up to that clause ("…a church pew, the kitchen table at two in the morning
+ *     when the house is too quiet", job 401, `itemBeforeClause`). When the call fails,
  *     `listsByShape` finds them by sentence shape alone ("X, Y, and Z") — the same rules, so a
- *     film is never worse off.
+ *     film is never worse off; and a list the model ended early where the shape holds more takes the
+ *     longer one (`endsEarly`).
  *  2. `applySpokenLists` — re-cuts the film so every item is exactly one picture, wherever the
  *     storyboard cut: a list that starts inside a host line hands over at its first item, words
  *     after the last item go to the next picture, and a piece that is NOT an item of any list loses
@@ -31,6 +34,7 @@ import type { StoryboardScene } from "@shared/types";
 import { invokeClaude } from "./claude";
 import { safeParseJSON } from "./jsonRepair";
 import { namedPeople } from "./hostLook";
+import { namesHostBefore } from "./hostIntro";
 import {
   FRESH,
   HOST_HANDOFF_MIN_WORDS,
@@ -165,16 +169,115 @@ const CLAUSE_START = new Set([
 ]);
 
 /**
+ * Words that open a clause saying WHEN, WHERE or WHY — what the rest of a sentence a list's last item
+ * runs on into opens on ("…the kitchen table at two in the morning WHEN the house is too quiet").
+ */
+const TRAILING_CLAUSE = new Set([
+  "when", "whenever", "where", "wherever", "while", "whilst", "because", "though", "although", "unless",
+]);
+
+/**
+ * A LAST ITEM IS KEPT WHEN IT RUNS ON INTO A CLAUSE (2026-10-18, Gideon's job 401 at 0:49): "…usually
+ * in some ordinary place, a waiting room, a church pew, the kitchen table at two in the morning when
+ * the house is too quiet." names three places, and the list graphic showed two — the third item ran
+ * on, with no comma and no "and", into the clause that ends the sentence, so it was 14 words: over the
+ * shape rules' limit (the run stopped before it) and the model's (one long item threw its whole list
+ * away). The item is its words up to the clause word (`TRAILING_CLAUSE`): "the kitchen table at two in
+ * the morning". Its own describing words stay ("at two in the morning"); only a clause of when, where
+ * or why goes, and it keeps the item's picture (`applySpokenLists`). Null when the piece has no such
+ * clause, when the clause is a word or two ("when needed"), when the words before it end on a
+ * preposition ("a plane for | when you need one") or name no thing (`namesAThing`, at most `maxWords`
+ * words: "the whole kit cost forty dollars | when I bought it" is a clause, never an item). Pure.
+ */
+export function itemBeforeClause(piece: string, maxWords = SHAPE_ITEM_MAX_WORDS): string | null {
+  const words = piece.trim().replace(/[.!?;:,]+$/, "").split(/\s+/).filter(Boolean);
+  const plain = (w: string) => w.toLowerCase().replace(/[^a-z']/g, "");
+  let lead = 0;
+  while (lead < words.length && JOINERS.has(plain(words[lead]))) lead++;
+  // Never "while" as a length of time ("the porch swing for a while when…").
+  const stop = words.findIndex((w, k) => k > lead && TRAILING_CLAUSE.has(plain(w)) && !/^(?:a|an|the)$/.test(plain(words[k - 1])));
+  // The clause word and at least two words of a clause after it.
+  if (stop < 0 || words.length - stop < 3) return null;
+  if (HEAD_ENDS.has(plain(words[stop - 1]))) return null;
+  const item = words.slice(0, stop).join(" ").replace(/[,;:—–-]+$/, "").trim();
+  // "the kind of thing people buy | when they visit" and "the moment the phone rings | while…" sum the
+  // list up or tell of a time; neither is one more thing in it.
+  const opening = words.slice(lead, Math.min(stop, lead + 3)).map(plain);
+  if (!item || [headWord(item), ...opening].some(w => singulars(w).some(s => SUMS_UP.has(s)))) return null;
+  // The words before the clause may be a clause themselves, with a verb `namesAThing` does not know:
+  // "a warm coat, a hot meal, the house GETS quiet when the kids go to bed" ends on what happens, not
+  // on a third thing, and with no "and" in front nothing else says so. Such a piece used to stop the
+  // run (too long for an item), so refusing it only keeps what the shape rules found before.
+  if (verbInHead(words.slice(lead, stop).map(plain))) return null;
+  return namesAThing(item, maxWords) ? item : null;
+}
+
+/**
+ * Whether an item's leading words — after its first word, up to its first preposition or clause word
+ * (`HEAD_ENDS`) — hold a word ending in "-s" with a word on each side of it: a present-tense verb
+ * between its subject and what follows ("the house GETS quiet", "the job GETS done"). Never the last
+ * of those words, which is what the item names ("the old work boots | by the door"), and never the
+ * word right after the first, where a plural names the thing ("the eggs getting cold", "the sales
+ * rack"). Pure.
+ */
+function verbInHead(words: string[]): boolean {
+  const end = words.findIndex((w, k) => k > 0 && HEAD_ENDS.has(w));
+  const head = words.slice(1, end < 0 ? words.length : end);
+  return head.some((w, k) => k > 0 && k < head.length - 1 && w.length >= 4 && /s$/.test(w) && !/(?:ss|us|is|'s)$/.test(w));
+}
+
+/** Head words of words that sum a list up rather than add to it ("the KIND of thing", "the WAY it…"). */
+const SUMS_UP = new Set(["kind", "sort", "type", "thing", "stuff", "one", "way", "moment", "time"]);
+
+/** Whether two list items are named the same way: both "a/the/some …", or both bare names. */
+const sameKind = (a: string, b: string) =>
+  DETERMINER.test(stripJoiners(a.trim())) === DETERMINER.test(stripJoiners(b.trim()));
+
+/**
+ * The model's list with a last item too long to be one (over `LIST_ITEM_MAX_WORDS`) cut before the
+ * clause it runs on into (`itemBeforeClause`) — job 401's "the kitchen table at two in the morning when
+ * the house is too quiet" threw away the whole list of three places. Only when the list is clearly one
+ * without it: two or more items before it, every one named the same way as the cut item (`sameKind`).
+ * A last item within the limit keeps every word: "the moment in the trip when they work" (job 399) is
+ * one point, its clause part of what it names. Returns the same array when nothing is cut. Pure.
+ */
+export function withLastItemCut(items: string[]): string[] {
+  if (!Array.isArray(items) || items.length < 3) return items;
+  const last = String(items[items.length - 1] ?? "");
+  if (tokenSpans(last).length <= LIST_ITEM_MAX_WORDS) return items;
+  const cut = itemBeforeClause(last, LIST_ITEM_MAX_WORDS);
+  if (!cut || !items.slice(0, -1).every(i => sameKind(String(i ?? ""), cut))) return items;
+  return [...items.slice(0, -1), cut];
+}
+
+/**
  * "and Facebook Marketplace by what each one does well" → "and Facebook Marketplace": an "and/or"
- * piece whose first few words name a thing and then run into a clause. Null otherwise. Pure.
+ * piece whose first few words name a thing and then run into a clause. A clause of when, where or why
+ * is cut first, so the item keeps its own describing words ("and the kitchen table at two in the
+ * morning | when the house is too quiet", `itemBeforeClause`, job 401). Null otherwise. Pure.
  */
 function lastItemBeforeClause(piece: string): string | null {
   if (!/^(?:and|or)\s/i.test(piece.trim())) return null;
+  const before = itemBeforeClause(piece);
+  if (before) return before;
   const words = piece.trim().split(/\s+/);
   const stop = words.findIndex((w, k) => k > 1 && CLAUSE_START.has(w.toLowerCase()));
   if (stop < 2 || stop > 6) return null;
   const item = words.slice(0, stop).join(" ");
   return namesAThing(item) ? item : null;
+}
+
+/**
+ * The same with no "and" in front ("a waiting room, a church pew, | the kitchen table at two in the
+ * morning when the house is too quiet", job 401): only after two or more items (`before`) named the
+ * same way (`sameKind`), so the words are clearly a list, and only before a clause of when, where or
+ * why (`itemBeforeClause`) — a piece that merely says more ("a saw, a drill, the whole kit cost forty
+ * dollars when I bought it") is no item. Null otherwise. Pure.
+ */
+function lastItemIntoClause(before: string[], piece: string): string | null {
+  if (before.length < 2 || /^(?:and|or)\s/i.test(piece.trim())) return null;
+  const cut = itemBeforeClause(piece);
+  return cut && before.every(t => sameKind(t, cut)) ? cut : null;
 }
 
 /**
@@ -228,8 +331,15 @@ export function listsByShape(sentence: string): string[][] {
       run = run.slice(firstDet);
     }
     // The last item may run straight on into the rest of the sentence with no comma ("…, and
-    // Facebook Marketplace by what each one does well"): its name is the words before the clause.
-    const tail = run.length && j < pieces.length ? lastItemBeforeClause(pieces[j]) : null;
+    // Facebook Marketplace by what each one does well"): its name is the words before the clause —
+    // with no "and" either, after two items, one of them maybe the first item ending the clause before
+    // the run ("…in a coat pocket, | a kitchen drawer, | the glove box of the car when…").
+    const runBare = run.every(t => !DETERMINER.test(stripJoiners(t)));
+    const firstThing = source ? (runBare ? trailingBareThing(source) : trailingThing(source)) : null;
+    const tail =
+      run.length && j < pieces.length
+        ? (lastItemBeforeClause(pieces[j]) ?? lastItemIntoClause([...(firstThing ? [firstThing] : []), ...run], pieces[j]))
+        : null;
     if (tail) run.push(tail);
     const bare = run.every(t => !DETERMINER.test(stripJoiners(t)));
     const lead =
@@ -555,8 +665,10 @@ export function parseSpokenLists(text: string, sentences: string[]): SpokenList[
     if (!steps && !itemsAreThings(sentences[n], items)) continue;
     // A step offered as a CHOICE ("…, or step back to the galley", job 399) is part of the step
     // before it, never the next one (`joinChoiceSteps`). A list of things keeps its "or": "a saw,
-    // a drill, or a plane" is three things to show.
-    const kept = steps ? joinChoiceSteps(sentences[n], items) : items;
+    // a drill, or a plane" is three things to show — and a last item that runs on into a clause of
+    // when, where or why past the item limit loses the clause, not the list (`withLastItemCut`, job
+    // 401: "the kitchen table at two in the morning when the house is too quiet").
+    const kept = steps ? joinChoiceSteps(sentences[n], items) : withLastItemCut(items);
     if (!validateSpokenList(sentences[n], kept, steps)) continue;
     // A parallel series the model ended one member early, at the member said differently ("…, the old
     // complain, and the young are already rehearsing the complaint", job 400), gets it back.
@@ -709,6 +821,37 @@ export function spokenListsByShape(sentences: string[], only?: Set<number>): Spo
   return out;
 }
 
+/** An item's words, for comparing two lists' items whatever their case or punctuation. */
+const wordsOf = (item: string) => tokenSpans(String(item ?? "")).map(t => t.tok).join(" ");
+
+/**
+ * Whether `longer` (a list the sentence shape found in `sentence`) is `list` (the model's) with the one
+ * last item the model left out because it ran on into a clause of when, where or why (job 401: "a
+ * waiting room, a church pew" without "the kitchen table at two in the morning | when the house is
+ * too quiet"): two lists of things in one sentence, every item of `list` word for word the item at the
+ * same place in `longer`, exactly one more item after them, said right before a `TRAILING_CLAUSE`
+ * word — and `list` still open, its last item not joined by "and"/"or". A list that closed on "and"
+ * is whole: Sam's job 407 "…an axe, a froe, and a drawknife, and the steel in those three was the one
+ * thing…" is three tools, and the shape's "and the steel" a new clause. A list of steps is never
+ * lengthened this way. Pure.
+ */
+export function endsEarly(list: SpokenList, longer: SpokenList, sentence: string): boolean {
+  if (list.kind === "steps" || longer.kind === "steps" || list.sentence !== longer.sentence) return false;
+  if (longer.items.length !== list.items.length + 1 || !list.items.length) return false;
+  if (!list.items.every((it, k) => wordsOf(it) === wordsOf(longer.items[k]))) return false;
+  const toks = tokenSpans(sentence).map(t => t.tok);
+  let cursor = 0;
+  let lastAt = -1;
+  longer.items.forEach((item, k) => {
+    const want = tokenSpans(String(item ?? "")).map(t => t.tok);
+    const at = cursor < 0 ? -1 : findTokens(toks, want, cursor);
+    // Where the model's last item starts: the word before it says whether its list was closed.
+    if (k === list.items.length - 1) lastAt = at;
+    cursor = at < 0 ? -1 : at + want.length;
+  });
+  return cursor > 0 && lastAt > 0 && !JOINERS.has(toks[lastAt - 1]) && TRAILING_CLAUSE.has(toks[cursor] ?? "");
+}
+
 /**
  * Every spoken list in the film's running text. One model call per ~250 sentences, each answer
  * double-checked by `validateSpokenList`; a batch whose call fails falls back to the shape rules for
@@ -742,8 +885,15 @@ export async function findSpokenLists(
     } else {
       // BOTH, always: a list the model missed but the sentence shape shows is kept too (Diane's job
       // 319: the model found none, and "Wash, towel, dryer, brush" lost its pictures).
-      for (const extra of spokenListsByShape(sentences, new Set(ids)))
-        if (!got.some(l => l.sentence === extra.sentence)) got.push(extra);
+      // And a list the model ended one item early, at an item that ran on into a clause of when, where
+      // or why, is the shape's longer one (`endsEarly`; job 401: the model gave "a waiting room, a
+      // church pew" and left out "the kitchen table at two in the morning", before "when the house is
+      // too quiet" — the list graphic showed two of three places).
+      for (const extra of spokenListsByShape(sentences, new Set(ids))) {
+        const shorter = got.findIndex(l => l.sentence === extra.sentence && endsEarly(l, extra, sentences[extra.sentence]));
+        if (shorter >= 0) got[shorter] = extra;
+        else if (!got.some(l => l.sentence === extra.sentence)) got.push(extra);
+      }
       got.sort((a, b) => a.sentence - b.sentence);
     }
     lists.push(...got);
@@ -1061,11 +1211,24 @@ export function applySpokenLists(
       ? (scenes[G[a].scene].scriptText ?? "").slice(G[a].end, G[b].start)
       : `${(scenes[G[a].scene].scriptText ?? "").slice(G[a].end)} ${(scenes[G[b].scene].scriptText ?? "").slice(0, G[b].start)}`;
   const punctBetween = (a: number, b: number) => /[,.;:!?]/.test(between(a, b));
-  const nameToks = tokenSpans(opts.hostName ?? "").map(t => t.tok);
+  // Where a clause of when, where or why that opens right after token `at` (no comma before it) ends:
+  // at its comma or full stop, in the same beat, within `LIST_ITEM_MAX_WORDS` words. Undefined
+  // otherwise — a clause that runs on into the next beat, or longer, is left where the beats cut it.
+  const clauseEnd = (at: number): number | undefined => {
+    if (at <= 0 || at >= G.length || !TRAILING_CLAUSE.has(toks[at]) || punctBetween(at - 1, at)) return undefined;
+    const sc = G[at - 1].scene;
+    for (let e = at + 1; e <= Math.min(G.length, at + LIST_ITEM_MAX_WORDS); e++) {
+      if (G[e - 1].scene !== sc) return undefined;
+      if (e === G.length || punctBetween(e - 1, e)) return e;
+    }
+    return undefined;
+  };
 
   interface Region {
     starts: number[];
     end: number;
+    /** Where the last item's own words end, when its picture runs on over a clause (`clauseEnd`). */
+    nameEnd?: number;
     first: number;
     last: number;
     kind?: SpokenList["kind"];
@@ -1105,12 +1268,21 @@ export function applySpokenLists(
     });
     // The last item keeps its own few describing words up to the next comma.
     let end = ranges[ranges.length - 1][1];
+    let nameEnd: number | undefined;
     for (let n = 0; n < 4 && end < G.length && !punctBetween(end - 1, end); n++) end++;
     if (end < G.length && !punctBetween(end - 1, end)) {
       // Still mid-phrase after four words: the item's words run into a clause — cut at the item.
       end = ranges[ranges.length - 1][1];
+      // ...unless it is a clause of when, where or why the item runs on into in its own beat, which
+      // keeps the item's picture to its comma or full stop (job 401: "the kitchen table at two in the
+      // morning | when the house is too quiet." is one picture of the table at night). Cut off, those
+      // words were a picture of their own, a second or two long, between the list and what follows.
+      // The picture is still named by the item's own words: the clause may be about something else
+      // ("and a plane | when the boards come in rough"), and the plane is what it shows.
+      const clause = clauseEnd(end);
+      if (clause) [nameEnd, end] = [end, clause];
     }
-    regions.push({ starts, end, first: G[starts[0]].scene, last: G[end - 1].scene, kind: list.kind });
+    regions.push({ starts, end, nameEnd, first: G[starts[0]].scene, last: G[end - 1].scene, kind: list.kind });
   }
 
   const textOf = (a: number, b: number): string => {
@@ -1158,8 +1330,13 @@ export function applySpokenLists(
       !host.hostIntro &&
       !!scenes[r.first - 1]?.hostPresent;
     if (onlyList) return r.first > 0 || no("is the film's first line");
-    // The introduction keeps the host's name on camera: its list hands over only after the name.
-    if (host.hostIntro && nameToks.length && !kept.some((_, j) => nameToks.every((w, q) => kept[j + q] === w)))
+    // The introduction keeps the host's name on camera: its list hands over only after the name —
+    // the name as the introduction was found (`namesHostBefore`: "I am Sam" for Sawdust Sam, job 407).
+    if (
+      host.hostIntro &&
+      opts.hostName?.trim() &&
+      !namesHostBefore(host.scriptText ?? "", opts.hostName, G[r.starts[0]].start)
+    )
       return no("would take the host's name off the introduction");
     // Otherwise a list inside a host line ALWAYS becomes pictures (Lance's job 314: "A bin in the hall
     // closet, a bag in the garage, maybe a box under the bed. And there's a decent chance…" stayed on
@@ -1203,7 +1380,10 @@ export function applySpokenLists(
     const prefix = (head.scriptText ?? "").slice(0, G[r.starts[0]].start).trim();
     let leadIn: string | null = null;
     const bounds = [...r.starts, r.end];
-    const names = bounds.slice(0, -1).map((a, k) => bareItem(textOf(a, bounds[k + 1])));
+    // Where item k's own words end: the next item's start, and for the last item before any clause
+    // its picture runs on over (`nameEnd`).
+    const nameEndOf = (k: number) => (k + 2 === bounds.length && r.nameEnd ? r.nameEnd : bounds[k + 1]);
+    const names = bounds.slice(0, -1).map((a, k) => bareItem(textOf(a, nameEndOf(k))));
     // A GENERAL HEAD right before the first item ("some ordinary place," before "a waiting room,",
     // job 400 scene 8) gets no picture of its own: its words lead the first example's picture, as in
     // `splitListPieces` — whether the planner cut it as a beat of its own or it opens this beat. It is
@@ -1307,7 +1487,7 @@ export function applySpokenLists(
         items.push(asItem({ ...scenes[exact], listCut: true, wordCut: true, sameShot: undefined }));
         continue;
       }
-      const bare = bareItem(text);
+      const bare = bareItem(textOf(a, nameEndOf(k)));
       const named = new Set(tokenSpans(bare).map(t => stem(t.tok)).filter(w => w.length >= 4 && !PLAIN.has(w)));
       // A planner picture over most of these words that already shows this item keeps its look.
       const own = scenes.findIndex((s, j) => {

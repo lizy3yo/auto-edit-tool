@@ -24,7 +24,9 @@
 import type { StoryboardScene, LongformInputParams } from "../shared/types";
 import { sceneHoldPlan } from "../shared/filmTimeline";
 import type { SilenceInterval } from "./videoAssembly";
+import { retimeSpokenNumbers } from "./narrationAlignment";
 import { SHOWS_PERSON, showsSomeoneElse } from "./hostLook";
+import { namesHostBefore } from "./hostIntro";
 import {
   demoteHostToStill,
   promoteCutawayToHost,
@@ -540,7 +542,9 @@ const ANCHOR_WINDOW_WORDS = 6;
  * share is found, and the cut goes in a pause inside the gap before it when there is one, else in
  * the middle of the gap. When the script word the cut follows (`after`) was HEARD nearby, the cut
  * goes right after it instead — the nearest one, preferring the one heard ending the same way (a
- * full stop for a sentence). Null without enough words to go on. Pure — unit-tested via the gate.
+ * full stop for a sentence). After a sentence end with no pause in the heard gap, the cut goes in
+ * the longest real pause the two heard words reach, even one the transcript stretched a word over.
+ * Null without enough words to go on. Pure — unit-tested via the gate.
  */
 function gapBeforeWord(
   from: number,
@@ -573,11 +577,46 @@ function gapBeforeWord(
     }
     if (best > 0) k = best;
   }
-  const a = inSpan[k - 1].end;
-  const b = Math.max(a, inSpan[k].start);
+  const before = inSpan[k - 1];
+  const next = inSpan[k];
+  const a = before.end;
+  const b = Math.max(a, next.start);
+  const clamp = (t: number) => Math.min(to - 0.05, Math.max(from + 0.05, t));
+  // A pause inside the heard gap takes the cut, the first one: right after the heard word. Never
+  // the longest pause within reach in its place — job 404's "…tap it. | Or scroll down": the
+  // transcript lost "Or", and the longest pause in reach was the one AFTER it (193.55-194.06), which
+  // would have handed "Or" to the sentence before; the first is the sentence's own (192.77-193.12).
   const pause = (silences ?? []).find(p => p.end > a && p.start < b);
-  const cut = pause ? (Math.max(pause.start, a) + Math.min(pause.end, b)) / 2 : (a + b) / 2;
-  return Math.min(to - 0.05, Math.max(from + 0.05, cut));
+  if (pause) return clamp((Math.max(pause.start, a) + Math.min(pause.end, b)) / 2);
+  // No pause in the heard gap, at a SENTENCE break: the real pause between the two sentences sits
+  // under one of the heard words. Job 406: the book cover finished its sentence on "…actually run."
+  // and the host came back on "Three hundred seventy pages" — and the cut came out at 180.69, inside
+  // the spoken number, the middle of a transcript gap that sat wholly AFTER the 0.74 s pause
+  // (179.42-180.16): the word before heard running on over the pause, the number heard late (one
+  // short token, "370"). The longest real pause the two heard words' spans reach is taken — the
+  // window the aligner's own snap allows (`Gap` in narrationAlignment.ts). After a comma or inside a
+  // sentence the heard gap stands: a silence inside a heard word may be its own closure.
+  const reach = endMark(after) === "." ? longestPause(silences, before.start, next.end) : null;
+  if (reach) return clamp((Math.max(reach.start, before.start) + Math.min(reach.end, next.end)) / 2);
+  return clamp((a + b) / 2);
+}
+
+/** The pause with the most of itself inside [from, to], or null when none reaches in. */
+function longestPause(
+  silences: SilenceInterval[] | undefined,
+  from: number,
+  to: number
+): SilenceInterval | null {
+  let best: SilenceInterval | null = null;
+  let bestIn = 0;
+  for (const p of silences ?? []) {
+    const inside = Math.min(p.end, to) - Math.max(p.start, from);
+    if (inside > bestIn) {
+      best = p;
+      bestIn = inside;
+    }
+  }
+  return best;
 }
 
 /**
@@ -960,10 +999,18 @@ function finishSentenceAfterHost(
   // 2. BACK — the host hands over at its own last clause punctuation (the voice pauses there).
   const floor = Math.max(HOST_HANDOFF_MIN_SEC, host.minHoldSec ?? 0);
   const at = (b: number) => timeAtWord(host, b, opts.silences, opts.words);
+  // The introduction keeps the WHOLE name on the host, asked the way the shot list asks it
+  // (`namesHostBefore`): asked of the kept words alone, "I'm Hank" counted as an introduction and a
+  // walk back from a cut at no break handed over between the two words — "…I'm Hank | Hardwood
+  // talking to you…", "…I'm Sawdust | Sam…". With no host name there is no name to keep whole.
+  const keepsName = (b: number) => {
+    const said = hw.slice(0, b).join(" ");
+    return params.hostName?.trim()
+      ? namesHostBefore(hw.join(" "), params.hostName, said.length)
+      : introducesHost(said, params.hostName);
+  };
   const keeps = (b: number) =>
-    b >= HOST_HANDOFF_MIN_WORDS &&
-    at(b) - from >= floor &&
-    (!host.hostIntro || introducesHost(hw.slice(0, b).join(" "), params.hostName));
+    b >= HOST_HANDOFF_MIN_WORDS && at(b) - from >= floor && (!host.hostIntro || keepsName(b));
   const back = (b: number) =>
     handOff(
       at(b),
@@ -1461,8 +1508,14 @@ export function settleMotion(scenes: StoryboardScene[]): number {
 export function enforcePlanRules(
   input: StoryboardScene[],
   params: LongformInputParams,
-  opts: PlanGateOptions = {}
+  options: PlanGateOptions = {}
 ): PlanGateResult {
+  // Every cut below is placed from the transcript's word times, and a number's is a guess, usually
+  // late — put back where its sound begins first (job 406: "Three hundred | seventy pages").
+  const opts: PlanGateOptions =
+    options.words?.length && options.silences?.length
+      ? { ...options, words: retimeSpokenNumbers(options.words, options.silences) }
+      : options;
   let scenes = input;
   const fixes: string[] = [];
   const given = new Set<string>();

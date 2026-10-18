@@ -52,7 +52,9 @@ import {
   settleVideoKind,
   videoKind,
   fitPicturesToLines,
+  fitSplitPanelsToLines,
   judgeSelfMoving,
+  oneThingPanels,
   ownTypedPicture,
   ownTypedPanel,
 } from "./shotList";
@@ -212,6 +214,7 @@ import { presignOwnBucketUrl, storagePut } from "./storage";
 import { lightVideoFor } from "./lightVideo";
 import { voiceSpace69Labs } from "./tts69labs";
 import { applySpokenLists, findSpokenLists } from "./spokenLists";
+import { introSpans, introducesHost } from "./hostIntro";
 import { collectShownFacts, describeNamedLooks, namedLookClause } from "./namedLooks";
 import {
   classifyNarrationFailure,
@@ -5850,7 +5853,12 @@ export const SPLIT_PANEL_PERSON_FREE_DIRECTIVE =
   "panel is always a real photograph of real objects.\n" +
   "IMPORTANT: the narration decides the SUBJECT; the original prompt only supplies wording. If " +
   "the original prompt is about something this narration is not about, DISCARD it entirely and " +
-  'describe the narrated subject instead — here that outranks the "do not add new objects" rule.';
+  'describe the narrated subject instead — here that outranks the "do not add new objects" rule.\n' +
+  // Job 406 scene 19 (2026-10-18): the line offered a choice ("a guided sharpening system or a belt
+  // setup runs…") and the panel kept both, "… or belt sander setup …" — this lane's system prompt
+  // never said one thing. `oneThingPanels` cuts what still gets through.
+  'IMPORTANT: name ONE thing — never "X or Y", even when the narration offers a choice. The ' +
+  "picture model draws one thing.";
 
 /**
  * The CTA lane's replacement for `SPLIT_PANEL_PERSON_FREE_DIRECTIVE`, prepended to the split
@@ -11273,82 +11281,9 @@ export function lengthenPitchShots(
   return list;
 }
 
-/** Honorifics a host name carries that a host does not introduce themself by ("Granny Mae" → "Mae"). */
-const NAME_HONORIFIC =
-  /^(granny|grandma|grandpa|gramma|nana|aunt|auntie|uncle|mr|mrs|ms|miss|dr|pastor|farmer|chef|mama|papa)\.?$/i;
-
-/** The regexes that find the host introducing themself, built once per host name. */
-function introPatterns(hostName: string | undefined): RegExp[] {
-  const out: RegExp[] = [/\b[Mm]y name(?:['’]s| is)\s+[A-Z][\w'’-]*/g];
-  const name = hostName?.trim();
-  if (!name) return out;
-  const core = name.split(/\s+/).filter(p => !NAME_HONORIFIC.test(p));
-  const variants = new Set<string>([name]);
-  if (core.length) {
-    variants.add(core.join(" "));
-    variants.add(core[0]);
-  }
-  for (const v of Array.from(variants)) {
-    const esc = v
-      .replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
-      .replace(/\s+/g, "\\s+");
-    const notPossessive = "(?![\\w'’])";
-    out.push(
-      new RegExp(
-        `\\b(?:I['’]m|I am|this is|it['’]s|call me)\\s+${esc}${notPossessive}`,
-        "gi"
-      ),
-      new RegExp(`\\b${esc}\\s+here\\b`, "gi")
-    );
-  }
-  return out;
-}
-
-/**
- * Words that follow "I'm" at the start of a sentence without being a name ("I'm Not sure…"), so
- * the no-name backstop below never mistakes them for one.
- */
-const NOT_A_NAME =
-  /^(not|so|sure|sorry|going|glad|here|back|telling|talking|just|also|still|really|always|never|about|afraid|done|getting|looking|trying|the|a|an|in|on|at|from|with|over|sixty|seventy|eighty|one|two|three|four|five)$/i;
-
-/** Character spans [start, end) of every self-introduction in `text`. Pure. */
-export function introSpans(
-  text: string,
-  hostName: string | undefined
-): [number, number][] {
-  const spans: [number, number][] = [];
-  // No name to look for (a channel with neither a host name nor a display name): the FIRST
-  // "I'm <Name>" / "I am <Name>" near the start of the script is the introduction — hosts
-  // introduce themselves in the opening, so nothing later can be mistaken for one.
-  if (!hostName?.trim()) {
-    const opening = Math.max(700, Math.floor(text.length * 0.2));
-    for (const m of Array.from(text.matchAll(/\b(?:I['’]m|I am)\s+([A-Z][\w'’-]+)/g))) {
-      if (m.index! > opening) break;
-      if (NOT_A_NAME.test(m[1])) continue;
-      spans.push([m.index!, m.index! + m[0].length]);
-      break;
-    }
-  }
-  for (const re of introPatterns(hostName)) {
-    re.lastIndex = 0;
-    for (const m of Array.from(text.matchAll(re)))
-      spans.push([m.index!, m.index! + m[0].length]);
-  }
-  return spans;
-}
-
-/**
- * True when a line is the host introducing themself: "I'm Hank Hardwood", "I am Granny Mae",
- * "Hank here", "this is Ruth", "my name is…". Built from the channel's `hostName` (with and
- * without an honorific, and the first name alone) so it works for every channel without a
- * per-channel list. A possessive ("it's Hank's saw") is not an introduction. Pure — unit-tested.
- */
-export function introducesHost(
-  text: string | undefined,
-  hostName: string | undefined
-): boolean {
-  return introSpans(text ?? "", hostName).length > 0;
-}
+// The self-introduction finders (`introSpans`, `introducesHost`) live in ./hostIntro, where the
+// shot list and the list cutter reach them too; re-exported here, their old home.
+export { introSpans, introducesHost };
 
 /**
  * Put the host on camera wherever they introduce themself — a constant of the format, like the
@@ -11422,16 +11357,14 @@ export function startsSentence(scenes: StoryboardScene[], i: number): boolean {
 
 /**
  * Where the sentence that introduces the host begins inside `text` ("I'm Granny Mae", "my name is
- * Hank"), or 0 when it is the first sentence or there is none. Pure.
+ * Hank"), or 0 when it is the first sentence or there is none. Found by the same `introSpans` that
+ * flagged the beat `hostIntro`: this used to look for the host name's FIRST word only, so "I am Sam"
+ * on Sawdust Sam's channel (job 407), and "I'm Mae" on Granny Mae's, were never found here even once
+ * the beat was flagged, and the take kept the sentence before the name. Pure.
  */
 export function introSentenceStart(text: string, hostName?: string): number {
-  const first = hostName?.trim().split(/\s+/)[0];
-  const escaped = first?.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const intro = escaped
-    ? new RegExp(`\\b(?:I['’]m|I am|my name(?:'s| is)|this is)\\s+${escaped}`, "i")
-    : /\b(?:I['’]m|I am|my name(?:'s| is))\b/i;
-  const at = text.search(intro);
-  if (at <= 0) return 0;
+  const at = Math.min(Infinity, ...introSpans(text, hostName).map(([a]) => a));
+  if (!Number.isFinite(at) || at <= 0) return 0;
   let start = 0;
   const ends = /[.!?…]["'”’)\]]*\s+/g;
   let m: RegExpExecArray | null;
@@ -15987,6 +15920,10 @@ export async function enhanceBrollPrompts(
     const err = await enhanceSplit(item);
     if (err) noteFailure(item.scene.index, err);
   }
+  // ONE THING PER PANEL, whatever the rewrite (or its failure) left: every panel this call wrote —
+  // the pipeline's, a retrofit's, a retry's, an operator's non-verbatim prompt (`oneThingPanels`).
+  const splitScenes = new Set(splits.map(x => x.scene));
+  oneThingPanels(scenes, params.keyThings, s => splitScenes.has(s));
 
   // Deterministic book→on-topic swap over every scene's splitVisual, plus the literal-pitch swap
   // on every pitch beat's panel AND full-frame prompt (a phone, a screen, a QR code, a scan, a
@@ -17053,6 +16990,25 @@ async function runUnifiedPipeline(
   if (enhanceResult.failedScenes.length) {
     appendJobWarning(jobId, enhanceWarningFor(enhanceResult));
   }
+
+  // SPLIT PANELS, CHECKED AGAINST THEIR LINES (`fitSplitPanelsToLines`): the line check above ran
+  // before any panel existed, so a panel was never asked whether it shows what its line is about —
+  // job 401 scene 26 drew "I pull my chair in closer" as an empty chair, job 406 scene 19 "a guided
+  // sharpening system or belt sander setup". Only the panels are rewritten; then every panel names
+  // one thing, whatever the check left (`oneThingPanels`). Before the host-name scrub below.
+  if (!(await isMockMode())) {
+    const panels = await fitSplitPanelsToLines(scenes, {
+      keyThings: params.keyThings,
+      subject: params.videoSubject,
+    });
+    if (panels.fixed > 0)
+      console.log(
+        `[Longform ${jobId}] ${panels.fixed} of ${panels.checked} split panel(s) rewritten to show what their line is about`
+      );
+  }
+  const oneThing = oneThingPanels(scenes, params.keyThings);
+  if (oneThing > 0)
+    console.log(`[Longform ${jobId}] ${oneThing} split panel(s) named two things with "or" — cut to one`);
 
   // Safety net: no proper host name may reach 69labs ("well-known person" filter).
   // Scrub every scene's prompt fields once, after the last mutation stage, so

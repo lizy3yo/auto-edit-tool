@@ -2205,6 +2205,28 @@ describe("brollDepictsBook / non-CTA book guard", () => {
     );
   });
 
+  it("job 406 scene 19: a panel rewrite that kept the line's 'X or Y' names one thing", async () => {
+    // The line offered a choice and the panel kept both; the picture model drew one of them.
+    const scenes = [
+      sc({
+        index: 0,
+        hostPresent: true,
+        narration: "A guided sharpening system or a belt setup runs a hundred to three hundred dollars.",
+        visualPrompt: "the host talking",
+        splitVisual: "A guided sharpening system or belt sander setup sitting on a workshop bench.",
+      }),
+    ];
+    mockInvoke.mockResolvedValue({
+      text: "A guided sharpening system or belt sander setup sitting on a garage workshop bench, viewed from a step back.",
+    } as any);
+    await enhanceBrollPrompts(scenes, baseParams);
+    expect(scenes[0].splitVisual).toBe(
+      "A guided sharpening system sitting on a garage workshop bench, viewed from a step back."
+    );
+    expect(scenes[0].visualPrompt).toBe("the host talking");
+    expect(SPLIT_PANEL_PERSON_FREE_DIRECTIVE).toMatch(/name ONE thing — never "X or Y", even when the narration offers a choice/);
+  });
+
   it("scopes the splitVisual pass to onlyIndices, and runs with zero cutaways in scope", async () => {
     const scenes = [
       sc({
@@ -5582,6 +5604,44 @@ describe("introducesHost / markHostIntroductions", () => {
     ];
     expect(markHostIntroductions(scenes, "Hank Hardwood", false)).toEqual([]);
     expect(scenes[0].hostPresent).toBeUndefined();
+  });
+
+  it("finds a host named by the last word of a two-word channel name, and only there (job 407)", () => {
+    // Sawdust Sam's "I am Sam, and this one is for…" played as a split screen: only "Sawdust Sam"
+    // and "Sawdust" were looked for.
+    const scenes: StoryboardScene[] = [
+      {
+        index: 8,
+        narration: "n",
+        scriptText: "That steel is why the last skill on this list held the other twenty-four together.",
+        visualPrompt: "an axe head on a stump",
+        stillImage: true,
+      },
+      {
+        index: 9,
+        narration: "n",
+        scriptText:
+          "I am Sam, and this one is for anybody who has wondered how a family got through a mountain winter on a woodlot and very little cash.",
+        visualPrompt: "",
+        hostPresent: true,
+        splitVisual: "a woodlot beside a cabin",
+      },
+      {
+        index: 10,
+        narration: "n",
+        scriptText: "Sweep the sawdust here, before it spreads.",
+        visualPrompt: "a broom on a shop floor",
+        stillImage: true,
+      },
+    ];
+    expect(introducesHost(scenes[1].scriptText, "Sawdust Sam")).toBe(true);
+    expect(markHostIntroductions(scenes, "Sawdust Sam", true)).toEqual([]);
+    expect(scenes[1].hostIntro).toBe(true);
+    expect(scenes[1].splitVisual).toBeUndefined();
+    // "sawdust here" in a woodworking line is not the host signing on.
+    expect(scenes[0].hostIntro).toBeUndefined();
+    expect(scenes[2].hostIntro).toBeUndefined();
+    expect(scenes[2].hostPresent).toBeUndefined();
   });
 
   it("is never demoted by the adjacency pass or the host budget", () => {
@@ -11740,6 +11800,26 @@ describe("the self-introduction starts on the name", () => {
 
   it("leaves an introduction that already opens its take", () => {
     expect(introSentenceStart("I'm Hank Hardwood, and here we go.", "Hank Hardwood")).toBe(0);
+  });
+
+  it("finds the introducing sentence when the host is named by one word of the channel's name (job 407)", () => {
+    // It looked for the host name's FIRST word only: "Sawdust" never matched "I am Sam", nor
+    // "Granny" "I'm Mae", so the take kept the sentence before the name.
+    const lead = "That steel is why the last skill on this list held the other twenty-four together. ";
+    const intro = "I am Sam, and this one is for anybody who has wondered how a family got through a mountain winter.";
+    expect(introSentenceStart(lead + intro, "Sawdust Sam")).toBe(lead.length);
+    expect(introSentenceStart("It sold for nine dollars. I'm Mae, and this one's for you.", "Granny Mae")).toBe(
+      "It sold for nine dollars. ".length
+    );
+    expect(introSentenceStart(intro, "Sawdust Sam")).toBe(0);
+    // A line with no introduction in it is left alone.
+    expect(introSentenceStart(lead + "Sawdust here gets into everything.", "Sawdust Sam")).toBe(0);
+    const scenes = [
+      { index: 1, scriptText: "The steel was the one thing that homestead could not grow.", visualPrompt: "p" },
+      { index: 2, scriptText: lead + intro, hostPresent: true, hostIntro: true, visualPrompt: "h" },
+    ] as StoryboardScene[];
+    expect(moveHostLeadIns(scenes, "Sawdust Sam")).toEqual([2]);
+    expect(scenes[1].scriptText).toBe(intro);
   });
 });
 

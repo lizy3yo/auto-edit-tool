@@ -22,7 +22,17 @@
 import type { BuildStage, KeyThing, RecurringPerson, StoryboardScene } from "@shared/types";
 import { invokeClaude } from "./claude";
 import { safeParseJSON } from "./jsonRepair";
-import { BODY_HAND, SHOWS_PERSON, showsPerson, namedPeople, namesOnlyAnimal, personKey } from "./hostLook";
+import {
+  BODY_HAND,
+  BODY_PART_WORDS,
+  REAL_HOLDER,
+  SHOWS_PERSON,
+  showsPerson,
+  namedPeople,
+  namesOnlyAnimal,
+  personKey,
+} from "./hostLook";
+import { hostNameRanges, namesHostBefore } from "./hostIntro";
 
 /** A picture shorter than this is a flash and folds into a neighbour. */
 export const SHOT_MIN_SEC = 1.2;
@@ -228,16 +238,17 @@ export const HOST_PART_MAX_SEC = 5;
 
 /**
  * Words the host says after their own name in `text` — the self-introduction may run long to
- * reach the name, and only what comes AFTER it counts against `HOST_PART_MAX_SEC`. Pure.
+ * reach the name, and only what comes AFTER it counts against `HOST_PART_MAX_SEC`. The name is
+ * found the way the introduction was (`hostNameRanges`): looked for as the WHOLE name only, "I am
+ * Sam" on Sawdust Sam's channel (job 407), or "I am Mae" on Granny Mae's, counted every word of the
+ * line. Pure.
  */
 export function wordsAfterName(text: string, hostName?: string): number {
-  const toks = tokenSpans(text).map(t => t.tok);
-  const name = tokenSpans(hostName ?? "").map(t => t.tok);
-  if (!name.length) return toks.length;
-  for (let i = toks.length - name.length; i >= 0; i--) {
-    if (name.every((w, k) => toks[i + k] === w)) return toks.length - (i + name.length);
-  }
-  return toks.length;
+  const toks = tokenSpans(text);
+  const named = hostNameRanges(text, hostName);
+  if (!named.length) return toks.length;
+  const end = named[named.length - 1][1];
+  return toks.filter(t => t.start >= end).length;
 }
 
 /**
@@ -591,7 +602,6 @@ export function applyShotPlan(
   const byScene = new Map(plans.map(p => [p.scene, p]));
   const originals = new Map<number, StoryboardScene>();
   const out: StoryboardScene[] = [];
-  const nameToks = tokenSpans(opts.hostName ?? "").map(t => t.tok);
   for (let si = 0; si < scenes.length; si++) {
     const s = scenes[si];
     let plan = byScene.get(s.index);
@@ -629,17 +639,16 @@ export function applyShotPlan(
         continue;
       }
       plan = { ...plan, shots: shotsLeft };
-      if (s.hostIntro && nameToks.length) {
-        const said = spans.slice(0, hostEnd).map(t => t.tok);
-        const hasName = said.some(
-          (_, i) =>
-            i + nameToks.length <= said.length &&
-            nameToks.every((w, k) => said[i + k] === w)
-        );
-        if (!hasName) {
-          out.push(s);
-          continue;
-        }
+      // The introduction keeps the name on the host — found as the introduction was found
+      // (`namesHostBefore`), so "I am Sam" (Sawdust Sam, job 407) may hand over after the name too;
+      // matched as the whole name only, every hand-off on such an introduction was refused.
+      if (
+        s.hostIntro &&
+        opts.hostName?.trim() &&
+        !namesHostBefore(text, opts.hostName, spans[hostEnd - 1].end)
+      ) {
+        out.push(s);
+        continue;
       }
       pieces.push({ at: 0, host: true });
       cursor = hostEnd;
@@ -1603,7 +1612,8 @@ const SHOT_LIST_SYSTEM =
   "line only refers to the MAIN thing, the MAIN thing), with what else the line names beside it, " +
   "and sets thing to its name exactly as the props list writes it (without MAIN). But a key thing " +
   "appears ONLY when the line is about it: a line about something else shows that, never the main " +
-  "thing out of habit (a line about the weather shows the weather). A later shot of a key thing " +
+  "thing out of habit (a line about the weather shows the weather; a line with nothing to see " +
+  "follows rule 1f). A later shot of a key thing " +
   "shows the SAME thing from another " +
   "spot — closer on one part, further back with the room around it, the other side, from above or " +
   "low down — the view the words point at, never the same view as the shot of it just before. A " +
@@ -1630,6 +1640,25 @@ const SHOT_LIST_SYSTEM =
   "A SHORT line stays ONE shot: when it names a thing and where or how it is used, sold or kept " +
   "(\"sell your quilts at the county fair\", \"list it on a buy-and-sell app\"), the one shot shows " +
   "them together — the thing in that place, or as a listing on a phone.\n" +
+  "1f. A LINE WITH NOTHING TO SEE. When a line carries an idea rather than a thing — an argument, " +
+  "a turn in the reasoning, a claim, a lesson, a feeling, a promise of what the video will show " +
+  "(\"then she turns the whole question around\", \"the money was never the real problem\", \"by " +
+  "the end you'll know why\") — the shot is an everyday moment that carries what it means: a person " +
+  "or a place the script already has, caught doing something that fits the thought (the neighbour " +
+  "from the story back at her own kitchen sink, a writer the script names at work), or the host at " +
+  "work. Someone who is not the host is shown as rule 6a says, with other set to who they are. " +
+  "Never the MAIN thing because nothing else came to mind: it appears only when the line " +
+  "names it or clearly points back at it, and \"the whole thing\", \"all of it\" or \"that\", summing " +
+  "up what was just said, point at the idea, never at a thing. Each such line gets its own moment: " +
+  "a later one never repeats a picture an earlier one already had — though one thought running on " +
+  "across sentences is still ONE shot (rule 2). A line that speaks of a thing by its quality, price, " +
+  "count or time is not one of these: it shows the thing (rules 1 and 5).\n" +
+  "1g. A SOUND. A line about a sound — a song, a call, a noise, a hum, a sound that has stopped — " +
+  "shows what makes it (an animal, a machine, a person, the weather) in the moment the line " +
+  "describes, where it is, and quiet when the line says it has gone quiet (\"the dog has stopped " +
+  "barking\" = the dog lying still by the gate). Never only the window, door or room the sound is " +
+  "heard through, even when the line names it — that is where the picture may be seen from, with " +
+  "the source in it — and never an empty place the line does not say is empty.\n" +
   "2. CHANGE THE PICTURE ONLY WHEN THE CONTEXT CHANGES. A new shot starts only where the words move " +
   "on to a DIFFERENT thing, place or action. While the words stay on the same thing — even across " +
   'several sentences — it is ONE shot: "a pile of old crates the neighbour set out by the curb" ' +
@@ -2202,6 +2231,24 @@ showing the topic of the line before it ONLY when its line names nothing new you
 kind of fire that likes to start while the house is asleep"), is WRONG: it gets its own picture of
 that new thing.
 
+A LINE WITH NOTHING TO SEE. When a line carries an idea rather than a thing — an argument, a turn
+in the reasoning, a claim, a lesson, a feeling, a promise of what the video will show — its picture
+is an everyday moment that carries what the line means: a person or a place the script already has,
+doing something that fits the thought, or the host at work. It is WRONG when it shows the video's
+MAIN thing only because nothing else fits: the main thing is right only when the line names it or
+clearly points back at it ("it", "this one", "the winner" after lines about it). "The whole thing",
+"all of it" or "that", summing up what was just said, point at the idea, never at a thing. Two lines
+with nothing to see never share a picture: when one shows again what an earlier such line's own
+picture showed (the same thing in the same place), the later one is WRONG — give it its own moment.
+A picture marked "continues" keeps the moment of the line right before it going and is not a repeat.
+A line that speaks of a thing by its quality, price, count or time is not one of these: it shows the
+thing.
+A SOUND. A line about a sound — a song, a call, a noise, a hum, a sound that has stopped — is about
+what makes it: the picture shows that source in the moment the line describes, where it is, quiet
+when the line says it has gone quiet. It is WRONG when it shows only a window, a door or a room the
+sound is heard through, or an empty place the line does not say is empty — even when the line names
+that window or room.
+
 WHAT NOT TO DO. A sentence RULES SOMETHING OUT when it says not to do something ("never…", "don't…"),
 says what something is NOT ("I don't mean…", "no, not the…"), what to use INSTEAD ("…instead of the
 plastic one"), what to keep away or out ("well away from the stove", "keep any flame out of the
@@ -2226,8 +2273,9 @@ make a loop", "stop the moment it feels snug"), and a count ("two coats instead 
 COUNT: two coats).
 
 Go through EVERY picture, one at a time, never skipping: first write what its line is about — its
-subject, not its last noun; for a line that only refers to a key thing, name the key thing — then
-whether the picture shows that, where the line puts it. Only then decide.
+subject, not its last noun; for a line that only refers to a key thing, name the key thing; for a
+sound, what makes it; for an idea, the idea — then whether the picture shows that, where the line
+puts it. Only then decide.
 
 "The one that…", "the winner", "the one I was proudest of" is one of the THINGS the video counts or
 compares (a project, a product, a choice) — work out which from the whole script, usually named in
@@ -2238,9 +2286,20 @@ the box of scraps beside it.
 A line that compares to something ELSE you can see — "the kind you see in …", "like the ones at …",
 "the kind you'd find in …" — ALWAYS gets that other thing as its own picture: SPLIT the line there.
 Give the exact first 2-5 words where the new picture starts, copied from the line, and what it shows.
-Split only when both parts are at least 4 words. Never split a picture marked "joined". A comparison
-the sentence rules out ("no, I don't mean the kind you see in the movies") is never split off or
-drawn.
+Split only when both parts are at least 4 words. Never split a picture marked "joined" inside a
+sentence. A comparison the sentence rules out ("no, I don't mean the kind you see in the movies")
+is never split off or drawn.
+
+ONE PICTURE, ONE SUBJECT. A picture whose line holds TWO OR MORE SENTENCES, where a later sentence
+is about a different thing you can see — another object, place, person or moment ("The town square
+has an old stone fountain. On Saturdays the farmers park their trucks along the edge to sell." = the
+fountain, then the farmers' trucks) — gets a new picture where that sentence starts: SPLIT there,
+from = the exact first 2-5 words of that sentence. Then about, shows_it and show answer for the words
+BEFORE the split only, and the split's show for the sentence it starts: when the picture fits only
+the later sentence, write show for the earlier words and give the split the picture as it already is. Split only when each part
+runs at least 3 seconds (its share of the picture's seconds) and is at least 4 words. Never split
+sentences that stay on the same thing — more said about it, the same thing from another side, an
+idea about it. A picture marked "joined" may be split this way, where a sentence starts.
 
 ONE IDEA, ONE PICTURE. A picture marked "same sentence" continues a sentence the picture before it
 started. When the two parts are ONE idea about one thing — the thing and where, how or what it is
@@ -2248,10 +2307,12 @@ used, sold or kept ("Sell your furniture | on Facebook Marketplace", "I hang the
 next to the mirror") — set join: true and write show: the ONE picture for the whole sentence. Keep
 them apart only when the second part moves on to a genuinely different thing worth its own picture.
 
-A picture marked "joined", or one you join, shows the WHOLE line in ONE picture — what the line is
+A picture marked "joined", or one you join, shows the WHOLE line in ONE picture (unless a later
+sentence of it moves on to a different thing, split as above) — what the line is
 really pointing at: the new thing it names when that is its point (a comparison: "it's the same wood
-they make baseball bats from" = the baseball bats), the main thing when the line is about it, or the
-things together when they belong together (the bookcase as a listing on a phone's buy-and-sell app).
+they make baseball bats from" = the baseball bats), the main thing when the line is about it (never
+for a line with nothing to see), or the things together when they belong together (the bookcase as a
+listing on a phone's buy-and-sell app).
 For a "joined" picture shows_it is false unless it already shows that.
 
 For each WRONG picture write the picture that fits: plain words, what is literally in the frame, one
@@ -2293,9 +2354,10 @@ forbids only when the picture's sentence rules something out.`;
 
 /**
  * A new picture starting inside a line, at `from` (its first words, verbatim). `other`: the person
- * who is not the host it shows (`otherPersonOf`), only when the check named one.
+ * who is not the host it shows (`otherPersonOf`) when the check named one, `null` when it answered
+ * that nobody else is in it (the host, the viewer, or no one), unset when it did not answer.
  */
-export type PictureSplit = { from: string; show: string; thing?: string; stage?: BuildStage; other?: string };
+export type PictureSplit = { from: string; show: string; thing?: string; stage?: BuildStage; other?: string | null };
 export type PictureFix = {
   id: number;
   show?: string;
@@ -2384,6 +2446,13 @@ const fitCandidate = (s: StoryboardScene) =>
   !s.hostPresent && !s.cta && !s.qrHero && !s.coverHero && !s.assetImageUrl && !s.showsBook && !s.splitVisual && !s.listSet;
 
 /**
+ * The split panels the panel pass reads and may rewrite (`fitSplitPanelsToLines`): a host beat's
+ * picture half, never a CTA beat's (its panel shows calm b-roll, not the pitch it sits beside).
+ */
+export const panelCandidate = (s: StoryboardScene) =>
+  !!s.hostPresent && !!s.splitVisual?.trim() && !s.cta && !s.qrHero && !s.coverHero && !s.assetImageUrl && !s.showsBook;
+
+/**
  * The model's fixes, kept only for candidate pictures: a rewrite where it said the picture does not
  * show what its line is about, and any split. Reads the per-picture answer (`pictures`) and the older
  * list of fixes (`fix`). With THE VIEWER, "you" in `who` or `other` is the viewer by name. Pure.
@@ -2393,6 +2462,25 @@ export function parsePictureFixes(
   scenes: StoryboardScene[],
   viewer?: RecurringPerson
 ): PictureFix[] {
+  return readPictureFixes(text, scenes, false, viewer);
+}
+
+/**
+ * The panel pass's answer (`fitSplitPanelsToLines`), kept only for split panels: a rewrite, its key
+ * thing and stage, and what the sentence rules out. A panel is never split or joined and shows
+ * nobody, so a split, a join, `who` and `other` are dropped. Pure.
+ */
+export function parsePanelFixes(text: string, scenes: StoryboardScene[]): PictureFix[] {
+  return readPictureFixes(text, scenes, true);
+}
+
+function readPictureFixes(
+  text: string,
+  scenes: StoryboardScene[],
+  panel: boolean,
+  viewer?: RecurringPerson
+): PictureFix[] {
+  const isCandidate = panel ? panelCandidate : fitCandidate;
   const parsed = safeParseJSON<any>(text);
   const data = parsed.success ? parsed.data : undefined;
   const entries: any[] = Array.isArray(data?.pictures)
@@ -2404,20 +2492,24 @@ export function parsePictureFixes(
   const clean = (v: unknown) => (typeof v === "string" ? v.trim().slice(0, 400) : "");
   for (const f of entries) {
     const id = pictureId(f?.id);
-    if (id == null || !scenes[id] || !fitCandidate(scenes[id])) continue;
+    if (id == null || !scenes[id] || !isCandidate(scenes[id])) continue;
     if (out.some(x => x.id === id)) continue;
-    const join = f?.join === true;
+    // A panel sits beside a host take whose timing is fixed: never joined or split, nobody in it.
+    const join = !panel && f?.join === true;
     const show = f?.shows_it === false || join ? clean(f?.show) : "";
-    const split: PictureSplit[] = (Array.isArray(f?.split) ? f.split : [])
+    const split: PictureSplit[] = (!panel && Array.isArray(f?.split) ? f.split : [])
       .map((x: any) => ({
         from: clean(x?.from),
         show: clean(x?.show),
         thing: clean(x?.thing) || undefined,
         stage: buildStageOf(x?.stage),
-        other: otherPersonFor(x?.other, viewer),
+        // Read like a rewrite's `other`: an answer of nobody else (null, "the host") is kept as null, so
+        // the new picture does not take the line's someone-else (`applyPictureSplits`); with THE VIEWER,
+        // "you" is the viewer by name (`otherPersonFor`).
+        other: !!x && typeof x === "object" && "other" in x ? otherPersonFor(x.other, viewer) ?? null : undefined,
       }))
       .filter((x: PictureSplit) => x.from && x.show);
-    const who = whoOf(f?.who, viewer);
+    const who = panel ? undefined : whoOf(f?.who, viewer);
     // WHAT THE SENTENCE RULES OUT rides even a picture the check left as it is: a right picture can
     // still come out of the picture model showing it.
     const forbids = forbidsOf(f?.forbids);
@@ -2425,7 +2517,7 @@ export function parsePictureFixes(
     // A stage the check answered (a stage word, or null for "no made thing") replaces the old one;
     // a missing field keeps it (`applyPictureFixes`). The person is read the same way.
     const answered = !!f && typeof f === "object" && "stage" in f;
-    const saidWho = !!f && typeof f === "object" && "other" in f;
+    const saidWho = !panel && !!f && typeof f === "object" && "other" in f;
     out.push({
       id,
       ...(join ? { join } : {}),
@@ -2676,10 +2768,29 @@ export function applyPictureJoins(
 }
 
 /**
+ * The token at `at` starts a new sentence: the words before it end on ".", "!" or "?" (a closing
+ * quote or bracket allowed) and a space — "$1.50" is one price, not two sentences. Pure.
+ */
+function startsSentenceAt(text: string, spans: TokenSpan[], at: number): boolean {
+  return at > 0 && /[.!?]["'’”)\]]*\s/.test(text.slice(spans[at - 1].end, spans[at].start));
+}
+
+/**
  * Split pictures where the check says a line names something NEW partway through: the words from
  * `from` on become their own picture showing it (`show`), the part before keeps its picture. A split
  * whose words are not in the line, or that would leave either part under 4 words, is skipped. The
  * new pieces have no timing yet — the caller re-cuts the film's ranges. Pure — returns a new list.
+ *
+ * ONE PICTURE, ONE SUBJECT (2026-10-18, job 407 scene 20): a split may also come where a SENTENCE
+ * starts that is about a different thing. One still ran 16.6 s over "The oldest cabins held long
+ * boards down with heavy poles laid across each course, so the roof went on without a nail. When you
+ * rive, the bolt sits in a fork or against a stump, never in your hand." — the roof sentence's two
+ * pieces had been joined for being short (`joinShortSplits`, `joinedLine`), the riving sentence
+ * joined on as the same topic (`joinSameContext`), and the check only ever split at a comparison and
+ * never a joined picture, so the roof was never shown. A joined picture is still never cut INSIDE a
+ * sentence — only where a new one starts — and a split that draws the picture before it again (the
+ * check writing the old picture into the split without rewriting the part before) shows nothing new
+ * and is dropped.
  */
 export function applyPictureSplits(
   scenes: StoryboardScene[],
@@ -2705,6 +2816,13 @@ export function applyPictureSplits(
     for (const cut of cuts) {
       const at = findPhraseAt(spans, cut.from, cursor + 1);
       if (at < 0) continue;
+      // A joined picture is one sentence made one picture on purpose ("Sell your furniture | on
+      // Facebook Marketplace"): it is cut again only where a new sentence starts.
+      if (s.joinedLine && !startsSentenceAt(text, spans, at)) continue;
+      // A split drawing the part before it again would be two copies of one picture and still leave
+      // the earlier words unshown: the line keeps the picture it had.
+      const before = starts.length ? starts[starts.length - 1].cut.show : s.showSubject ?? s.visualPrompt ?? "";
+      if (sameSubject(before, cut.show) || nearlySameSubject(before, cut.show)) continue;
       starts.push({ at, cut });
       cursor = at;
     }
@@ -2716,7 +2834,7 @@ export function applyPictureSplits(
       k > 0 &&
       (b - bounds[k - 1] < 4 ||
         (total > 0 && ((b - bounds[k - 1]) / spans.length) * total < SPLIT_PART_MIN_SEC));
-    if (starts.length === 0 || s.joinedLine || bounds.some(tooShort)) {
+    if (starts.length === 0 || bounds.some(tooShort)) {
       out.push(s);
       return;
     }
@@ -2749,18 +2867,30 @@ export function applyPictureSplits(
         // The person the check put in this new picture; else the line's, but only while the new part
         // still shows a person (the audit found "a woman customer" left on an incense holder, job 361
         // scene 32) — `markHostBroll` would otherwise draw them into a picture of something else.
-        otherPerson: cut.other ?? (showsPerson(cut.show) ? s.otherPerson : undefined),
-        otherPeople: cut.other ? otherPeopleOf(cut.other) : showsPerson(cut.show) ? s.otherPeople : undefined,
-        // Still the same sentence: what it rules out stays out of this part too.
+        // An answer of NOBODY ELSE is kept: a split where a new sentence starts is where the person
+        // changes (job 399 scene 16: "the flight attendant pours your soda…" then "you can have the
+        // whole thing just by asking" — the viewer's hands, which the line's someone-else would draw
+        // as the crew member).
+        otherPerson: cut.other !== undefined ? cut.other ?? undefined : showsPerson(cut.show) ? s.otherPerson : undefined,
+        otherPeople: cut.other
+          ? otherPeopleOf(cut.other)
+          : cut.other === undefined && showsPerson(cut.show)
+            ? s.otherPeople
+            : undefined,
+        // What the line rules out (answered for the whole line) stays out of this part too.
         forbids: s.forbids,
         stillImage: true,
         objectMotion: undefined,
         selfMoving: undefined,
         toolContact: contactToolWork(cut.show) ? true : undefined,
         pictureText: undefined,
+        // Soft print by the new picture's own words, as a rewrite reads it (`applyPictureFixes`).
+        blurPrint: blurredPrint(cut.show) ? true : undefined,
         sameShot: undefined,
         listCut: undefined,
         hostCandidate: undefined,
+        // Its own sentence's picture, not a join: a picture cut from a joined one is not joined.
+        joinedLine: undefined,
         wordCut: true,
       } as StoryboardScene);
       split++;
@@ -2856,8 +2986,395 @@ export async function fitPicturesToLines(
   const moved = fixes
     .filter(f => f.split?.length && merged.remap.has(f.id))
     .map(f => ({ ...f, id: merged.remap.get(f.id)! }));
-  const cut = applyPictureSplits(merged.scenes, moved, opts.keyThings, s => s.audioDuration ?? 0);
+  // A picture a join just made has no measured length (`FRESH`): its seconds are its parts', so a
+  // split of it — now allowed where a new sentence starts — still leaves no part under 3 s.
+  const lenOf = new Map<StoryboardScene, number>();
+  scenes.forEach((s, id) => {
+    const into = merged.scenes[merged.remap.get(id) ?? -1];
+    if (into) lenOf.set(into, (lenOf.get(into) ?? 0) + (s.audioDuration ?? 0));
+  });
+  const cut = applyPictureSplits(merged.scenes, moved, opts.keyThings, s => lenOf.get(s) ?? s.audioDuration ?? 0);
   return { scenes: cut.scenes, fixed, split: cut.split, joined: merged.joined };
+}
+
+// ─── One picture, one thing: never "X or Y" ─────────────────────────────────────────────
+
+/**
+ * A word that says where a thing is or what state it is in — so the end of the thing's own name, and
+ * of the second alternative: "… or belt sander setup | sitting on a garage workshop bench". A doing
+ * word (`DOING_WORD`) closes it too.
+ */
+const AFTER_A_THING =
+  /^(?:on|in|at|by|beside|next|near|with|under|over|against|from|of|for|inside|behind|below|above|across|along|around|atop|into|onto|through|between|among|beneath|underneath|that|which|where|while|whose|and|or|but|so|to|as|like|during|after|before|until|when|if|because|since|sitting|resting|lying|standing|hanging|leaning|propped|placed|laid|set|left|stacked|spread|perched|mounted|clamped|bolted|parked|tucked|displayed|arranged|scattered|piled|lined|waiting|glowing|burning|steaming|running|showing|displaying|holding|containing|filled|covered|marked|labeled|labelled|printed|made|used|related|attached|wrapped|facing|shown|seen|viewed|visible|nearby|still|rests|sits|lies|stands|hangs|leans|waits|shows|is|are|was|were)$/i;
+/**
+ * A word that opens a thing's name — so the start of the first alternative: "a | white or
+ * cream-colored smoke alarm", "a small packet of | crackers or cookies".
+ */
+const BEFORE_A_THING =
+  /^(?:a|an|the|its|their|his|her|my|your|our|this|that|these|those|some|each|every|another|either|on|in|at|by|beside|next|near|with|under|over|against|from|of|for|inside|behind|below|above|across|along|around|atop|into|onto|through|between|among|beneath|underneath|to|like|and|or|but|while|as|is|are|was|were|be)$/i;
+const DETERMINER = /^(?:a|an|the|its|their|his|her|my|your|our|this|that|these|those|some|each|every|another)$/i;
+/** A doing word, not a thing: a choice of verbs ("adjusting or pointing at", "stacked or fanned") is left alone. */
+const DOING_WORD = /^[a-z]{3,}(?:ing|ed)$/i;
+/**
+ * A THING whose name ends like a doing word. Read as one, it closed the second choice inside its own
+ * name and the cut glued the two halves together: "an old worn blanket or plain batting beneath it"
+ * came out "an old worn blanket batting beneath it" (job 154), "a table runner or small pieced wall
+ * hanging" came out "a table runner hanging" (job 166), "autumn foliage or market setting softly
+ * behind" came out "autumn foliage setting softly behind" (job 261). Read as a thing when it is a
+ * doing word, the doing word only goes with the dropped choice ("a large white cup or plate setting on
+ * the table" → "a large white cup on the table"), which still reads. "Hanging" is a thing only after
+ * "wall": as a doing word it is everywhere ("a pot holder hanging from a peg").
+ */
+const THING_ENDING_IN_ING =
+  /^(?:batting|bedding|building|ceiling|clothing|frosting|icing|railing|siding|stuffing|string|spring|topping|tubing|wedding|awning|shelving|decking|flooring|roofing|fencing|tiling|paneling|panelling|carpeting|plumbing|housing|lining|padding|molding|moulding|sapling|seedling|duckling|earring|pudding|wiring|setting)$/i;
+const isThingName = (word: string, before: string) =>
+  THING_ENDING_IN_ING.test(word) || (/^hanging$/i.test(word) && /^wall$/i.test(before));
+/**
+ * A word a picture writer puts after a doing word to say how it is done, so the thing's name has
+ * ended before the doing word: "a small square | folded neatly", "a bar | sliding up".
+ */
+const AFTER_A_DOING = /^(?:up|down|out|off|away|back|open|shut|flat|upright|[a-z]{3,}ly)$/i;
+/**
+ * A word that says what a thing does, so the first choice starts after it: "the shelf holds | jars or
+ * small glass spice tins" (cutting back past it would drop "shelf holds" with the first choice).
+ */
+const SAYS_WHAT_IT_DOES =
+  /^(?:holds|has|have|shows|sits|rests|lies|stands|hangs|leans|waits|contains|carries|keeps|needs|gets|makes|looks|seems|becomes|reads|wears)$/i;
+/** A describing word: a colour, a tone, a kind ("very dark | or black beads", "a different floral | or check print"). */
+const DESCRIBING =
+  /^(?:[a-z]{3,}(?:ful|ous|ive|ish|less|ral)|black|white|grey|gray|brown|red|blue|green|yellow|orange|pink|purple|cream|ivory|beige|tan|navy|dark|light|pale|bright|deep|plain)$/i;
+/**
+ * A word that describes the NAME after it rather than being the name: a describing word, a material,
+ * a pattern, a size or shape ("a simple wooden | or metal rail", "faded geometric | or floral print",
+ * "a small | or large bowl"). A choice that ends on one shares the name the second choice carries.
+ */
+const describesTheName = (w: string) =>
+  DESCRIBING.test(w) ||
+  /^[a-z]{4,}ic$|-(?:colou?red|toned|tone)$/i.test(w) ||
+  /^(?:wooden|wood|metal|plastic|glass|steel|iron|copper|brass|tin|cotton|wool|woollen|woolen|linen|leather|paper|stone|ceramic|porcelain|silver|gold|golden|velvet|silk|denim|rubber|vinyl|bamboo|wicker|cardboard|concrete|marble|clay|terracotta|stainless|aluminum|aluminium|oak|pine|maple|walnut|cedar|birch|teak|mahogany|check|checked|checkered|plaid|striped|patterned|spotted|dotted|tartan|small|large|big|tiny|little|tall|short|long|wide|narrow|thick|thin|old|new|worn|soft|heavy|round|square|simple|clean|smooth|rough|shiny|matte|indoor|outdoor|handmade|homemade|vintage|antique|modern)$/i.test(
+    w
+  );
+/** The word before an "or" that is no choice between two things: a count, "more or less", "with or without". */
+const NO_CHOICE_BEFORE =
+  /^(?:\d[\d.,/]*|one|two|three|four|five|six|seven|eight|nine|ten|twelve|twenty|thirty|fifty|hundred|few|several|more|less|sooner|later|with|whether|rather)$/i;
+/** The word after one: a count, "or so", "or similar", "or else", or a new clause ("… or it cracks", "… or is about to"). */
+const NO_CHOICE_AFTER =
+  /^(?:\d[\d.,/]*|one|two|three|four|five|six|seven|eight|nine|ten|twelve|twenty|thirty|fifty|hundred|few|several|so|not|more|less|fewer|else|other|another|any|anything|something|whatever|similar|nothing|never|without|it|they|you|we|he|she|i|this|that|these|those|there|its|their|is|are|was|were|be|has|have|had|will|can|could|would)$/i;
+/** A sentence saying what is NOT there bans every thing it names: "no writing or logos", "no face, head, or body". */
+const NEGATED_SENTENCE = /\b(?:no|not|without|never|neither|nor|none|nothing|nobody|any|whether)\b|n['’]t\b/i;
+
+/**
+ * A description naming ONE thing where it offered a choice: "A guided sharpening system or belt
+ * sander setup sitting on a garage workshop bench" → "A guided sharpening system sitting on a garage
+ * workshop bench" (job 406 scene 19's split panel, 2026-10-18 — the line offered the choice, every
+ * picture writer is told "never X or Y", and the panel path let it through: the picture model drew
+ * one of them, the cheap one its memory held, under "a belt setup runs $100 to $300"). The first
+ * thing is kept, unless the second is the longer and so carries the thing's name ("a coaster or small
+ * ornament" → "a small ornament"); a first choice that is only a word describing the name gives way
+ * to the second's ("a simple wooden or metal rail" → "a simple metal rail"). Cut only where both are
+ * clear: the first runs back to a word that opens a name (`BEFORE_A_THING`), the second ends within
+ * five words at a comma, the end, or a word saying where it is or what it is doing (`AFTER_A_THING`).
+ * Left exactly as written: a count ("one or two"), "or so", "more or less", "with or without", a
+ * sentence that says what is NOT there ("no face, head, or body"), a list closed by ", or", "A, B or
+ * C", a choice of doing words, and anything less clear. Replayed over the local storyboards (jobs
+ * 150-407): 30 of 1,277 split panels changed, each to one clean thing; run over the 15,554 full-frame
+ * descriptions as a harder test, the first version glued halves together ("a pot holder lined pouch",
+ * "a simple wooden in a modest room") and the rules above came from those rows. Pure.
+ */
+export function oneThingOnly(text: string): string {
+  let out = text;
+  for (let pass = 0; pass < 3; pass++) {
+    const next = cutOneChoice(out);
+    if (next === out) break;
+    out = next;
+  }
+  return out;
+}
+
+function cutOneChoice(text: string): string {
+  const bareOf = (w: string) => w.replace(/[^A-Za-z0-9'’-]+$/, "");
+  const lastOf = (s: string, marks: string[]) => Math.max(...marks.map(c => s.lastIndexOf(c))) + 1;
+  // ", or" closes a list ("no face, head, or body") or opens a new clause: never a cut.
+  const re = /(?<!,)\s+or\s+/gi;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text))) {
+    const before = text.slice(0, m.index);
+    if (NEGATED_SENTENCE.test(before.slice(lastOf(before, [".", ";", ":", "!", "?", "("])))) continue;
+    const clauseAt = lastOf(before, [",", ";", ":", ".", "!", "?", "(", "—", "–"]);
+    // The first alternative: back to the word that opens its name, or says what the thing does.
+    const xs = Array.from(before.slice(clauseAt).matchAll(/\S+/g));
+    let from = xs.length;
+    while (from > 0 && !BEFORE_A_THING.test(bareOf(xs[from - 1][0])) && !SAYS_WHAT_IT_DOES.test(bareOf(xs[from - 1][0])))
+      from--;
+    const x = xs.slice(from);
+    if (!x.length) continue;
+    const prev = bareOf(x[x.length - 1][0]);
+    const prevPrev = x.length >= 2 ? bareOf(x[x.length - 2][0]) : "";
+    if (NO_CHOICE_BEFORE.test(prev) || (DOING_WORD.test(prev) && !isThingName(prev, prevPrev))) continue;
+    // "chisels, planes or saws" is a list of three, not a choice of two.
+    if (from === 0 && x.length <= 2 && before[clauseAt - 1] === ",") continue;
+    // The second alternative: on to where its name ends, within five words.
+    const rest = text.slice(m.index + m[0].length);
+    const ys = Array.from(rest.matchAll(/[^\s—–]+/g));
+    const lead = ys[0]?.[0] ?? "";
+    if (!lead || ys[0].index !== 0 || /^[(\[“"]/.test(lead)) continue;
+    const leadBare = bareOf(lead);
+    // "wet or freshly styled", "ready or just stitched": a choice of states.
+    const howWord = /^(?:[a-z]{2,}ly|just|already|almost|newly|barely|half)$/i.test(leadBare);
+    if (NO_CHOICE_AFTER.test(leadBare) || DOING_WORD.test(leadBare) || howWord) continue;
+    // "… outdoors or in a covered market": a choice of places or of clauses, not of things.
+    if (AFTER_A_THING.test(leadBare) || (BEFORE_A_THING.test(leadBare) && !DETERMINER.test(leadBare))) continue;
+    let end = -1;
+    let words = 0;
+    let closedByWord = false;
+    for (let k = 0; k < Math.min(ys.length, 6); k++) {
+      const w = ys[k][0];
+      const bare = bareOf(w);
+      // A doing word after the name ("a guide | opened to a page", "a bar | sliding up"), never one in
+      // front of it ("a very old rusty dented metal tin", "a small lined pouch", job 150: "a pot holder
+      // or small | lined pouch" came out "a pot holder lined pouch") and never a thing's own name
+      // ("plain batting", `THING_ENDING_IN_ING`). The same holds for the doing words that say where a
+      // thing is: they end the name only when what follows says so.
+      const next = bareOf(ys[k + 1]?.[0] ?? "");
+      const doingShape = DOING_WORD.test(bare) && !/^during$/i.test(bare);
+      const ends = doingShape
+        ? !isThingName(bare, k > 0 ? bareOf(ys[k - 1][0]) : "") &&
+          (!next || bare !== w || AFTER_A_THING.test(next) || DETERMINER.test(next) || AFTER_A_DOING.test(next))
+        : AFTER_A_THING.test(bare);
+      if (k > 0 && (ends || /^[(\[“"]/.test(w))) {
+        end = ys[k - 1].index! + bareOf(ys[k - 1][0]).length;
+        words = k;
+        closedByWord = true;
+        break;
+      }
+      if (k === 5) break;
+      const dash = /^[—–]/.test(rest.slice(ys[k].index! + w.length));
+      if (bare !== w || dash || k === ys.length - 1) {
+        end = ys[k].index! + bare.length;
+        words = k + 1;
+        break;
+      }
+    }
+    if (end < 0) continue;
+    // A second choice that stops on a describing word stopped inside its name ("a bag or small | set
+    // of tools"): not clear, left as written. One that runs to a comma or the end is whole ("in
+    // cream or pale grey,").
+    const lastOfSecond = bareOf(ys[words - 1][0]);
+    if (closedByWord && describesTheName(lastOfSecond)) continue;
+    // ONE DESCRIBING WORD FOR ANOTHER: a first choice that ends on a word describing the name ("a
+    // simple wooden | or metal rail", "faded geometric | or floral print") shares the name the second
+    // choice carries, so only that word and the "or" go — keeping the first and dropping the second
+    // left "a simple wooden in a modest room" (job 154), "faded geometric in muted tones" (job 163).
+    // A second choice opening on "a" or "the" names a whole new thing: not clear, left as written.
+    // A second choice ENDING on a describing word is a whole choice like the first, and the usual rule
+    // below decides ("in light maple | or dark walnut." — swapping one word left "in light dark
+    // walnut", job 295).
+    if (describesTheName(prev) && DETERMINER.test(leadBare)) continue;
+    const swapOneWord = describesTheName(prev) && words >= 2 && !describesTheName(lastOfSecond);
+    // How much of `before` is kept (up to `keep`), the first word it drops, and what follows it.
+    let keep = before.length;
+    let dropped = x[0];
+    let tail: string;
+    if (swapOneWord) {
+      // An intensifier goes with its word ("very dark | or black beads" → "black beads").
+      const intensified =
+        x.length >= 2 && /^(?:very|quite|rather|fairly|slightly|really)$/i.test(bareOf(x[x.length - 2][0]));
+      dropped = intensified ? x[x.length - 2] : x[x.length - 1];
+      keep = clauseAt + dropped.index!;
+      tail = rest;
+    } else {
+      // The longer of the two carries the thing's name ("a coaster | or small ornament", "late autumn
+      // | or winter evening light"), and so does the second when the first is one describing word
+      // ("a white | or cream,"). A second opening on "a" or "the" would leave two: the first.
+      const keepSecond =
+        !DETERMINER.test(leadBare) && (words > x.length || (words === x.length && DESCRIBING.test(prev)));
+      if (keepSecond) keep = clauseAt + x[0].index!;
+      tail = keepSecond ? rest : rest.slice(end);
+    }
+    let head = before.slice(0, keep);
+    if (keep < before.length) {
+      // "a white or ivory smoke alarm" → "an ivory smoke alarm"; a sentence keeps its capital.
+      head = head.replace(/\b(a|an)(\s+)$/i, (_, art: string, gap: string) => {
+        const an = /^[aeiou]/i.test(tail) ? "an" : "a";
+        return (/^A/.test(art) ? an.charAt(0).toUpperCase() + an.slice(1) : an) + gap;
+      });
+      if (/^\s*$|[.!?:;]\s*$/.test(head) && /^[A-Z]/.test(dropped[0])) tail = tail.charAt(0).toUpperCase() + tail.slice(1);
+    }
+    // "either a stand mixer or a hand whisk" keeps one of them, without its "either".
+    const either = /\beither\s+/gi;
+    let at = -1;
+    for (let e = either.exec(head); e; e = either.exec(head)) if (e.index >= clauseAt) at = e.index;
+    if (at >= 0) {
+      const after = head.slice(at).replace(/^either\s+/i, "");
+      head = head.slice(0, at) + (/^E/.test(head.charAt(at)) ? after.charAt(0).toUpperCase() + after.slice(1) : after);
+    }
+    return head + tail;
+  }
+  return text;
+}
+
+/**
+ * Every split panel named as ONE thing (`oneThingOnly`). A key thing only the dropped choice named
+ * is no longer the panel's: the panel is drawn from its thing's pictures (`withSplitMemory`), and
+ * those must be of what the panel now shows. `only` limits it to the panels just written. Returns
+ * how many changed. Pure apart from mutating `scenes`.
+ */
+export function oneThingPanels(
+  scenes: StoryboardScene[],
+  things: KeyThing[] | undefined,
+  only?: (s: StoryboardScene) => boolean
+): number {
+  let n = 0;
+  for (const s of scenes) {
+    if (!s.hostPresent || !s.splitVisual || (only && !only(s))) continue;
+    const one = oneThingOnly(s.splitVisual);
+    if (one === s.splitVisual) continue;
+    const was = keyThingsIn(s.splitVisual, things).map(t => t.name);
+    const now = keyThingsIn(one, things).map(t => t.name);
+    s.splitVisual = one;
+    if (s.keyThing && was.includes(s.keyThing) && !now.includes(s.keyThing)) {
+      s.keyThing = now[0];
+      s.buildStage = undefined;
+    }
+    const others = s.otherKeyThings?.filter(name => name !== s.keyThing && (now.includes(name) || !was.includes(name)));
+    s.otherKeyThings = others?.length ? others : undefined;
+    n++;
+  }
+  return n;
+}
+
+// ─── Does each split panel show what its line is about? ─────────────────────────────────
+
+/**
+ * The panel pass's own rules, sent after `FIT_SYSTEM` (`systemSuffix`, so the line check's rulebook
+ * stays one cached block). Neutral examples only: the cases are in the tests.
+ */
+export const PANEL_FIT_RULES = `
+
+SPLIT PANELS — THIS PASS. Here the only pictures to check are the PANEL lines: a square picture shown
+BESIDE the host while the host says the line on camera. CONTEXT lines are pictures already checked
+and HOST/OTHER lines are said with nothing beside the host: read both for context, never answer for
+them. Judge every PANEL by all the rules above, and also:
+- A panel shows NO person: no face, body, hands or arms. When its line is about someone doing
+  something, the panel shows the thing it is done to or leaves behind, at rest. A rewrite never puts
+  a person or hands in it, so who and other are never set on a panel. The one exception is a body
+  part the line is about (hair, skin, nails): it is drawn on the host, close, the face not shown — a
+  panel showing it that way is RIGHT; never rewrite it into a product or a part lying on its own.
+- A FIGURE OF SPEECH about what the host does or feels ("I lean in a little closer", "that one
+  stopped me in my tracks") is never drawn as the empty prop of that action: the panel shows what
+  the line is really about.
+- A line about an idea with nothing literal to see shows what the idea points at, never the video's
+  MAIN thing unless the line names it or clearly refers to it. On a panel the everyday moment that
+  carries it is a place or a thing from the script, never a person.
+- A panel names ONE thing. A panel that says "X or Y" ("a stand mixer or a hand whisk on the
+  counter") is WRONG even when the line itself offers the choice: rewrite it as the one thing the
+  line and the pictures around it point at — the one a nearby picture shows, else the first the line
+  names.
+- A panel shows what ITS line is about: a thing only a neighbouring line talks about, added beside
+  or behind the subject, is WRONG — rewrite it without.
+- A panel is a real photograph: never a diagram, a cut-open or see-through view, a cross-section or
+  a view no camera could take.
+A panel is never split or joined. Answer one entry for EVERY PANEL line, with the same JSON.`;
+
+/**
+ * Put each panel rewrite on its panel, and ONLY the panel: the host take beside it (its prompt, its
+ * angle, its timing) is never touched. The panel's words, the seed a later redraw rewrites from, its
+ * key thing (the check's name, else the first the words name — the panel is drawn from that thing's
+ * pictures, `withSplitMemory`), the part, named look and words it was tied to while the new words
+ * still name them (`tieToTypedWords`), and its stage while it is still of the same thing. A rewrite
+ * with a person or hands in it is not used: a panel is person-free beside the host (a body part is
+ * drawn on the host by `buildSplitRightScene`, so that one is kept). Returns how many were rewritten.
+ * Pure apart from mutating `scenes`.
+ */
+export function applyPanelFixes(scenes: StoryboardScene[], fixes: PictureFix[], things: KeyThing[] | undefined): number {
+  let n = 0;
+  for (const f of fixes) {
+    const s = scenes[f.id];
+    if (!s || !panelCandidate(s)) continue;
+    if (f.forbids) s.forbids = f.forbids;
+    if (!f.show) continue;
+    const bodyPart = BODY_PART_WORDS.test(f.show) && !REAL_HOLDER.test(f.show);
+    if (showsPerson(f.show) && !bodyPart) continue;
+    const said = withoutNegatedPhrases(f.show);
+    const named = keyThingsIn(said, things);
+    const primary = (f.thing ? matchKeyThing(f.thing, things ?? []) : null) ?? named[0] ?? null;
+    const was = { thing: s.keyThing, stage: s.buildStage };
+    tieToTypedWords(s, said, things);
+    s.keyThing = primary?.name;
+    const others = named.map(t => t.name).filter(name => name !== primary?.name);
+    s.otherKeyThings = others.length ? others : undefined;
+    s.buildStage = f.stage !== undefined ? f.stage ?? undefined : was.thing === primary?.name ? was.stage : undefined;
+    s.splitVisual = f.show;
+    s.splitVisualSeed = f.show;
+    // Judged again on the new words (`judgeSelfMoving`) before any panel is made to move.
+    s.splitSelfMoving = undefined;
+    n++;
+  }
+  return n;
+}
+
+/**
+ * SPLIT PANELS ARE CHECKED AGAINST THEIR LINES (2026-10-18, the review of jobs 401-407). The line
+ * check (`fitPicturesToLines`) runs at voicing, before the host plan, and never read a split's
+ * picture half: the panels only exist once `enforceHostSplitMix` has picked them, from each host
+ * beat's old cutaway, and the panel rewrite after it (`enhanceBrollPrompts`) answers to the line's
+ * words, not to what the line is about. So job 401 scene 26, "When a man like that sits down to
+ * write about time, I pull my chair in closer", shipped an empty office chair beside the host — a
+ * figure of speech drawn literally, and with no person allowed in a panel, the action became a
+ * prop; scene 21, "Your problem is theft…", the video's main prop with no tie to the line; job 406
+ * scene 19, "A guided sharpening system or belt sander setup …", two things, one drawn; job 403
+ * scene 15 added the next line's subject behind its own. One pass, after the panels are written:
+ * every line in order, the panels marked, the same rulebook as the line check plus the panel's own
+ * rules (`PANEL_FIT_RULES`), on the same model. Only the panel is rewritten (`applyPanelFixes`),
+ * never the host half and never the timing. A batch with no panel costs nothing; any failure
+ * changes nothing. Returns how many panels were read and how many rewritten.
+ */
+export async function fitSplitPanelsToLines(
+  scenes: StoryboardScene[],
+  opts: { keyThings?: KeyThing[]; subject?: string } = {}
+): Promise<{ checked: number; fixed: number }> {
+  const BATCH = 80;
+  const fixes: PictureFix[] = [];
+  let checked = 0;
+  for (let from = 0; from < scenes.length; from += BATCH) {
+    const lines: string[] = [];
+    let panels = 0;
+    for (let i = Math.max(0, from - 4); i < Math.min(scenes.length, from + BATCH); i++) {
+      const s = scenes[i];
+      const said = (s.scriptText ?? "").trim().replace(/\s+/g, " ");
+      if (i >= from && panelCandidate(s)) {
+        panels++;
+        const secs = s.audioDuration ? ` (${s.audioDuration.toFixed(1)} s)` : "";
+        lines.push(`#${i} PANEL${secs}: said "${said}" | shows: ${s.splitVisual!.trim()}`);
+      } else if (fitCandidate(s)) {
+        lines.push(`CONTEXT: said "${said}" | shows: ${s.showSubject ?? s.visualPrompt ?? ""}`);
+      } else {
+        lines.push(`HOST/OTHER: "${said}"`);
+      }
+    }
+    if (!panels) continue;
+    try {
+      const r = await invokeClaude({
+        systemPrompt: FIT_SYSTEM,
+        systemSuffix: PANEL_FIT_RULES,
+        userMessage:
+          (opts.subject ? `VIDEO SUBJECT: ${opts.subject}\n` : "") +
+          (opts.keyThings?.length
+            ? `KEY THINGS: ${opts.keyThings.map(k => `${k.main ? "MAIN " : ""}${k.name}: ${k.look}`).join(" | ")}\n`
+            : "") +
+          `\n${lines.join("\n")}\n\nJSON:`,
+        maxTokens: 12000,
+        model: FIT_MODEL(),
+        effort: planningEffort("FIT_EFFORT"),
+        step: "Line check (split panels)",
+      });
+      fixes.push(...parsePanelFixes(r.text, scenes));
+      checked += panels;
+    } catch {
+      /* a failed check changes nothing */
+    }
+  }
+  return { checked, fixed: applyPanelFixes(scenes, fixes, opts.keyThings) };
 }
 
 // ─── Does something in each picture move by itself? ─────────────────────────────────────

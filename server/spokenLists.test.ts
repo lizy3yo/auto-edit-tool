@@ -2,7 +2,9 @@ import { describe, it, expect } from "vitest";
 import type { StoryboardScene } from "@shared/types";
 import {
   applySpokenLists,
+  endsEarly,
   findSpokenLists,
+  itemBeforeClause,
   itemsInOnePhoto,
   joinChoiceSteps,
   listsByShape,
@@ -13,6 +15,7 @@ import {
   spokenListsByShape,
   stepsByShape,
   validateSpokenList,
+  withLastItemCut,
   withLastSeriesMember,
   type SpokenList,
 } from "./spokenLists";
@@ -275,6 +278,36 @@ describe("the film is cut to fit its lists", () => {
     ]);
   });
 
+  it("Sawdust Sam (job 407): an introduction by one word of the name hands its list over after the name", () => {
+    // Matched as the whole name only, "I am Sam" never said "Sawdust Sam", so the list stayed on the host.
+    const scenes = [
+      host(1, "Hello.", { hostOpener: true }),
+      host(2, "I am Sam, and this one is for anybody standing at a chopping block with an axe, a froe, and a drawknife,", {
+        hostIntro: true,
+      }),
+      scene(3, "wondering how the cabin got built."),
+      host(4, "Bye."),
+    ];
+    const r = applySpokenLists(scenes, shapeLists(scenes), { hostName: "Sawdust Sam" });
+    expect(r.handed).toBe(1);
+    expect(rows(r.scenes).slice(1, 5)).toEqual([
+      ["I am Sam, and this one is for anybody standing at a chopping block with", true, false],
+      ["an axe,", false, true],
+      ["a froe,", false, true],
+      ["and a drawknife,", false, true],
+    ]);
+    // A list that comes before the name still stays with the host.
+    const before = [
+      host(1, "Hello.", { hostOpener: true }),
+      host(2, "With an axe, a froe, and a drawknife, I am Sam, and I build cabins.", { hostIntro: true }),
+      scene(3, "x."),
+      host(4, "Bye."),
+    ];
+    const kept = applySpokenLists(before, shapeLists(before), { hostName: "Sawdust Sam" });
+    expect(kept.handed).toBe(0);
+    expect(kept.skipped.join(" ")).toContain("would take the host's name off the introduction");
+  });
+
   it("leaves the host the list when the host would keep too little, lose the name, or speak on", () => {
     // A host line that is ONLY the list goes to the pictures (Lance's job 311); a host line that
     // keeps a few words before it does not hand over.
@@ -478,9 +511,12 @@ describe("a general head before its examples is never an item (job 400 at 0:47)"
     "Most people past sixty have — usually in silence, usually in some ordinary place, a waiting room, a church pew, the kitchen table at two in the morning when the house is too quiet.";
   const answer = (items: string[]) => JSON.stringify({ lists: [{ sentence: 0, kind: "things", items }] });
 
+  // Since job 401 the third place, which runs on into "when the house is too quiet", is an item too.
+  const PLACES = ["a waiting room", "a church pew", "the kitchen table at two in the morning"];
+
   it("the shape rules list the examples, not the head that ends the clause before them", () => {
-    expect(listsByShape(LINE)).toEqual([["a waiting room", "a church pew"]]);
-    expect(spokenListsByShape([LINE])).toEqual([{ sentence: 0, items: ["a waiting room", "a church pew"] }]);
+    expect(listsByShape(LINE)).toEqual([PLACES]);
+    expect(spokenListsByShape([LINE])).toEqual([{ sentence: 0, items: PLACES }]);
     // Any wording: a head that opens the sentence, an indefinite pronoun, a "certain kind of".
     expect(listsByShape("Some quiet spot, a porch swing, a park bench, and the front seat of a parked car.")).toEqual([
       ["a porch swing", "a park bench", "the front seat of a parked car"],
@@ -528,25 +564,26 @@ describe("a general head before its examples is never an item (job 400 at 0:47)"
     scene(3, "the kitchen table at two in the morning when the house is too quiet.", { showSubject: "a kitchen table at night" }),
     host(4, "And the math always presents itself as the problem."),
   ];
-  const cut = [
+  // `table`: whether the list holds the third place (found today, job 401; job 400 saved only two).
+  const cut = (table: boolean) => [
     ["Seventeen. He pays, he walks out to the parking lot, and the number rides home with him in the passenger seat.", false, false],
     ["Most people past sixty have — usually in silence, usually in some ordinary place,", false, false],
     ["a waiting room,", false, true],
     ["a church pew,", false, true],
-    ["the kitchen table at two in the morning when the house is too quiet.", false, false],
+    ["the kitchen table at two in the morning when the house is too quiet.", false, table],
     ["And the math always presents itself as the problem.", true, false],
   ];
 
   it("the film is cut on the examples: the head's words stay with their beat", () => {
     const r = applySpokenLists(film(), shapeLists(film()));
     expect(r.applied).toBe(1);
-    expect(rows(r.scenes)).toEqual(cut);
+    expect(rows(r.scenes)).toEqual(cut(true));
     expect(r.scenes[1].showSubject).toBe("an older man sitting alone on a grey padded chair against a pale wall");
   });
 
   it("a list saved before the rule, head and all, is cut the same way on a resume", () => {
     const saved: SpokenList[] = [{ sentence: 2, items: ["some ordinary place", "a waiting room", "a church pew"] }];
-    expect(rows(applySpokenLists(film(), saved).scenes)).toEqual(cut);
+    expect(rows(applySpokenLists(film(), saved).scenes)).toEqual(cut(false));
   });
 
   it("a head the planner cut as a picture of its own leads the first example's picture instead", () => {
@@ -564,7 +601,7 @@ describe("a general head before its examples is never an item (job 400 at 0:47)"
       ["Most people past sixty have — usually in silence, usually in", false],
       ["some ordinary place, a waiting room,", true],
       ["a church pew,", true],
-      ["the kitchen table at two in the morning when the house is too quiet.", false],
+      ["the kitchen table at two in the morning when the house is too quiet.", true],
       ["Bye.", false],
     ]);
     expect(r.scenes[1].showSubject).toBe("a row of grey padded waiting room chairs");
@@ -592,7 +629,8 @@ describe("a general head before its examples is never an item (job 400 at 0:47)"
         ["Maybe you have done that arithmetic. Most people past sixty have — usually in silence, usually in", true, false],
         ["some ordinary place, a waiting room,", false, true],
         ["a church pew,", false, true],
-        ["the kitchen table at two in the morning when the house is too quiet.", false, false],
+        // The shape rules find the third place too (job 401); the list job 400 saved has two.
+        ["the kitchen table at two in the morning when the house is too quiet.", false, lists !== saved],
         ["And the math always presents itself as the problem.", true, false],
       ]);
       expect(r.scenes[1].showSubject).toBe("a row of grey padded waiting room chairs against a pale wall");
@@ -1019,5 +1057,217 @@ describe("the bridge's group picture only when one photograph can hold the list 
     const bridge = r.scenes.find(s => s.scriptText === "and once the cedar is charred you just")!;
     expect(bridge.showSubject).toBe("a charred cedar scrap on the bench");
     expect(r.apart).toEqual(['"and once the cedar is charred…": a list of steps']);
+  });
+});
+
+describe("a last item that runs on into a clause is kept (Gideon's job 401 at 0:49)", () => {
+  // The voice names three places — "…a waiting room, a church pew, the kitchen table at two in the
+  // morning when the house is too quiet." — and the list graphic showed "1 A waiting room / 2 A church
+  // pew", closing as the table was said. The third item, with no comma and no "and" before the clause
+  // it runs into, was 14 words: the shape rules stopped before it, and the model left it out.
+  const LINE =
+    "Most people past sixty have — usually in silence, usually in some ordinary place, a waiting room, a church pew, the kitchen table at two in the morning when the house is too quiet.";
+  const PLACES = ["a waiting room", "a church pew", "the kitchen table at two in the morning"];
+  const answer = (items: string[], kind = "things") => JSON.stringify({ lists: [{ sentence: 0, kind, items }] });
+
+  it("an item is its words up to a clause of when, where or why — its own describing words kept", () => {
+    expect(itemBeforeClause("the kitchen table at two in the morning when the house is too quiet.")).toBe(
+      "the kitchen table at two in the morning"
+    );
+    expect(itemBeforeClause("and the kitchen table at two in the morning when the house is too quiet")).toBe(
+      "and the kitchen table at two in the morning"
+    );
+    expect(itemBeforeClause("the glove box of the car when you finally clean it out")).toBe("the glove box of the car");
+    expect(itemBeforeClause("the dryer vent because it stays warm")).toBe("the dryer vent");
+    expect(itemBeforeClause("the shed out back where the mower lives")).toBe("the shed out back");
+  });
+
+  it("no item when there is no such clause, it is a word or two, or the words before it are no thing", () => {
+    expect(itemBeforeClause("the kitchen table at two in the morning")).toBeNull();
+    expect(itemBeforeClause("the kitchen table when needed")).toBeNull();
+    // A preposition before the clause: the item's own words are not finished.
+    expect(itemBeforeClause("a plane for when you need one")).toBeNull();
+    // A clause, never an item; and words that sum the list up rather than add to it.
+    expect(itemBeforeClause("the whole kit cost forty dollars when I bought it")).toBeNull();
+    expect(itemBeforeClause("the kind of thing people buy when they visit")).toBeNull();
+    expect(itemBeforeClause("the moment the phone rings while you are out")).toBeNull();
+    expect(itemBeforeClause("honestly the money when it matters most")).toBeNull();
+    // "a while" is a length of time, not the start of a clause.
+    expect(itemBeforeClause("the porch swing for a while after supper")).toBeNull();
+    expect(itemBeforeClause("the porch swing for a while when the sun goes down")).toBeNull();
+    // Longer than an item may be.
+    expect(itemBeforeClause("the big old rocking chair my grandfather built out of oak and pine when he retired")).toBeNull();
+    // A clause with a verb between its subject and what follows: what happens, not a thing.
+    expect(itemBeforeClause("the house gets quiet when the kids go to bed")).toBeNull();
+    expect(itemBeforeClause("the job gets done when you stop rushing it")).toBeNull();
+  });
+
+  it("a plural that names the thing is no verb", () => {
+    expect(itemBeforeClause("the eggs getting cold while he read the paper")).toBe("the eggs getting cold");
+    expect(itemBeforeClause("the sales rack by the door when the store opens")).toBe("the sales rack by the door");
+    expect(itemBeforeClause("the old work boots by the door where they always sit")).toBe("the old work boots by the door");
+  });
+
+  it("the shape rules keep the third place, with or without 'and', and in any wording", () => {
+    expect(listsByShape(LINE)).toEqual([PLACES]);
+    expect(listsByShape(LINE.replace("a church pew, the", "a church pew, and the"))).toEqual([PLACES]);
+    expect(spokenListsByShape([LINE])).toEqual([{ sentence: 0, items: PLACES }]);
+    // A first item that ends the clause before the run counts toward the two.
+    expect(listsByShape("You'll find them in a coat pocket, a kitchen drawer, the glove box of the car when you finally clean it out.")).toEqual([
+      ["a coat pocket", "a kitchen drawer", "the glove box of the car"],
+    ]);
+    expect(listsByShape("They hide in a shoe, a glove, the dryer vent because it stays warm.")).toEqual([["a shoe", "a glove", "the dryer vent"]]);
+    expect(listsByShape("You need flour, sugar, butter when it is soft.")).toEqual([["flour", "sugar", "butter"]]);
+  });
+
+  it("the shape rules add nothing that is not clearly one more item", () => {
+    // Only one item before it: no list to keep.
+    expect(listsByShape("I sat on a bench, the kitchen table at two in the morning when the house is too quiet.")).toEqual([]);
+    // A clause, not a thing; a summing-up; a different kind of item (a bare name after "a/the …" items).
+    expect(listsByShape("I grabbed a saw, a drill, the whole kit cost forty dollars when I bought it.")).toEqual([]);
+    expect(listsByShape("We sold a quilt, a table runner, the kind of thing people buy when they visit.")).toEqual([]);
+    expect(listsByShape("I packed a saw, a drill, sandpaper when the store had it.")).toEqual([]);
+    // Two things, then what happens: no third item, and no list (two with no "and" are none).
+    expect(listsByShape("A warm coat, a hot meal, the house gets quiet when the kids go to bed.")).toEqual([]);
+    expect(listsByShape("A little patience, a steady hand, the job gets done when you stop rushing it.")).toEqual([]);
+    // ...while the same shape ending on one more thing is still a list of three.
+    expect(listsByShape("The coffee, the toast, the eggs getting cold while he read the paper.")).toEqual([
+      ["The coffee", "the toast", "the eggs getting cold"],
+    ]);
+    // A clause that is not when, where or why still stops the run (Dale's job 292 needs its "and").
+    expect(listsByShape("Today I'm ranking Etsy, craft fairs, Facebook Marketplace by what each one does well.")).toEqual([]);
+  });
+
+  it("the model's last item over the limit loses its clause, not the list", () => {
+    expect(withLastItemCut(["a waiting room", "a church pew", "the kitchen table at two in the morning when the house is too quiet"])).toEqual(PLACES);
+    expect(parseSpokenLists(answer(["some ordinary place", "a waiting room", "a church pew", "the kitchen table at two in the morning when the house is too quiet"]), [LINE])).toEqual([
+      { sentence: 0, items: PLACES },
+    ]);
+  });
+
+  it("the model's list is cut only when the item is too long, and only after two items named the same way", () => {
+    // Job 399: within the limit, a clause is part of what the item names.
+    const points = ["the exact words", "who to say them to", "the moment in the trip when they work"];
+    expect(withLastItemCut(points)).toBe(points);
+    const pitch =
+      "It's called A Hundred Air Hostess Secrets, a four hundred eighty-five page PDF, and every secret gives you the exact words, who to say them to, and the moment in the trip when they work.";
+    expect(parseSpokenLists(answer(points), [pitch])).toEqual([{ sentence: 0, items: points }]);
+    // Two items only, or a bare name before the cut "the …" item: left as they were (and refused).
+    const two = ["a church pew", "the kitchen table at two in the morning when the house is too quiet"];
+    expect(withLastItemCut(two)).toBe(two);
+    const mixed = ["flour", "sugar", "the butter from the fridge out in the garage when it has gone soft enough"];
+    expect(withLastItemCut(mixed)).toBe(mixed);
+    // Too long with no clause to cut: nothing to keep.
+    const long = ["a saw", "a drill", "the big old rocking chair my grandfather built out of oak and pine in the shed"];
+    expect(withLastItemCut(long)).toBe(long);
+  });
+
+  it("a list the model ended one item early takes the sentence shape's longer list", async () => {
+    const r = await findSpokenLists(`Maybe you have done that arithmetic. ${LINE}`, {
+      ask: async () => '{"lists":[{"sentence":1,"kind":"things","items":["a waiting room","a church pew"]}]}',
+    });
+    expect(r.fromModel).toBe(true);
+    expect(r.lists).toEqual([{ sentence: 1, items: PLACES }]);
+    // The model's list stands when the shape agrees, or holds more that is no item of it (job 407).
+    const same = await findSpokenLists("Get a saw, a drill, and a plane.", {
+      ask: async () => '{"lists":[{"sentence":0,"kind":"things","items":["a saw","a drill","a plane"]}]}',
+    });
+    expect(same.lists).toEqual([{ sentence: 0, items: ["a saw", "a drill", "a plane"] }]);
+    const tools = await findSpokenLists(
+      "But on the back wall hung an axe, a froe, and a drawknife, and the steel in those three was the one thing that homestead could not grow.",
+      { ask: async () => '{"lists":[{"sentence":0,"kind":"things","items":["an axe","a froe","a drawknife"]}]}' }
+    );
+    expect(tools.lists).toEqual([{ sentence: 0, items: ["an axe", "a froe", "a drawknife"] }]);
+  });
+
+  it("only the one item left out before a clause of when, where or why lengthens the model's list", () => {
+    const shape: SpokenList = { sentence: 1, items: PLACES };
+    expect(endsEarly({ sentence: 1, items: ["a waiting room", "a church pew"] }, shape, LINE)).toBe(true);
+    expect(endsEarly({ sentence: 1, items: ["A waiting room,", "a church pew."] }, shape, LINE)).toBe(true);
+    expect(endsEarly({ sentence: 1, items: PLACES }, shape, LINE)).toBe(false);
+    expect(endsEarly({ sentence: 1, items: ["a waiting room"] }, shape, LINE)).toBe(false);
+    expect(endsEarly({ sentence: 1, items: ["a church pew", "the kitchen table at two in the morning"] }, shape, LINE)).toBe(false);
+    expect(endsEarly({ sentence: 2, items: ["a waiting room", "a church pew"] }, shape, LINE)).toBe(false);
+    expect(endsEarly({ sentence: 1, items: ["a waiting room", "a church pew"], kind: "steps" }, shape, LINE)).toBe(false);
+    // Sam's job 407: the model's three tools closed on "and"; the shape's "and the steel" opens a new
+    // clause ("…was the one thing that homestead could not grow") — the model's list stands.
+    const tools = "But on the back wall hung an axe, a froe, and a drawknife, and the steel in those three was the one thing that homestead could not grow.";
+    expect(spokenListsByShape([tools])).toEqual([{ sentence: 0, items: ["an axe", "a froe", "a drawknife", "the steel"] }]);
+    expect(endsEarly({ sentence: 0, items: ["an axe", "a froe", "a drawknife"] }, { sentence: 0, items: ["an axe", "a froe", "a drawknife", "the steel"] }, tools)).toBe(false);
+    // An item the model left out that runs into nothing is the model's call ("…, the whole thing for forty bucks").
+    const kit = "Get a saw, a drill, a plane, the whole thing for forty bucks.";
+    expect(endsEarly({ sentence: 0, items: ["a saw", "a drill", "a plane"] }, { sentence: 0, items: ["a saw", "a drill", "a plane", "the whole thing for forty bucks"] }, kit)).toBe(false);
+  });
+
+  // Job 401 as it was cut (review pack scenes 7-12): the planner gave the table its own beat, clause
+  // and all, and the split after it is a fixed beat.
+  const job401 = () => [
+    scene(7, "and the number rides home with him in the passenger seat.", { showSubject: "man walking across a quiet parking lot toward his car" }),
+    scene(8, "Maybe you have done that arithmetic. Most people past sixty have — usually in silence, usually in some ordinary place,", {
+      showSubject: "an older man sitting alone and still on a bench, seen from the side, lost in thought",
+    }),
+    scene(9, "a waiting room,", { listCut: true, showSubject: "empty waiting room with cushioned chairs under fluorescent light" }),
+    scene(10, "a church pew,", { listCut: true, showSubject: "empty polished wooden church pew with light through tall windows" }),
+    scene(11, "the kitchen table at two in the morning when the house is too quiet.", {
+      showSubject: "round wooden kitchen table with two chairs and a dim lamp at night",
+    }),
+    host(12, "And the math always presents itself as the problem. Fewer years ahead than behind,", { splitVisual: "a desk in a study" }),
+  ];
+
+  it("the table is the third list picture, its own beat and picture kept", () => {
+    const r = applySpokenLists(job401(), shapeLists(job401()));
+    expect(r.applied).toBe(1);
+    expect(r.scenes.map(s => [s.scriptText, !!s.listCut, s.showSubject])).toEqual([
+      ["and the number rides home with him in the passenger seat.", false, "man walking across a quiet parking lot toward his car"],
+      [
+        "Maybe you have done that arithmetic. Most people past sixty have — usually in silence, usually in some ordinary place,",
+        false,
+        "an older man sitting alone and still on a bench, seen from the side, lost in thought",
+      ],
+      ["a waiting room,", true, "empty waiting room with cushioned chairs under fluorescent light"],
+      ["a church pew,", true, "empty polished wooden church pew with light through tall windows"],
+      ["the kitchen table at two in the morning when the house is too quiet.", true, "round wooden kitchen table with two chairs and a dim lamp at night"],
+      ["And the math always presents itself as the problem. Fewer years ahead than behind,", false, "picture 12"],
+    ]);
+  });
+
+  it("in one beat with the item, the clause keeps the item's picture to its full stop", () => {
+    const scenes = [
+      host(1, "Hi there."),
+      scene(2, "Most people past sixty have — usually in silence, usually in some ordinary place, a waiting room,"),
+      scene(3, "a church pew, the kitchen table at two in the morning when the house is too quiet."),
+      host(4, "Bye."),
+    ];
+    const r = applySpokenLists(scenes, shapeLists(scenes));
+    expect(rows(r.scenes).slice(2, 5)).toEqual([
+      ["a waiting room,", false, true],
+      ["a church pew,", false, true],
+      // Before: "the kitchen table at two in the morning" and a picture of its own for "when the house is too quiet."
+      ["the kitchen table at two in the morning when the house is too quiet.", false, true],
+    ]);
+    // Named by the item's own words, never the clause's.
+    expect(r.scenes[4].showSubject).toBe("the kitchen table at two in the morning");
+    const plane = [host(1, "Hi there."), scene(2, "You need a saw, a drill, and a plane when the boards come in rough and twisted."), host(3, "Bye.")];
+    const p = applySpokenLists(plane, shapeLists(plane));
+    expect(p.scenes.map(s => [s.scriptText, s.showSubject]).slice(4, 5)).toEqual([["and a plane when the boards come in rough and twisted.", "a plane"]]);
+  });
+
+  it("a clause that runs on into the next beat, or is not when, where or why, is left where it was", () => {
+    const split = [
+      host(1, "Hi there."),
+      scene(2, "Most people past sixty have — usually in silence, usually in some ordinary place, a waiting room,"),
+      scene(3, "a church pew, the kitchen table at two in the morning when the house"),
+      scene(4, "is too quiet."),
+      host(5, "Bye."),
+    ];
+    expect(rows(applySpokenLists(split, shapeLists(split)).scenes).slice(4, 6)).toEqual([
+      ["the kitchen table at two in the morning", false, true],
+      ["when the house is too quiet.", false, false],
+    ]);
+    const ranking = [host(1, "Hi there."), scene(2, "Today I'm ranking Etsy, craft fairs, and Facebook Marketplace by what each one actually does well."), host(3, "Bye.")];
+    expect(rows(applySpokenLists(ranking, shapeLists(ranking)).scenes).slice(4, 6)).toEqual([
+      ["and Facebook Marketplace", false, true],
+      ["by what each one actually does well.", false, false],
+    ]);
   });
 });
