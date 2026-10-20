@@ -897,6 +897,51 @@ Express · tRPC · Drizzle · MySQL.
   (s) The name card sits on the self-introduction even when short (edges shrink to 0.2 s, the 1.5 s
   hold kept), never on a take before it; a DimCaption is ≤ 10 words and darkening graphics are ≥ 3 s
   apart. Details and replay counts: `graphics-lab/out/round13-docs.json`; the reviews: `graphics-lab/out/review3/`.
+- **What the other four verification films found** (round 14, 2026-10-20). Walter, Luca, Gary and
+  Sam (jobs 411-414) against 404-407: 0 severe, noticeable down (Luca 14 → 2, Sam 8 → 4). 19 general
+  fixes, each replayed over the ~350 local storyboards. MEMORY: (a) A PLACE LENDS NO PICTURE (a lawn,
+  yard, room, aisle, landscape or the weather — `lendsNoPicture`): job 411's first yard was copied into
+  five pictures and its snow under Gulf Coast palms; a place keeps one written look, without season,
+  light or hour (`placeLook`), used only in pictures set in that same place (`placesSetIn`, the home
+  line too). (b) ANOTHER OF ITS KIND IS NOT THE KEPT ANIMAL: wild/stray/feral/every… before a pet's or
+  the host's stock's name, or someone else's ownership of any key thing, files the picture under
+  nothing and says it is not the one shown before (job 412's wild cats drawn as the house cat).
+  (c) A CONTINUATION KNOWS WHAT IT CONTINUES: followed back past list items and inserts; a keyless
+  continuation is drawn from it (the people's and things' look only, a `REDRAW_CAMERAS` camera) and
+  after it — every picture waits for its near-copy partner (job 413's phone call, landline then
+  smartphone). (d) EVERY THING A PICTURE SHOWS KEEPS ITS MEMORY: a list's steps are done to one thing
+  and drawn from the steps before; "those three" is drawn from each item's own picture; a group key
+  thing whose look names a list's items makes each a member (job 414's froe). (e) A SEASON OR HOUR THE
+  LINE NAMES STAYS (`holdLineSeasons`, `SEASON_HOUR_RULE`; job 411's spring song drawn in snow), and
+  written looks and the props list carry no light, weather or hour (`sheetWithoutLight`).
+  PICTURES: (f) ALLOWED WORDS SHARP, OTHER PRINT SOFT on the same page; words the picture's own line
+  says (≤ 6, never a mid-sentence capitalised name) are not refused as writing (job 413's "LOAN").
+  (g) A PROMPT IS WRITTEN FOR THE SHOT IT WILL BE (`cutawayPromptLane`, `server/brollRewrite.ts`): the
+  hands-video directive is gone, a rewrite that copies a directive or drops its line's subject is
+  refused (`rewriteFault`), and a shot that turned out not to move is written again as a photo.
+  (h) TOOLS AND LINES AS THEY REALLY WORK: a froe or wedge struck with a club (`SPLIT_STRIKE_CLAUSE`),
+  a shaving tool across the piece along it (`SHAVING_STROKE_CLAUSE`), a cable or hose ends at the part
+  it serves (`connectingLinesClause`); a "broken" redraw for a tool names the fault. (i) NOTHING THE
+  LINE DOES NOT NAME (`NOTHING_UNNAMED_RULE`, `withoutAddedKeyThings`): the props list and stretch line
+  say how things look, never what to add; a later line's reveal is removed from earlier pictures, and
+  an empty place or a search that finds nothing is drawn bare (`NOTHING_THERE_RULE`). (j) A SPLIT
+  PANEL IS WRITTEN FROM ITS LINE (`showSubject` as MUST SHOW, judged by what most of its line is about
+  by speaking time) and keeps the tool its line names, resting on the work (`withLineTool`).
+  PLANNING: (k) THE COVER COMES UP WHEN THE BOOK IS NAMED: the cover beat is split at the clause that
+  first names it ("my book", the title), the words before stay on the host. (l) NUMBERS ARE NOT TIMING
+  ANCHORS: a sentence break beside a number cuts in the longest real pause (`numberBreakPause`, job
+  413's "Three hundred | seventy"). (m) A short lead that only finishes the sentence before goes back to
+  that picture; a beat ending on a sentence's first ≤ 4 words hands them on. (n) A SETTING TURN ENDS A
+  TOPIC (`SETTING_TURN_RULE`, `settingMove` in `server/lineSetting.ts`: wild → indoors, long ago →
+  today). (o) No host take stops between "anything", "the one", "the kind"… and the clause that says
+  what it is (`breakBetween`). GRAPHICS: (p) the script's spelling on screen, never the transcript's
+  (`closeSpelling`; "migratorious"); (q) cards say what the voice says — a BeforeAfter needs a change,
+  a MythStamp the belief the voice calls false, no number card for a figurative number, a unit said
+  right after the number; (r) a Checklist is held to the said-list rule at the script's punctuation; a
+  chapter series promising more than the film counts keeps its labels and drops only "of N"; (s) reading
+  time counts from when a graphic's words appear (`shownAt`), and the number pair, MYTH stamp and
+  chapter label move to the allowed corner covering least of the picture's subject. Details:
+  `graphics-lab/out/round14-docs.json`.
 - `server/hostPlate.ts` — **provider-independent**. The lip-sync model animates the image it
   is handed and never changes the setting, so `HOST_PLATES=1` generates a 16:9 plate of the host
   IN each beat's setting (host photo as identity reference) and syncs from that instead of the
