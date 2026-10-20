@@ -143,6 +143,7 @@ import {
   ANON_PERSON_SUFFIX,
   NO_FIGURES_SUFFIX,
   CUTAWAY_PERSON_FREE_DIRECTIVE,
+  OBJECT_MOTION_DIRECTIVE,
   CTA_EMPTY_HANDS_SUFFIX,
   LIPSYNC_HOST_DIRECTION,
   LIPSYNC_HOST_DIRECTION_PINNED,
@@ -2524,6 +2525,134 @@ describe("brollDepictsBook / non-CTA book guard", () => {
     const { failedScenes } = await enhanceBrollPrompts(scenes, baseParams);
     expect(scenes[0].visualPrompt).toBe("RAW");
     expect(failedScenes).toEqual([2]);
+  });
+});
+
+// A cutaway's prompt is written for what the shot will be, and an answer that is not its picture is
+// refused for the scene's own words (2026-10-20, job 413 scenes 9-10: both shipped the hands-at-work
+// VIDEO directive they were given, reworded — "Bare weathered hands with fingers already on a tool or
+// workbench task, pressing or adjusting what they work on" — and scene 9 came out as someone
+// hand-planing a board on a channel about garage businesses).
+describe("enhanceBrollPrompts — written for the shot it will be, refused when it is not its picture", () => {
+  const ANSWER_413 =
+    "Bare weathered hands with fingers already on a tool or workbench task, pressing or adjusting what " +
+    "they work on. Wooden workbench, pegboard wall, and tools visible in the background. No face, head, " +
+    "shoulders, or body visible.";
+  const sc = (extra: Partial<StoryboardScene>): StoryboardScene => ({
+    index: 0,
+    narration: "n",
+    visualPrompt: "vp",
+    hostPresent: false,
+    ...extra,
+  });
+  // As the prompt writer saw them: the balancer had made them moving shots, a person in them.
+  const scene9 = () =>
+    sc({
+      index: 9,
+      scriptText:
+        "and Gary’s Garage Secrets is for working people who want extra income with numbers a neighbor would believe — no apps, no coins, no course-sellers.",
+      showSubject: "the host working at his garage workbench with tools around him",
+      visualPrompt: "the host working at his garage workbench with tools around him",
+      humanPresent: true,
+      stillImage: false,
+    });
+  const scene10 = () =>
+    sc({
+      index: 10,
+      scriptText: "Here’s tonight’s deal:",
+      showSubject: "the host pulling a stool up to the garage workbench and opening a notebook",
+      visualPrompt: "the host pulling a stool up to the garage workbench and opening a notebook",
+      humanPresent: true,
+      stillImage: false,
+    });
+
+  afterEach(() => {
+    mockInvoke.mockReset();
+  });
+
+  it("a hands shot the balancer made moving is written as a photo — no video directive, Type still", async () => {
+    mockInvoke.mockResolvedValue({
+      text: "Bare weathered hands resting on a garage workbench, tools hung on the wall behind",
+    } as any);
+    const scenes = [scene9()];
+    await enhanceBrollPrompts(scenes, baseParams);
+    const sent = mockInvoke.mock.calls[0][0].userMessage as string;
+    expect(sent).not.toMatch(/VIDEO cutaway|pressing or adjusting|motion-human/);
+    expect(sent).not.toContain(OBJECT_MOTION_DIRECTIVE);
+    expect(sent).toContain("Type: still\n");
+    expect(scenes[0].visualPrompt).toMatch(/^Bare weathered hands resting on a garage workbench/);
+    expect(scenes[0].promptLane).toBe("still");
+  });
+
+  it("job 413's answer is refused for scene 10's own words; scene 9's, naming its bench and tools, stands", async () => {
+    mockInvoke.mockImplementation(async ({ userMessage }: any) =>
+      userMessage.includes("=== SHOT")
+        ? ({ text: JSON.stringify([{ shot: 1, prompt: ANSWER_413 }, { shot: 2, prompt: ANSWER_413 }]) } as any)
+        : ({ text: ANSWER_413 } as any)
+    );
+    const scenes = [scene9(), scene10()];
+    await enhanceBrollPrompts(scenes, baseParams);
+    // One call for the pair: the refusal costs nothing.
+    expect(mockInvoke).toHaveBeenCalledTimes(1);
+    expect(scenes[1].visualPrompt).toBe(
+      "the host pulling a stool up to the garage workbench and opening a notebook"
+    );
+    expect(scenes[1].promptLane).toBeUndefined();
+    expect(scenes[0].visualPrompt).toBe(ANSWER_413);
+    expect(scenes[0].promptLane).toBe("still");
+  });
+
+  it("a thing that moves by itself keeps the motion directive, and an answer handing it back is refused", async () => {
+    const kettle = () =>
+      sc({
+        index: 3,
+        scriptText: "and the kettle is already going on the stove.",
+        showSubject: "steam rising from a kettle on the stove",
+        visualPrompt: "steam rising from a kettle on the stove",
+        objectMotion: true,
+        stillImage: false,
+      });
+    mockInvoke.mockResolvedValue({
+      text: "Steam rising from the spout of a dented kettle on a gas stove, a plain kitchen behind",
+    } as any);
+    const good = [kettle()];
+    await enhanceBrollPrompts(good, baseParams);
+    const sent = mockInvoke.mock.calls[0][0].userMessage as string;
+    expect(sent).toContain(OBJECT_MOTION_DIRECTIVE);
+    expect(sent).toContain("Type: motion-object\n");
+    expect(good[0].promptLane).toBe("video");
+
+    // The directive's own words, handed back as the picture.
+    mockInvoke.mockReset();
+    mockInvoke.mockResolvedValue({
+      text:
+        "The moving element stays connected to its source and follows a real path under gravity, " +
+        "nothing impossibly suspended; everything else in the frame stays at rest.",
+    } as any);
+    const bad = [kettle()];
+    await enhanceBrollPrompts(bad, baseParams);
+    expect(bad[0].visualPrompt).toBe("steam rising from a kettle on the stove");
+    expect(bad[0].promptLane).toBeUndefined();
+  });
+
+  it("a moving shot the self-moving judge turned down is written as a photo", async () => {
+    mockInvoke.mockResolvedValue({ text: "A sliding door standing closed in a quiet room" } as any);
+    const scenes = [
+      sc({
+        index: 4,
+        scriptText: "and the sliding door at the back.",
+        showSubject: "a sliding door at the back of a quiet room",
+        visualPrompt: "a sliding door at the back of a quiet room",
+        objectMotion: true,
+        stillImage: false,
+        selfMoving: false,
+      }),
+    ];
+    await enhanceBrollPrompts(scenes, baseParams);
+    const sent = mockInvoke.mock.calls[0][0].userMessage as string;
+    expect(sent).not.toContain(OBJECT_MOTION_DIRECTIVE);
+    expect(sent).toContain("Type: still\n");
+    expect(scenes[0].promptLane).toBe("still");
   });
 });
 

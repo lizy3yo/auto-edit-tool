@@ -7776,3 +7776,68 @@ describe("allowed words and soft print go together; a word the line says is not 
     );
   });
 });
+
+// Job 413 scenes 9-10 (2026-10-20): both pictures shipped the hands-at-work VIDEO directive they were
+// given, reworded, as their description — scene 9, under the channel's own introduction, came out as
+// someone hand-planing a board on a channel about garage businesses. The shots were moving when the
+// prompt writer saw them (the balancer had flipped them) and photos when they shipped.
+describe("a cutaway is written for the shot it will be, and an answer that is not its picture is refused (job 413 scenes 9-10)", () => {
+  const ANSWER =
+    "Bare weathered hands with fingers already on a tool or workbench task, pressing or adjusting what " +
+    "they work on. Wooden workbench, pegboard wall, and tools visible in the background. No face, head, " +
+    "shoulders, or body visible.";
+  const scene9 = pic(
+    9,
+    "and Gary’s Garage Secrets is for working people who want extra income with numbers a neighbor would believe — no apps, no coins, no course-sellers.",
+    "the host working at his garage workbench with tools around him",
+    { humanPresent: true, stillImage: false }
+  );
+  const scene10 = pic(10, "Here’s tonight’s deal:", "the host pulling a stool up to the garage workbench and opening a notebook", {
+    humanPresent: true,
+    stillImage: false,
+  });
+
+  it("a shot of the host at work is written as a photo, never with a video directive", async () => {
+    const { cutawayPromptLane } = await import("./brollRewrite");
+    expect(cutawayPromptLane(scene9)).toBe("still");
+    expect(cutawayPromptLane(scene10)).toBe("still");
+  });
+
+  it("scene 10's answer leaves out its stool and notebook and goes back to its own words; scene 11's stands", async () => {
+    const { rewriteFault, rewriteFallback } = await import("./brollRewrite");
+    const { CUTAWAY_STOCK_DIRECTIVES } = await import("./longformVideo");
+    expect(rewriteFault(ANSWER, scene10, scene10.showSubject!, CUTAWAY_STOCK_DIRECTIVES)).toBe("subject");
+    expect(rewriteFallback(scene10, scene10.showSubject!)).toBe(scene10.showSubject);
+    const scene11 = pic(
+      11,
+      "seventeen businesses,",
+      "the guided knife-sharpening unit on the workbench with a kitchen knife clamped in its guide and the host's hands drawing a stone along the edge",
+      { listCut: true, humanPresent: true }
+    );
+    expect(
+      rewriteFault(
+        "A guided knife-sharpening unit clamped to a garage workbench with a kitchen knife held in its metal guide, bare weathered hands pressing an abrasive stone along the blade edge, concrete floor and tool pegboard in the background.",
+        scene11,
+        scene11.showSubject!,
+        CUTAWAY_STOCK_DIRECTIVES
+      )
+    ).toBeUndefined();
+  });
+
+  it("a shot written for motion that the gate makes a photo is written again; one still moving is not", async () => {
+    const { leftMotionLane } = await import("./brollRewrite");
+    const door = pic(4, "and the sliding door at the back.", "a sliding door at the back of a quiet room", {
+      promptLane: "video",
+      objectMotion: undefined,
+      stillImage: true,
+      selfMoving: false,
+    });
+    expect(leftMotionLane(door)).toBe(true);
+    const steam = pic(3, "and the kettle is already going.", "steam rising from a kettle on the stove", {
+      promptLane: "video",
+      objectMotion: true,
+      stillImage: false,
+    });
+    expect(leftMotionLane(steam)).toBe(false);
+  });
+});

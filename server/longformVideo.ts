@@ -27,6 +27,7 @@ import nodePath from "node:path";
 import sharp from "sharp";
 import { invokeClaude } from "./claude";
 import { invokeGemini } from "./gemini";
+import { cutawayPromptLane, leftMotionLane, rewriteFallback, rewriteFault } from "./brollRewrite";
 import {
   applyShotPlan,
   deriveContinuitySheet,
@@ -3847,6 +3848,8 @@ export function promoteCutawayToHost(s: StoryboardScene): void {
   s.objectMotion = undefined;
   s.splitVisual = undefined;
   s.visualPrompt = talkingHeadVisualPrompt(DEFAULT_HOST_DESCRIPTOR, s.index);
+  // The prompt is no longer a rewrite of a cutaway, so what it was written for no longer applies.
+  s.promptLane = undefined;
   // A shot-list piece is exactly as long as its words; the ordinary host floor would freeze it.
   s.minHoldSec = Math.max(
     s.minHoldSec ?? 0,
@@ -6076,21 +6079,22 @@ export const OBJECT_MOTION_DIRECTIVE =
   "follows a real path under gravity, nothing impossibly suspended, and nothing blurred, " +
   "streaked, or smeared. Everything else in the frame stays at rest.";
 
+// THERE IS NO HANDS-AT-WORK VIDEO DIRECTIVE ANY MORE (2026-10-20, job 413 scenes 9-10). Hands and
+// people are never a video (`videoKind`, 2026-09-30), yet the still/motion balancer could still flip
+// a hands shot to motion before the prompt writer ran, and the writer was then told "this is a VIDEO
+// cutaway with hands at work … fingers on the tool, pressing or adjusting what they work on". It
+// handed that back as both pictures' description, the gate made them photos, and scene 9 shipped as
+// someone hand-planing a board on a garage-business channel. A prompt is now written for what the
+// video rule will make the shot (`cutawayPromptLane`), so a hands shot is written as a photo.
+
 /**
- * Prepended to the cutaway enhancer userMessage on a `humanPresent` VIDEO clip (not still).
- * The shared `STILL_BROLL_ENHANCER_SYSTEM` demands hands "paused or at rest" — correct for
- * stills and Ken Burns, wrong for the video lane where `ANON_PERSON_SUFFIX` and
- * `PERSON_MOTION_CAMERA_CLAUSE` expect hands mid-task from the first frame. Same pattern as
- * `OBJECT_MOTION_DIRECTIVE`: override only the settled-instant rule for hands; everything else
- * in the system prompt stays.
+ * The instruction blocks the cutaway prompt writer is handed beside a shot. A rewrite that repeats
+ * one of them instead of describing its own picture is refused (`rewriteFault`).
  */
-export const HUMAN_MOTION_DIRECTIVE =
-  "IMPORTANT: this is a VIDEO cutaway with hands at work — the narration implies a manual " +
-  "action. For this one prompt, override the paused/at-rest rule for the hands ONLY: describe " +
-  "bare weathered hands already in frame and mid-task from the start (fingers on the tool, " +
-  "pressing or adjusting what they work on), never entering from off-screen and never paused " +
-  "on a finished result. Keep everything else at rest — no face, head, or body, and no broad " +
-  "arm movement. The hands hold realistic anatomy with no extra fingers.";
+export const CUTAWAY_STOCK_DIRECTIVES: readonly string[] = [
+  CUTAWAY_PERSON_FREE_DIRECTIVE,
+  OBJECT_MOTION_DIRECTIVE,
+];
 
 /**
  * HERO FRAMING for a shot the shot list cut for one named thing (`scene.showSubject`). It replaces
@@ -17181,6 +17185,40 @@ export async function enhanceBrollPrompts(
   const splitSeedOf = (scene: StoryboardScene): string | undefined =>
     (scene.splitVisualSeed ??= scene.splitVisual);
 
+  // WRITTEN FOR WHAT THE SHOT WILL BE (`cutawayPromptLane`, job 413 scenes 9-10): the motion
+  // directive and the "motion" type only for a shot the video rule lets move. A photo catching a
+  // thing mid-motion keeps the directive, written as a still, as before.
+  const laneLinesFor = (scene: StoryboardScene): { directive: string; type: string } => {
+    const lane = cutawayPromptLane(scene);
+    return {
+      directive: lane === "still" ? "" : `${OBJECT_MOTION_DIRECTIVE}\n`,
+      type: `Type: ${lane === "video" ? "motion-object" : "still"}\n`,
+    };
+  };
+
+  // A REWRITE THAT IS NOT ITS PICTURE IS REFUSED for the scene's own words — no second call. Job 413
+  // scenes 9-10 both came back as the hands directive they were given, reworded, and nothing looked:
+  // one rewrite repeating a stock directive, one naming one word of its six-word subject.
+  const adoptRewrite = (scene: StoryboardScene, enhanced: string): void => {
+    const lane = cutawayPromptLane(scene);
+    const seed = seedOf(scene);
+    const fault = rewriteFault(enhanced, scene, seed, CUTAWAY_STOCK_DIRECTIVES);
+    if (!fault) {
+      scene.visualPrompt = enhanced;
+      scene.promptLane = lane;
+      return;
+    }
+    console.warn(
+      `[enhanceBrollPrompts] scene ${scene.index}: the rewrite ` +
+        (fault === "directive"
+          ? "repeats a stock directive"
+          : "leaves out what its line needs shown") +
+        ` — kept the scene's own words`
+    );
+    scene.visualPrompt = rewriteFallback(scene, seed);
+    scene.promptLane = undefined;
+  };
+
   // THE VIDEO'S OWN BOOK STAYS OUT OF A CUTAWAY, and nothing else is taken from it. A line that
   // mentions the book without a hard CTA signal (URL/QR/price) is not flagged cta, so the prompt
   // writer can write the book in — and a positive mention beats the trailing NO_BOOK_SUFFIX. Only
@@ -17214,6 +17252,7 @@ export async function enhanceBrollPrompts(
     const systemPrompt = isCta
       ? CTA_BROLL_ENHANCER_SYSTEM
       : STILL_BROLL_ENHANCER_SYSTEM;
+    const lane = laneLinesFor(scene);
     const userMessage = isCta
       ? (backdrop ? `${QR_BACKDROP_DIRECTIVE}\n` : "") +
         channelLine +
@@ -17225,12 +17264,7 @@ export async function enhanceBrollPrompts(
         `in the video's topic register): "${scene.scriptText ?? scene.narration}"\n\n` +
         `Enhanced prompt:`
       : `${CUTAWAY_PERSON_FREE_DIRECTIVE}\n` +
-        (scene.objectMotion && !scene.humanPresent
-          ? `${OBJECT_MOTION_DIRECTIVE}\n`
-          : "") +
-        (scene.humanPresent && !scene.stillImage
-          ? `${HUMAN_MOTION_DIRECTIVE}\n`
-          : "") +
+        lane.directive +
         channelLine +
         subjectLine +
         directionLine +
@@ -17238,7 +17272,7 @@ export async function enhanceBrollPrompts(
         beatLineFor(scene) +
         previousShotsFor(i) +
         mustShowFor(scene) +
-        `Type: ${scene.stillImage ? "still" : scene.objectMotion && !scene.humanPresent ? "motion-object" : scene.humanPresent ? "motion-human" : "still"}\n` +
+        lane.type +
         `Scene narration: "${scene.scriptText ?? scene.narration}"\n` +
         `Original prompt: ${seedOf(scene)}\n\n` +
         `Enhanced prompt:`;
@@ -17265,7 +17299,7 @@ export async function enhanceBrollPrompts(
           subject
         );
       } else if (enhanced) {
-        scene.visualPrompt = enhanced;
+        adoptRewrite(scene, enhanced);
       }
     } catch (err) {
       failure = err ?? new Error("unknown error");
@@ -17297,17 +17331,19 @@ export async function enhanceBrollPrompts(
   // below, so a failed group costs a retry, never a prompt. CTA cutaways stay one per call.
   const groupSize = Math.max(1, Math.floor(Number(process.env.BROLL_ENHANCE_BATCH ?? 8) || 1));
   const enhanceGroup = async (group: typeof cutaways): Promise<typeof cutaways> => {
-    const blocks = group.map(({ scene, i }, k) =>
-      `=== SHOT ${k + 1} ===\n` +
-      (scene.objectMotion && !scene.humanPresent ? `${OBJECT_MOTION_DIRECTIVE}\n` : "") +
-      (scene.humanPresent && !scene.stillImage ? `${HUMAN_MOTION_DIRECTIVE}\n` : "") +
-      beatLineFor(scene) +
-      previousShotsFor(i) +
-      mustShowFor(scene) +
-      `Type: ${scene.stillImage ? "still" : scene.objectMotion && !scene.humanPresent ? "motion-object" : scene.humanPresent ? "motion-human" : "still"}\n` +
-      `Scene narration: "${scene.scriptText ?? scene.narration}"\n` +
-      `Original prompt: ${seedOf(scene)}`
-    );
+    const blocks = group.map(({ scene, i }, k) => {
+      const lane = laneLinesFor(scene);
+      return (
+        `=== SHOT ${k + 1} ===\n` +
+        lane.directive +
+        beatLineFor(scene) +
+        previousShotsFor(i) +
+        mustShowFor(scene) +
+        lane.type +
+        `Scene narration: "${scene.scriptText ?? scene.narration}"\n` +
+        `Original prompt: ${seedOf(scene)}`
+      );
+    });
     try {
       const result = await invokeGemini({
         systemPrompt: STILL_BROLL_ENHANCER_SYSTEM,
@@ -17334,7 +17370,7 @@ export async function enhanceBrollPrompts(
           typeof entry?.prompt === "string" ? entry.prompt : ""
         );
         if (!enhanced) return void left.push(item);
-        item.scene.visualPrompt = enhanced;
+        adoptRewrite(item.scene, enhanced);
         guardCutawayBook(item.scene, item.i);
       });
       return left;
@@ -18708,15 +18744,24 @@ async function runUnifiedPipeline(
   for (const f of gate.unresolved) {
     appendJobWarning(jobId, `Plan check ${f.rule} could not be fixed: ${f.detail}`);
   }
-  // A host beat the gate sent to the pictures gets the same rewrite every other cutaway got.
+  // A host beat the gate sent to the pictures gets the same rewrite every other cutaway got — and so,
+  // in the same call, does a shot written for motion that the gate (or the self-moving judge before
+  // it) made an ordinary photo (`leftMotionLane`): its "in motion" wording describes a shot it no
+  // longer is (job 413 scenes 9-10 kept theirs to the end).
   const gateDemoted = scenes
     .filter(s => hostsBeforeGate.has(s) && !s.hostPresent)
     .map(s => s.index);
-  if (gateDemoted.length) {
-    const reEnhance = await enhanceBrollPrompts(scenes, params, gateDemoted);
+  const nowStill = scenes.filter(s => leftMotionLane(s)).map(s => s.index);
+  const reWrite = Array.from(new Set([...gateDemoted, ...nowStill]));
+  if (nowStill.length)
+    console.log(
+      `[Longform ${jobId}] ${nowStill.length} picture(s) written for motion are now photos — written again`
+    );
+  if (reWrite.length) {
+    const reEnhance = await enhanceBrollPrompts(scenes, params, reWrite);
     if (reEnhance.failedScenes.length) appendJobWarning(jobId, enhanceWarningFor(reEnhance));
     for (const s of scenes) {
-      if (gateDemoted.includes(s.index))
+      if (reWrite.includes(s.index))
         s.visualPrompt = stripHostNames(s.visualPrompt, hostAliases);
     }
   }
