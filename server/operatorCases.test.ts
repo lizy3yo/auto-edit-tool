@@ -1026,7 +1026,7 @@ describe("a line about someone else shows that person, not the host", () => {
     const prompt = buildStillPrompt(buyer);
     expect(prompt).toContain(otherPersonClause("a woman customer"));
     expect(prompt).toMatch(/NOT the video's host/);
-    expect(prompt).toMatch(/face turned away or out of frame so it is never shown/);
+    expect(prompt).toMatch(/the face away from it or out of frame so it is never shown/);
     expect(prompt).toMatch(/This person has exactly two arms/);
     expect(prompt).toContain(ONE_OTHER_PERSON_SUFFIX);
     expect(prompt).not.toContain(NO_FIGURES_SUFFIX);
@@ -3245,7 +3245,7 @@ describe("a picture of two people asks for both, faces hidden (job 399 scenes 8 
     for (const [scene, passenger] of [[s[1], "a male passenger"], [s[2], "a seated passenger"]] as const) {
       const prompt = buildStillPrompt(scene);
       expect(prompt).toContain(`The people in this shot are a flight attendant and ${passenger} — two different, ordinary people`);
-      expect(prompt).toMatch(/faces turned away or out of frame so no face is ever shown/);
+      expect(prompt).toMatch(/faces away from it or out of frame so no face is ever shown/);
       expect(prompt).not.toMatch(/The only person in this shot|Apart from that one person/);
       expect(prompt).not.toContain(ONE_OTHER_PERSON_SUFFIX);
       expect(scene.brollHostRef).toBeUndefined();
@@ -6565,7 +6565,7 @@ describe("someone else shows no face: no smile in the words, and the check asks 
     );
     const prompt = buildStillPrompt(s[0]);
     expect(prompt).not.toMatch(/smil/i);
-    expect(prompt).toMatch(/faces turned away or out of frame so no face is ever shown/);
+    expect(prompt).toMatch(/faces away from it or out of frame so no face is ever shown/);
     expect(othersFaceAsked(s[0], false, false)).toBe(true);
   });
 
@@ -8802,9 +8802,9 @@ describe("a split panel is built from its line, and keeps the tool its line name
     expect(leadIntoNext("The Japanese look people paid me for wasn't the precision work. It was the fire,")).toBeUndefined();
   });
 
-  it("414 scene 22: the panel keeps the drawknife, resting on the work; a panel that has it, or is about another sentence, is left alone", async () => {
+  it("414 scene 22: the panel keeps the drawknife, lying flat on the work; a panel that has it, or is about another sentence, is left alone", async () => {
     const { withLineTool } = await import("./shotList");
-    expect(withLineTool(SHINGLE_22, LINE_22)).toBe(`${SHINGLE_22}, a drawknife resting on the work, unattended.`);
+    expect(withLineTool(SHINGLE_22, LINE_22)).toBe(`${SHINGLE_22}, a drawknife lying flat on the work, unattended.`);
     // A panel that has the drawknife is left alone.
     const KEPT = "a pale board on a stump, one end tapered, a drawknife lying across it";
     expect(withLineTool(KEPT, LINE_22)).toBe(KEPT);
@@ -8813,7 +8813,7 @@ describe("a split panel is built from its line, and keeps the tool its line name
     const STROKES =
       "A pale oak board held flat on a work surface, one end shaved thin by drawknife strokes, wood curls resting on the board and ground nearby.";
     expect(withLineTool(STROKES, LINE_22)).toBe(
-      `${STROKES.replace(/\.$/, "")}, a drawknife resting on the work, unattended.`
+      `${STROKES.replace(/\.$/, "")}, a drawknife lying flat on the work, unattended.`
     );
     // A tool said as a figure of speech puts nothing in the picture.
     expect(withLineTool("a booth at a weekend market", "Some buyers come with an axe to grind.")).toBe(
@@ -10006,5 +10006,509 @@ describe("round 15: 'U. S.' is one word — no beat, picture or host take ends o
     // Negative: "The whole can." and job 310's "…in a small X. Snug," still end their sentences.
     expect(endsSentence("Number one. The whole can.", "On a lot of U. S. airlines,")).toBe(true);
     expect(endsSentence("clockwise, that crosses over itself in a small X.", "Snug, but loose enough")).toBe(true);
+  });
+});
+
+/**
+ * A PERSON IS ALWAYS IN THE NATURAL POSE OF WHAT THEY DO; THE CAMERA, NEVER THE BODY, KEEPS THE FACE
+ * OUT (2026-10-20, the operator on job 417: "they aren't even seated properly — this is what I would
+ * also like to avoid — an unnatural type of event the person is doing, in every action"). Every face
+ * rule placed the camera against the PERSON ("from behind or from the side"), the description placed
+ * it against the ROOM ("a narrow aisle visible behind them"), and in a row of fixed seats the model
+ * kept the room's view and turned the people round. The survey of jobs 399-417: 4 of ~43 seated
+ * pictures in the four cabin films, 3 conversations and a handover drawn as backs side by side; every
+ * pew, desk, table, car and bed picture right. The rule is general; these rows are its examples.
+ */
+describe("round 15: the natural pose of what a person does; the camera, never the body, hides the face (job 417 scene 2)", () => {
+  const PHOTO = "https://x/host.png";
+  const ATTENDANT = "a woman in her forties with dark hair in a low bun, wearing a navy uniform jacket and a red patterned scarf";
+  const MAKEUP = "a woman in her late fifties with shoulder-length auburn hair and fair freckled skin, wearing a cream knit top";
+  const seats417 = () =>
+    pic(2, "the same flight, and sat in the same row.", "two passengers seated together in an airline seat row", {
+      visualPrompt:
+        "Two passengers seated side by side in an airline seat row, blue upholstered seats with headrests, narrow aisle visible behind them.",
+      keyThing: "seat row",
+      humanPresent: true,
+      otherPerson: "two passengers",
+      otherPeople: 2,
+      stillImage: true,
+    });
+  const glance417 = () =>
+    pic(8, "He figures she must know somebody on the crew.", "a man passenger in his seat glancing toward a woman passenger seated in an empty row up front", {
+      visualPrompt: "A passenger seated in row fourteen glancing forward toward an empty seat row visible ahead in the cabin.",
+      keyThing: "seat row",
+      humanPresent: true,
+      otherPerson: "a man passenger",
+      stillImage: true,
+    });
+  const talk417 = () =>
+    pic(9, "She doesn't. What she knows is which questions flight attendants like hearing, and when to ask them.", "woman passenger speaking pleasantly to a flight attendant in the aisle", {
+      visualPrompt:
+        "A passenger and a flight attendant standing in the narrow cabin aisle, speaking together, the attendant facing the passenger with an attentive set to the shoulders.",
+      humanPresent: true,
+      otherPerson: "a woman passenger and a flight attendant",
+      otherPeople: 2,
+      stillImage: true,
+    });
+  // Job 417 scene 7: from the aisle beside and a little behind, the seat back and tray ahead of him —
+  // what the operator called nearer-correct.
+  const cup417 = () =>
+    pic(7, "The other was still in row fourteen with a few inches of soda over ice.", "a man passenger in a seat row holding a plastic cup with a few inches of soda over ice", {
+      visualPrompt: "A passenger seated in row fourteen holding a clear plastic cup about three-quarters full with soda and ice cubes.",
+      keyThing: "plastic cup",
+      humanPresent: true,
+      otherPerson: "a man passenger",
+      stillImage: true,
+    });
+
+  it("417-2: two passengers in a row are told to face the way their seats face, the camera moving to hide the faces", async () => {
+    const { NATURAL_POSE_CLAUSE, FACING_EACH_OTHER_CLAUSE } = await import("./longformVideo");
+    const prompt = buildStillPrompt(seats417());
+    expect(prompt.split(NATURAL_POSE_CLAUSE)).toHaveLength(2);
+    expect(prompt).toContain(FACING_EACH_OTHER_CLAUSE);
+    expect(prompt).toContain(otherPersonClause("two passengers", 2));
+    // Seated the way the seat faces, the row ahead showing its backs, never reversed or sideways…
+    expect(NATURAL_POSE_CLAUSE).toMatch(/facing the way their own seat or their work faces, held up by what they sit, lie or lean on/);
+    expect(NATURAL_POSE_CLAUSE).toMatch(/every seat and everyone in it faces that way, so the row ahead shows only its seat backs/);
+    expect(NATURAL_POSE_CLAUSE).toMatch(/never sitting backwards or sideways in a seat that faces forward, facing their own seat back/);
+    // …and the face hidden by where the camera stands — "aisle visible behind them" is no reason to turn them.
+    expect(NATURAL_POSE_CLAUSE).toMatch(/What keeps a face out of the picture is where the CAMERA stands/);
+    expect(NATURAL_POSE_CLAUSE).toMatch(/from the seat or row behind over its back/);
+    expect(NATURAL_POSE_CLAUSE).toMatch(/A place the description puts behind or ahead of them is drawn where it really is from that camera/);
+    // Side by side in one row, both face the way the row faces.
+    expect(FACING_EACH_OTHER_CLAUSE).toMatch(/people side by side in one row both face the way the row faces/);
+    // No wording left that turns a BODY away from the camera.
+    expect(prompt).not.toMatch(/(?:whole body|Everyone in this shot) is turned away from the camera/);
+    expect(prompt).not.toMatch(/faces turned away or out of frame/);
+  });
+
+  it("417-8: one passenger — the row ahead shows its seat backs, and no second person is suggested", async () => {
+    const { NATURAL_POSE_CLAUSE, FACING_EACH_OTHER_CLAUSE } = await import("./longformVideo");
+    const prompt = buildStillPrompt(glance417());
+    expect(prompt.split(NATURAL_POSE_CLAUSE)).toHaveLength(2);
+    // Said to one person, "someone they talk to" is a person the model adds.
+    expect(prompt).not.toContain(FACING_EACH_OTHER_CLAUSE);
+    expect(NATURAL_POSE_CLAUSE).not.toMatch(/talk|each other|second person/i);
+    expect(prompt).toContain(ONE_OTHER_PERSON_SUFFIX);
+  });
+
+  it("417-7 (clean): a passenger seen from the aisle keeps its own words, and nothing asks to turn him", async () => {
+    const { NATURAL_POSE_CLAUSE, OTHERS_TURNED_AWAY_CLAUSE, faultRedrawFor } = await import("./longformVideo");
+    const s = cup417();
+    const prompt = buildStillPrompt(s);
+    expect(prompt).toContain(s.visualPrompt!);
+    expect(prompt.split(NATURAL_POSE_CLAUSE)).toHaveLength(2);
+    expect(prompt).not.toContain(OTHERS_TURNED_AWAY_CLAUSE);
+    // The still check calls that framing right, and a frame it passes is redrawn by nothing.
+    const q2 = STILL_DEFECT_SYSTEM.slice(STILL_DEFECT_SYSTEM.indexOf("QUESTION 2"), STILL_DEFECT_SYSTEM.indexOf("QUESTION 3"));
+    expect(q2).toMatch(/A person seen from behind or beside who sits the way their seat faces, its back hiding them, is right/);
+    expect(faultRedrawFor({}, { broken: false, what: "" }, { broken: 0, writing: 0 }, new Set(), true, true)).toBeUndefined();
+  });
+
+  it("417-9 / 417-31 / 415-25: people who talk or hand something over face each other; the face redraw moves the camera", async () => {
+    const { FACING_EACH_OTHER_CLAUSE, OTHERS_TURNED_AWAY_CLAUSE, turnOthersAway, hostWithOthersClause } = await import("./longformVideo");
+    expect(FACING_EACH_OTHER_CLAUSE).toMatch(/People who talk, listen or hand something to each other turn toward each other/);
+    expect(FACING_EACH_OTHER_CLAUSE).toMatch(/beside the pair, both framed below the chin/);
+    expect(FACING_EACH_OTHER_CLAUSE).toMatch(/behind one of them, past that shoulder, with the other's face cut off by the top of the frame/);
+    expect(FACING_EACH_OTHER_CLAUSE).toMatch(/never two people who are talking or handing something over turned side by side to face the same way/);
+    // The redraw after "face shown" (417-9's two backs at the galley came from it).
+    expect(OTHERS_TURNED_AWAY_CLAUSE).not.toMatch(/Everyone in this shot is turned away/);
+    expect(OTHERS_TURNED_AWAY_CLAUSE).toMatch(/the CAMERA stands behind or beside everyone in this shot/);
+    expect(OTHERS_TURNED_AWAY_CLAUSE).toMatch(/each body keeps the natural pose of doing it/);
+    expect(OTHERS_TURNED_AWAY_CLAUSE).toMatch(/never a person turned round, reversed in a seat or turned away from what they are doing/);
+    // It rides a picture of one person too, so it names no second one.
+    expect(OTHERS_TURNED_AWAY_CLAUSE).not.toMatch(/two people|each other|second person/i);
+    const first = buildStillPrompt(talk417());
+    const again = turnOthersAway(first);
+    expect(again.split(OTHERS_TURNED_AWAY_CLAUSE)).toHaveLength(2);
+    expect(again).toContain(FACING_EACH_OTHER_CLAUSE);
+    // The host among others (job 399 scene 14's attendant) faces whoever they deal with too.
+    expect(hostWithOthersClause({ who: "a flight attendant", look: ATTENDANT }, "a seated passenger")).toContain(FACING_EACH_OTHER_CLAUSE);
+  });
+
+  it("the host at work keeps the task's pose: the turned-away framing moves the camera, never the host", async () => {
+    const { HOST_TURNED_AWAY_CLAUSE, NATURAL_POSE_CLAUSE, turnHostAway } = await import("./longformVideo");
+    expect(HOST_TURNED_AWAY_CLAUSE).not.toMatch(/The whole body is turned away/);
+    expect(HOST_TURNED_AWAY_CLAUSE).toMatch(/the CAMERA stands there, behind or beside them, never in front/);
+    expect(HOST_TURNED_AWAY_CLAUSE).toMatch(/the body keeps the natural pose of doing it, facing the way their seat, bench or work faces/);
+    expect(HOST_TURNED_AWAY_CLAUSE).toMatch(/never turned round, reversed in a seat or twisted off the work/);
+    expect(HOST_FRAMING_CLAUSE).not.toMatch(/the whole body turned away/);
+    expect(HOST_FRAMING_CLAUSE).toMatch(/\(2\) the camera behind or beside them/);
+    // Job 413 scene 14's host at the bench: the redraw after the face swaps the framing, the pose clause stays.
+    const bench = [
+      pic(14, "and the old file still does the job.", "the host leaning on the workbench with arms crossed, looking at a worn tool in his hand", {
+        visualPrompt:
+          "Bare weathered hands at a garage workbench holding a worn metal tool, examining it closely while resting against the bench edge.",
+        humanPresent: true,
+      }),
+    ];
+    markHostBroll(bench, { hostLook: "a broad man in his sixties with a short grey beard, in a plaid flannel shirt" }, PHOTO);
+    const prompt = buildStillPrompt(bench[0]);
+    expect(prompt).toContain(HOST_FRAMING_CLAUSE);
+    expect(prompt.split(NATURAL_POSE_CLAUSE)).toHaveLength(2);
+    const turned = turnHostAway(prompt);
+    expect(turned).toContain(HOST_TURNED_AWAY_CLAUSE);
+    expect(turned.split(NATURAL_POSE_CLAUSE)).toHaveLength(2);
+  });
+
+  it("every picture of a person carries it — anonymous hands too — but a step on the host's own face is unchanged", async () => {
+    const { NATURAL_POSE_CLAUSE, NATURAL_HANDS_POSE_CLAUSE, NATURAL_POSE_CAMERA_CLAUSE, hostFaceClause, BODY_ON_PERSON_CLAUSE } =
+      await import("./longformVideo");
+    const hands = { humanPresent: true } as StoryboardScene;
+    const anon = personClauseFor(hands, "hands kneading dough on a floured board");
+    expect(anon).toContain(ANON_PERSON_SUFFIX);
+    // Hands only: where the hands come from, never the camera moved "over the shoulder" — the shoulder
+    // the hands clause keeps out of the shot ("everything above the forearms is outside the shot").
+    expect(anon).toContain(NATURAL_HANDS_POSE_CLAUSE);
+    expect(anon).not.toContain(NATURAL_POSE_CAMERA_CLAUSE);
+    expect(anon).not.toMatch(/over the shoulder|from the seat or row behind/);
+    expect(NATURAL_HANDS_POSE_CLAUSE).toMatch(/come into the picture from where a real person doing it sits or stands/);
+    expect(NATURAL_HANDS_POSE_CLAUSE).toMatch(/never reaching in from the far side of the work, over a seat back/);
+    // A concealer step shows her face by design: its clause is exactly what it was.
+    const step = [pic(4, "Dab it under the eyes and it brightens the whole face.", "the host dabbing concealer under her eyes")];
+    markHostBroll(step, { hostLook: MAKEUP }, PHOTO);
+    expect(step[0].hostFaceShown).toBe(true);
+    const face = personClauseFor(step[0], step[0].showSubject!);
+    expect(face).toBe(` ${hostFaceClause(step[0].brollHostLook!)} ${BODY_ON_PERSON_CLAUSE}`);
+    expect(face).not.toContain(NATURAL_POSE_CLAUSE);
+    expect(buildStillPrompt(step[0])).not.toMatch(/the CAMERA stands|natural pose for what/);
+  });
+
+  // Job 244 scene 3: a host picture of a chin line faces the camera, cut at the lips — "never seen from
+  // behind, never turned away". The camera half's "behind, over the shoulder, below the chin" would hide
+  // the chin the line is about, so it takes the body half alone.
+  it("a chin line's picture (job 244 scene 3) keeps its lips-cut framing: the pose, never the camera moved behind or below the chin", async () => {
+    const { NATURAL_POSE_BODY_CLAUSE, NATURAL_POSE_CAMERA_CLAUSE, NATURAL_POSE_CLAUSE } = await import("./longformVideo");
+    const scenes = [
+      pic(
+        3,
+        "Land two inches lower, and that same necklace drags your chin and your jawline down with it.",
+        "Host standing, fingertips adjusting a gold chain necklace resting at her collarbone, its pendant catching the window light",
+        { humanPresent: true }
+      ),
+    ];
+    markHostBroll(scenes, { hostLook: "a slender woman in her early sixties with fair skin and shoulder-length silver hair, a navy crewneck sweater" }, PHOTO);
+    expect(hostLipsCut(scenes[0])).toBe(true);
+    const prompt = buildStillPrompt(scenes[0]);
+    expect(prompt).toContain(HOST_LIPS_CUT_CLAUSE);
+    expect(prompt).toContain(NATURAL_POSE_BODY_CLAUSE);
+    expect(prompt).not.toContain(NATURAL_POSE_CAMERA_CLAUSE);
+    expect(prompt).not.toContain(NATURAL_POSE_CLAUSE);
+    expect(prompt).not.toMatch(/over the shoulder|below the chin/);
+    // A host picture of anything else takes both halves.
+    const bench = [pic(5, "and the old file still does the job.", "the host filing a worn tool at the workbench", { humanPresent: true })];
+    markHostBroll(bench, { hostLook: "a broad man in his sixties with a short grey beard, in a plaid flannel shirt" }, PHOTO);
+    expect(hostLipsCut(bench[0])).toBe(false);
+    expect(buildStillPrompt(bench[0])).toContain(NATURAL_POSE_CLAUSE);
+  });
+
+  // The rule rides every picture of a person, so it names no place and no furniture but the seat: a
+  // thing a prompt names is a thing the picture maker draws.
+  it("the pose rule names no place or furniture a picture would then draw", async () => {
+    const { NATURAL_POSE_CLAUSE, NATURAL_HANDS_POSE_CLAUSE } = await import("./longformVideo");
+    for (const clause of [NATURAL_POSE_CLAUSE, NATURAL_HANDS_POSE_CLAUSE])
+      expect(clause).not.toMatch(/\b(?:bus|theatre|theater|classroom|bed|desk|bench|counter|table|sofa|car|train)\b/i);
+  });
+
+  it("the still check names a pose no one takes, in words the redraw reads", () => {
+    const q2 = STILL_DEFECT_SYSTEM.slice(STILL_DEFECT_SYSTEM.indexOf("QUESTION 2"), STILL_DEFECT_SYSTEM.indexOf("QUESTION 3"));
+    expect(q2).toMatch(/a person in a pose nobody takes for what they are doing/);
+    expect(q2).toMatch(/sitting backwards or sideways in a seat that faces one way \(facing their own seat back, or their legs across the seat\)/);
+    expect(q2).toMatch(/in rows of fixed seats that all face one way, one row turned round to face the others/);
+    expect(q2).toMatch(/a body passing through its seat, or sitting or leaning on nothing/);
+    expect(q2).toMatch(/a body twisted away from the work its own hands are doing/);
+    expect(q2).toMatch(/two people talking or handing something over who stand or sit side by side facing the same way instead of toward each other/);
+    expect(q2).toMatch(/a heavy thing held out at arm's length in one hand/);
+    // Seat-mates face the way their row faces while they talk (job 399 scene 2's man, 417-2 drawn
+    // right): a broken verdict there would redraw a right picture, and a second one ship it empty.
+    expect(q2).toMatch(/so are people side by side in one row of seats \(a car, a bench, a pew, a row of fixed seats\) who face the way the row faces while they talk/);
+    expect(q2).toMatch(/seats built to face each other \(a booth, a bay of four\)/);
+    expect(q2).toMatch(/When unsure, answer false/);
+    expect(STILL_DEFECT_SYSTEM).toMatch(/a person in a pose nobody takes starts "unnatural pose:" and says who and how/);
+  });
+
+  it("the first pose fault is redrawn told the natural pose and where the camera goes; the second still gets the at-rest draw", async () => {
+    const { faultRedrawFor, namedFaultClause, namedFaultRedraw, NAMED_FAULT_START, NATURAL_POSE_FIX, SPLIT_STRIKE_CLAUSE } =
+      await import("./longformVideo");
+    type R = "at rest" | "soft print" | "named fault";
+    const none = new Set<R>();
+    const first = { broken: 0, writing: 0 };
+    const words2 = `${seats417().showSubject} ${seats417().visualPrompt}`;
+    // The check's own words for the survey's faults, in the form it is asked for and as it may put them.
+    for (const what of [
+      "unnatural pose: two people sitting backwards in their seats", // 417-2
+      "two passengers sitting backwards, facing their seat backs", // 417-2
+      "row ahead turned round to face the man behind", // 417-8
+      "seats in the row ahead facing him", // 417-8
+      "woman sitting sideways across her seat", // 402-23
+      "woman's torso passing through the seat back", // 399-2
+      "two people talking side by side facing the galley wall", // 417-9, 417-31
+      "scroll handed over, both men facing the same way, side by side", // 415-25
+      "whole toilet held one-handed at arm's length", // 403-23
+      "host's head twisted over his shoulder", // the head rule already in the check
+      "not seated properly in the chair",
+    ]) {
+      expect(namedFaultClause(what, words2, true), what).toContain(NATURAL_POSE_FIX);
+      expect(faultRedrawFor({}, { broken: true, what }, first, none, true, true), what).toBe("named fault");
+      // Nobody drawn in it: no pose to fix — its plain reroll, as before.
+      expect(namedFaultClause(what, words2, false), what).toBeUndefined();
+    }
+    const out = namedFaultRedraw("P.", "unnatural pose: two people sitting backwards in their seats", words2, true);
+    expect(out).toBe(
+      `P. ${NAMED_FAULT_START} unnatural pose: two people sitting backwards in their seats. This time draw it the way it really is. ${NATURAL_POSE_FIX}`
+    );
+    expect(NATURAL_POSE_FIX).toMatch(/sitting the way their own seat faces and held up by it/);
+    expect(NATURAL_POSE_FIX).toMatch(/Keep any face out by moving the CAMERA/);
+    expect(NATURAL_POSE_FIX).toMatch(/close and framed below the chin/);
+    expect(NATURAL_POSE_FIX).toMatch(/never by turning the person round, reversing a seat or a row, or twisting the body away/);
+    expect(NATURAL_POSE_FIX).toMatch(/a heavy thing is lifted close to the body with both hands/);
+    // A pose and a tool in one fault: both rules.
+    const both = namedFaultClause("body twisted away from the work, froe pressed down with no club", "hands splitting a bolt with a froe", true);
+    expect(both).toContain(NATURAL_POSE_FIX);
+    expect(both).toContain(SPLIT_STRIKE_CLAUSE);
+    // Faults in no pose keep what they had: a thing on its own, a seat with no one in it, a body count.
+    for (const what of [
+      "cutting board floating above the table",
+      "plane seat back merging into the window",
+      "shelf edge fails to line up",
+      "table legs twisted like wax",
+      "hand with six fingers",
+      "a third arm holding the cup",
+    ])
+      expect(namedFaultClause(what, words2, true), what).toBeUndefined();
+    // A thing's head or body, a "-handed" grip and a phone at arm's length are no pose: a fault with a
+    // rule of its own (a tool's, a line's) keeps that rule alone, anything else its plain reroll. The
+    // first five are the check's real words from the round 11-14 render logs.
+    for (const [what, ownRule] of [
+      ["axe head pressed on log, handle oddly bent", true],
+      ["froe blade floats above stump, handle through fist", true],
+      ["chainsaw bar cutting through log, hand placement implausible", false],
+      ["smoke detector hanging from ceiling by wires, detached from surface", true],
+      ["second tray table folded up on seatback, unattached", false],
+      ["axe head twisted sideways on its handle", true],
+      ["hammer head turned round on the handle", true],
+      ["one-handed grip, drill bit facing forward, not in wood", true],
+      ["shower head twisted off the wall", false],
+      ["phone held at arm's length, screen warped", false],
+    ] as const) {
+      const clause = namedFaultClause(what, "hands at work", true);
+      expect(clause ?? "", what).not.toContain(NATURAL_POSE_FIX);
+      if (!ownRule) expect(clause, what).toBeUndefined();
+    }
+    // Seat-mates face the way their row faces: the redraw says so beside "facing whoever they talk to".
+    expect(NATURAL_POSE_FIX).toMatch(/people side by side in one row of seats both face the way the row faces/);
+    // The second broken draw still gets the one at-rest draw; the named fault once only.
+    const again = { broken: true, what: "unnatural pose: sitting backwards" };
+    expect(faultRedrawFor({}, again, { broken: 1, writing: 0 }, new Set<R>(["named fault"]), true, true)).toBe("at rest");
+    expect(faultRedrawFor({}, again, first, new Set<R>(["named fault"]), true, true)).toBeUndefined();
+  });
+
+  it("the new rules name no channel's things", async () => {
+    const { NATURAL_POSE_CLAUSE, FACING_EACH_OTHER_CLAUSE, NATURAL_POSE_FIX, HOST_TURNED_AWAY_CLAUSE, OTHERS_TURNED_AWAY_CLAUSE } =
+      await import("./longformVideo");
+    const q2 = STILL_DEFECT_SYSTEM.slice(STILL_DEFECT_SYSTEM.indexOf("a person in a pose nobody takes"), STILL_DEFECT_SYSTEM.indexOf("- a mirror"));
+    for (const clause of [NATURAL_POSE_CLAUSE, FACING_EACH_OTHER_CLAUSE, NATURAL_POSE_FIX, HOST_TURNED_AWAY_CLAUSE, OTHERS_TURNED_AWAY_CLAUSE, q2])
+      expect(clause).not.toMatch(/plane|aircraft|airline|cabin|passenger|flight|galley|aisle|tray|toilet|froe|scroll|Roman|courtyard|\bcat\b/i);
+  });
+
+  it("job 417 scene 2: the picture that sat two passengers backwards is now asked for the natural pose, and its fault is named and redrawn", async () => {
+    const { NATURAL_POSE_CLAUSE, faultRedrawFor, namedFaultRedraw, NATURAL_POSE_FIX } = await import("./longformVideo");
+    const s = seats417();
+    const prompt = buildStillPrompt(s);
+    // The description still says what it said; the clause beside it decides how the people sit.
+    expect(prompt).toContain("narrow aisle visible behind them");
+    expect(prompt.split(NATURAL_POSE_CLAUSE)).toHaveLength(2);
+    expect(prompt.indexOf(otherPersonClause("two passengers", 2))).toBeLessThan(prompt.indexOf(NATURAL_POSE_CLAUSE));
+    // It passed the check with no flag; asked now, the check names the pose and the reroll is told.
+    const what = "unnatural pose: two people sitting backwards in their seats";
+    expect(faultRedrawFor(s, { broken: true, what }, { broken: 0, writing: 0 }, new Set(), true, true)).toBe("named fault");
+    expect(namedFaultRedraw(prompt, what, `${s.showSubject} ${s.visualPrompt}`, true)).toContain(NATURAL_POSE_FIX);
+  });
+});
+
+// ─── Round 15: a list of steps told of another time carries it (job 418 #19) ───────────────────
+
+describe("job 418 #19: a list of STEPS told of another time is done with that time's tools", () => {
+  // Sawdust Sam's practice film on the round-14 code (78.06-80.36 s): "They cut the log into short
+  // bolts," inside a passage about how the oldest mountain cabins were roofed by hand, drew the host
+  // with a modern orange chainsaw. A list of things in such a passage carries its time and place
+  // (round 13, job 409); a list of STEPS lost it in the finder, so the step's prompt named no time and
+  // no tool. The lines are the film's own; the setting is what the finder answers for that passage.
+  const ROOF = "Number one is the roof, split by hand from white oak or chestnut with a froe, and the direction of the split mattered most.";
+  const RIVING =
+    "They cut the log into short bolts, split each bolt into pie wedges, and rived the boards along those same lines, so every board runs from bark toward heart and stays flat in the weather.";
+  const SHAKES = "They went up rough as shakes, or got shaved thin at one end with a drawknife to make shingles.";
+  const STEPS = ["cut the log into short bolts", "split each bolt into pie wedges", "rived the boards along those same lines"];
+  const WHEN = "the southern Appalachian mountains in the 1800s";
+  const LOOK =
+    "A lean man in his sixties with fair skin, short grey hair, and a trimmed grey beard, wearing an olive button-up shirt over a dark grey t-shirt";
+  const sc = (index: number, scriptText: string, showSubject: string, over: Partial<StoryboardScene> = {}) =>
+    ({ index, narration: scriptText, scriptText, showSubject, visualPrompt: showSubject, ...over }) as StoryboardScene;
+  // Scenes 17-22 as stored after the first cut.
+  const board418 = () => [
+    sc(17, "What faded was the everyday habit, so we will go from that cabin roof down to its fire.", "the host", { hostPresent: true }),
+    sc(18, `${ROOF} They`, "Hands striking the back of an L-shaped froe blade, set across the end of a white oak bolt, with a wooden club, the split opening straight down the grain", {
+      humanPresent: true,
+    }),
+    sc(19, "cut the log into short bolts,", "a white oak log being cut into short bolts in the woodlot", {
+      visualPrompt: "A white oak log being cut into short bolts in a wooded hillside clearing with felled trunks and stumps nearby.",
+      humanPresent: true,
+      listCut: true,
+      listKind: "steps",
+    }),
+    sc(20, "split each bolt into pie wedges,", "Hands driving a froe into the end of a round oak bolt resting on a stump", { humanPresent: true, listCut: true, listKind: "steps" }),
+    sc(21, "and rived the boards along those same lines,", "Hands levering the right-angle handle of a froe to pry a thin pale board free along the grain of an oak wedge", {
+      humanPresent: true,
+      listCut: true,
+      listKind: "steps",
+    }),
+    sc(22, "so every board runs from bark toward heart and stays flat in the weather.", "A pale rived oak board lying flat, straight grain running its full length"),
+  ];
+
+  it("the finder's setting reaches every step, and the chainsaw step's prompt names the time, its tools and ways", async () => {
+    const found = await findSpokenLists(`${ROOF} ${RIVING} ${SHAKES}`, {
+      ask: async () => JSON.stringify({ lists: [{ sentence: 1, kind: "steps", items: STEPS, setting: WHEN }] }),
+    });
+    expect(found.lists).toEqual([{ sentence: 1, kind: "steps", items: STEPS, setting: WHEN }]);
+    const r = applySpokenLists(board418(), found.lists);
+    markHostBroll(r.scenes, { hostLook: LOOK }, "https://x/host.png");
+    const { attachMemory } = await import("./pictureMemory");
+    attachMemory(r.scenes, []);
+    const steps = r.scenes.filter(s => s.listCut);
+    expect(steps.map(s => [s.listKind, s.listSetting, s.brollHostLook])).toEqual(STEPS.map(() => ["steps", WHEN, LOOK]));
+    const chainsaw = steps[0];
+    expect(chainsaw.scriptText).toBe("cut the log into short bolts,");
+    const prompt = buildStillPrompt(chainsaw);
+    expect(prompt).toContain(`this step is set in ${WHEN} and done as it was done there and then: the tools, materials and way of working belong to that time and place`);
+    // The host is drawn as in the photo: never told to dress for 1800 beside "exactly as in the reference photo".
+    expect(prompt).toContain(hostBrollClause(LOOK).slice(0, 60));
+    expect(prompt).not.toMatch(/dressed as people were there and then/);
+  });
+
+  it("clean: a how-to said to the viewer today stays today (Hank's job 326), and a list saved without a setting keeps none", async () => {
+    const howTo =
+      "Square up the scrap with a couple of saw cuts, give it a quick brush, drill the hole about halfway through at a slight angle, oil it, and put a felt dot on the bottom.";
+    const items = ["Square up the scrap with a couple of saw cuts", "give it a quick brush", "drill the hole about halfway through at a slight angle", "oil it", "put a felt dot on the bottom"];
+    for (const setting of [null, "today", "the present day"]) {
+      const found = await findSpokenLists(howTo, { ask: async () => JSON.stringify({ lists: [{ sentence: 0, kind: "steps", items, setting }] }) });
+      expect(found.lists).toEqual([{ sentence: 0, kind: "steps", items }]);
+    }
+    // Every list of steps stored before this fix had its setting dropped: replayed, nothing changes.
+    const r = applySpokenLists(board418(), [{ sentence: 1, kind: "steps", items: STEPS }]);
+    expect(r.scenes.some(s => s.listSetting)).toBe(false);
+  });
+});
+
+// ─── Round 15: a tool nobody holds is put down (job 418 #25) ─────────────────────────────────────
+
+describe("job 418 #25: a person-free panel puts its tool down and shows the holder its line names", () => {
+  // Sawdust Sam's practice film on the round-14 code (108.30-115.33 s): beside "When you rive, the bolt
+  // sits in a fork or against a stump, never in your hand", the panel was written "Oak bolt wedged
+  // upright in a stump fork, froe blade set into its top end with the handle angled, resting unattended
+  // on the work" — the MUST SHOW line's tool with the hand taken out of it. For 7 s on half the screen
+  // the froe hung on a bare wire hook, its handle out over nothing, a board peeled off with no tool in
+  // it, and the "fork" was a hole bored in the stump; flagged broken on all three draws, it shipped.
+  const LINE = "When you rive, the bolt sits in a fork or against a stump, never in your hand.";
+  const PANEL =
+    "Oak bolt wedged upright in a stump fork, froe blade set into its top end with the handle angled, resting unattended on the work.";
+  const scene25 = () =>
+    ({
+      index: 25,
+      hostPresent: true,
+      narration: "When you rive, the bolt sits in a",
+      scriptText: LINE,
+      visualPrompt: "the channel's host, exactly as in their host photo, seated in a chair talking directly to the camera",
+      showSubject: "An oak bolt wedged upright in the fork of a stump, a froe blade set into its top end and a hand on the right-angle handle",
+      splitVisual: PANEL,
+    }) as StoryboardScene;
+
+  it("the writer and the panel pass are told it, the picture maker is told it, and the hook is no longer offered", async () => {
+    const { SPLIT_PANEL_PERSON_FREE_DIRECTIVE, UNHELD_TOOL_CLAUSE, NO_FIGURES_SUFFIX } = await import("./longformVideo");
+    const { PANEL_FIT_RULES } = await import("./shotList");
+    for (const rules of [SPLIT_PANEL_PERSON_FREE_DIRECTIVE, PANEL_FIT_RULES]) {
+      expect(rules).toMatch(/lies flat on the work, a bench or the ground/);
+      expect(rules).toMatch(/only where a real one stays by itself/);
+      expect(rules).toMatch(/working pose/);
+      expect(rules).toMatch(/HOLDER the (?:narration|line) says the work sits in, on or against/);
+      expect(rules).toMatch(/run(?:s)? (?:the two )?(?:together )?into one thing/);
+      expect(rules).not.toMatch(/\b(?:froe|fork|stump|bolt|riv(?:e|ing)|club|hook)\b/i);
+    }
+    const prompt = buildStillPrompt(buildSplitRightScene(scene25()), false, undefined, undefined, true);
+    expect(prompt).toContain(UNHELD_TOOL_CLAUSE);
+    expect(prompt).toContain(NO_FIGURES_SUFFIX);
+    expect(prompt).not.toMatch(/hangs from a hook/);
+  });
+
+  it("the check names the hung tool and its first redraw is told how a tool is put down; someone at work keeps the tool's own rule", async () => {
+    const { faultRedrawFor, namedFaultClause, UNHELD_TOOL_CLAUSE, SPLIT_STRIKE_CLAUSE, CONNECTING_LINES_CLAUSE } = await import(
+      "./longformVideo"
+    );
+    expect(STILL_DEFECT_SYSTEM).toMatch(/a tool with NO hand on it that hangs in mid-air or from a hook, wire or string fixed to\s+nothing/);
+    const what = "froe hanging from a wire hook above the bolt";
+    expect(faultRedrawFor({}, { broken: true, what }, { broken: 0, writing: 0 }, new Set(), true, false)).toBe("named fault");
+    const clause = namedFaultClause(what, PANEL, false);
+    expect(clause).toContain(UNHELD_TOOL_CLAUSE);
+    expect(clause).not.toContain(CONNECTING_LINES_CLAUSE);
+    // Hands at the froe (job 414 scene 17) are still told how it is struck in.
+    expect(namedFaultClause(what, "hands splitting a bolt with a froe", true)).toContain(SPLIT_STRIKE_CLAUSE);
+    // A tool lying put down with nobody at it is no fault to name (job 418 scene 23's drawknife).
+    expect(namedFaultClause("drawknife lying across the board", "a drawknife resting across it", false)).toBeUndefined();
+  });
+});
+
+// ─── Round 15: a person named by what they do (job 418 #2) ───────────────────────────────────────
+
+describe("job 418 #2: the log restorer the line names is in the picture the label names", () => {
+  // Sawdust Sam's practice film on the round-14 code (7.15-11.79 s): under "A log restorer in Grayson
+  // County, Virginia, let me try it." the shot list asked for "an older log restorer standing beside
+  // its door", but "restorer" was no person word, so no someone-else was set and no person clause was
+  // added; the rewrite kept only the cabin, both draws were flagged "missing", and the SmallLabel "A
+  // log restorer" sat over an empty cabin.
+  const LOOK =
+    "A lean man in his sixties with fair skin, short grey hair, and a trimmed grey beard, wearing an olive button-up shirt over a dark grey t-shirt";
+  const scene2 = () =>
+    ({
+      index: 2,
+      scriptText: "A log restorer in Grayson County, Virginia, let me try it.",
+      narration: "A log restorer in Grayson County, Virginia, let me try it.",
+      showSubject:
+        "a restored log cabin in Grayson County Virginia, an older log restorer standing beside its door, seen from the side",
+      visualPrompt:
+        "A restored log cabin in Grayson County, Virginia, with hewn poplar walls and a split-oak shingled roof, its wooden-pinned door visible, seen from outside.",
+      stillImage: true,
+    }) as StoryboardScene;
+
+  it("the restorer is someone else, drawn with a person clause from behind or the side, never the host", () => {
+    const s = scene2();
+    markHostBroll([s], { hostLook: LOOK }, "https://x/sam.png");
+    expect(s).toMatchObject({ otherPerson: "an older log restorer", humanPresent: true });
+    expect(s.brollHostRef).toBeUndefined();
+    expect(buildStillPrompt(s)).toContain(otherPersonClause("an older log restorer"));
+  });
+
+  it("the line check's who reaches it, and a thing named the same way stays a thing", async () => {
+    const { applyWho } = await import("./shotList");
+    const s = scene2();
+    applyWho(s, "a log restorer");
+    expect(s.otherPerson).toBe("a log restorer");
+    const { namedPeople } = await import("./hostLook");
+    expect(namedPeople("a red rubber plunger standing idle in the corner of the bathroom")).toBeUndefined(); // job 403 #21
+    expect(namedPeople("a fire extinguisher standing within reach of the workbench")).toBeUndefined(); // job 146 #258
+  });
+
+  it("a bird or an animal named the same way is drawn with nobody in it", () => {
+    // The robin films (jobs 404, 411) are about birds: "a male robin singing" names nobody, and a
+    // warbler singing or a deer eating the hostas must not become "the only person in this shot".
+    for (const showSubject of [
+      "a male robin singing with its beak open on a branch at sunrise in spring", // job 404 #18
+      "a male warbler singing on a fence post at sunrise",
+      "a deer eating the hostas at the edge of the garden",
+    ]) {
+      const s = { ...scene2(), showSubject, scriptText: "They come back every spring." } as StoryboardScene;
+      markHostBroll([s], { hostLook: LOOK }, "https://x/sam.png");
+      expect(s.otherPerson, showSubject).toBeUndefined();
+      expect(s.humanPresent, showSubject).toBeUndefined();
+      expect(s.brollHostRef, showSubject).toBeUndefined();
+    }
   });
 });

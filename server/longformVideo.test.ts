@@ -144,6 +144,7 @@ import {
   ensureVideoSubject,
   BODY_ON_PERSON_CLAUSE,
   ANON_PERSON_SUFFIX,
+  NATURAL_HANDS_POSE_CLAUSE,
   NO_FIGURES_SUFFIX,
   CUTAWAY_PERSON_FREE_DIRECTIVE,
   OBJECT_MOTION_DIRECTIVE,
@@ -2907,11 +2908,11 @@ describe("enhanceBrollPrompts — a split panel from its line, keeping the tool 
     expect(scenes[0].splitVisual).toBe(PHONE);
   });
 
-  it("414 scene 22: a rewrite of the result alone gets the drawknife back, resting on the work", async () => {
+  it("414 scene 22: a rewrite of the result alone gets the drawknife back, lying flat on the work", async () => {
     mockInvoke.mockResolvedValue({ text: SHINGLE } as any);
     const scenes = [panelScene(22, LINE_22, HANDS_22)];
     await enhanceBrollPrompts(scenes, baseParams);
-    expect(scenes[0].splitVisual).toBe(`${SHINGLE}, a drawknife resting on the work, unattended.`);
+    expect(scenes[0].splitVisual).toBe(`${SHINGLE}, a drawknife lying flat on the work, unattended.`);
     // The seed a redraw rewrites from is untouched.
     expect(scenes[0].splitVisualSeed).toBe(HANDS_22);
     // A rewrite that kept the tool is left as written.
@@ -2925,10 +2926,48 @@ describe("enhanceBrollPrompts — a split panel from its line, keeping the tool 
 
   it("the panel directive weighs most of the line and keeps the named tool, in neutral words", () => {
     expect(SPLIT_PANEL_PERSON_FREE_DIRECTIVE).toMatch(/a TOOL the narration says the job is done with/);
-    expect(SPLIT_PANEL_PERSON_FREE_DIRECTIVE).toMatch(/stays in the panel, resting on the work, unattended/);
+    expect(SPLIT_PANEL_PERSON_FREE_DIRECTIVE).toMatch(/stays in the panel, put down — lying flat on the work, unattended/);
     expect(SPLIT_PANEL_PERSON_FREE_DIRECTIVE).toMatch(/what MOST of it is about, by how long each part is said/);
     expect(SPLIT_PANEL_PERSON_FREE_DIRECTIVE).toMatch(/A MUST SHOW line, when given, IS that subject/);
     expect(SPLIT_PANEL_PERSON_FREE_DIRECTIVE).not.toMatch(/\b(?:shingles?|drawknife|cabin|roof|oak|poplar|back wall|froe)\b/i);
+  });
+
+  // Job 418 scene 25 (round 15): "When you rive, the bolt sits in a fork or against a stump, never in your
+  // hand." The MUST SHOW line had "a froe blade set into its top end and a hand on the right-angle
+  // handle"; the writer took the hand out and left the tool where the hand held it — "froe blade set into
+  // its top end with the handle angled, resting unattended on the work" — and "the fork of a stump" ran
+  // the line's two holders into one, drawn as a hole bored in the stump.
+  it("418 scene 25: the panel writer is told a tool nobody holds is put down, and the holder the line names is one real thing", async () => {
+    // Nothing is left "exactly as the action left it": the work is, what was in the hands is put down.
+    expect(SPLIT_PANEL_PERSON_FREE_DIRECTIVE).not.toMatch(/in place exactly as the action left it/);
+    expect(SPLIT_PANEL_PERSON_FREE_DIRECTIVE).toMatch(
+      /the work as the action left it, and whatever was in the hands put down the way a person puts it down/
+    );
+    expect(SPLIT_PANEL_PERSON_FREE_DIRECTIVE).toMatch(/NOBODY HOLDS a tool in this panel, so it lies flat on the work, a bench or the ground/);
+    expect(SPLIT_PANEL_PERSON_FREE_DIRECTIVE).toMatch(/stays standing in the work only where a real one stays by itself/);
+    expect(SPLIT_PANEL_PERSON_FREE_DIRECTIVE).toMatch(
+      /Never leave a tool in its working pose with the hand taken out \(its handle angled up, poised over the work/
+    );
+    expect(SPLIT_PANEL_PERSON_FREE_DIRECTIVE).toMatch(/hanging from anything unless the narration says it hangs/);
+    // The MUST SHOW line's own tool, held in it, is put down with the hand taken out.
+    expect(SPLIT_PANEL_PERSON_FREE_DIRECTIVE).toMatch(
+      /A MUST SHOW line, when given, IS that subject: keep it, drawn with no person and any tool in it put down/
+    );
+    expect(SPLIT_PANEL_PERSON_FREE_DIRECTIVE).toMatch(/a HOLDER the narration says the work sits in, on or against/);
+    expect(SPLIT_PANEL_PERSON_FREE_DIRECTIVE).toMatch(/written by its parts — what it is made of and how it holds the work/);
+    expect(SPLIT_PANEL_PERSON_FREE_DIRECTIVE).toMatch(/describe the first one alone, never the two run together into one thing/);
+    // Neutral words: none of the film's own things.
+    expect(SPLIT_PANEL_PERSON_FREE_DIRECTIVE).not.toMatch(/\b(?:froe|fork|stump|bolt|riv(?:e|ing)|club|hook)\b/i);
+    // The writer of that line's panel is handed it.
+    mockInvoke.mockResolvedValue({ text: "An oak bolt standing on end in a forked log, a froe lying flat on the log beside it." } as any);
+    const LINE_25 = "When you rive, the bolt sits in a fork or against a stump, never in your hand.";
+    const NEED_25 =
+      "An oak bolt wedged upright in the fork of a stump, a froe blade set into its top end and a hand on the right-angle handle";
+    const scenes = [panelScene(25, LINE_25, NEED_25)];
+    await enhanceBrollPrompts(scenes, baseParams);
+    expect(panelMessage()).toContain(SPLIT_PANEL_PERSON_FREE_DIRECTIVE);
+    expect(panelMessage()).toContain(`Scene narration: "${LINE_25}"`);
+    expect(scenes[0].splitVisual).toBe("An oak bolt standing on end in a forked log, a froe lying flat on the log beside it.");
   });
 });
 
@@ -8540,7 +8579,7 @@ describe("buildStillPrompt (script-only + one fixed look tail)", () => {
     } as StoryboardScene;
     const prompt = buildStillPrompt(scene);
     expect(prompt).toBe(
-      `a homeowner inspects the finished bed ${ANON_PERSON_SUFFIX} ${BODY_ON_PERSON_CLAUSE} ${AMATEUR_IPHONE_LOOK} Wide 16:9 horizontal landscape framing. ${NO_FIGURES_SUFFIX} ${NO_BOOK_SUFFIX}`
+      `a homeowner inspects the finished bed ${ANON_PERSON_SUFFIX} ${NATURAL_HANDS_POSE_CLAUSE} ${BODY_ON_PERSON_CLAUSE} ${AMATEUR_IPHONE_LOOK} Wide 16:9 horizontal landscape framing. ${NO_FIGURES_SUFFIX} ${NO_BOOK_SUFFIX}`
     );
     expect(prompt).toContain(ANON_PERSON_SUFFIX);
     expect(prompt.endsWith(NO_BOOK_SUFFIX)).toBe(true);
@@ -12457,6 +12496,50 @@ describe("someone else's face is asked about in the one check, and drawn again f
     expect(prompt.split(OTHERS_TURNED_AWAY_CLAUSE)).toHaveLength(2);
     expect(turnOthersAway(prompt)).toBe(prompt);
     expect(buildStillPrompt(passenger())).not.toContain(OTHERS_TURNED_AWAY_CLAUSE);
+  });
+
+  // Job 417 scene 2 (2026-10-20): two passengers drawn sitting backwards in their seats, and the check
+  // passed it. Named now, the first broken draw's own reroll is told the natural pose and that the
+  // camera moves — no draw added; a second broken draw still gets the at-rest draw.
+  it("an unnatural pose is redrawn told the pose and where the camera goes, in the reroll's own turn", async () => {
+    const { NAMED_FAULT_START, NATURAL_POSE_FIX, NATURAL_POSE_CLAUSE, PERSON_FREE_FALLBACK } = await import(
+      "./longformVideo"
+    );
+    const [a, b, c] = await Promise.all([pngOf("#e81"), pngOf("#e82"), pngOf("#e83")]);
+    const seated = () =>
+      ({
+        index: 2,
+        scriptText: "the same flight, and sat in the same row.",
+        showSubject: "two passengers seated together in an airline seat row",
+        visualPrompt:
+          "Two passengers seated side by side in an airline seat row, blue upholstered seats with headrests, narrow aisle visible behind them.",
+        humanPresent: true,
+        otherPerson: "two passengers",
+        otherPeople: 2,
+        stillImage: true,
+      }) as any;
+    checkSays({ broken: true, what: "unnatural pose: two people sitting backwards in their seats" });
+    let genImage = drawsOf(a, b);
+    let out = await generateValidatedStill(seated(), 4, undefined, genImage);
+    expect(genImage).toHaveBeenCalledTimes(2);
+    const [p1, p2] = genImage.mock.calls.map(c => c[0].prompt as string);
+    expect(p1).toContain(NATURAL_POSE_CLAUSE);
+    expect(p1).not.toContain(NAMED_FAULT_START);
+    expect(p2.startsWith(p1)).toBe(true);
+    const added = p2.slice(p1.length);
+    expect(added).toContain(`${NAMED_FAULT_START} unnatural pose: two people sitting backwards in their seats.`);
+    expect(added).toContain(NATURAL_POSE_FIX);
+    expect(out.buffer.equals(b)).toBe(true);
+    // Broken again: the existing at-rest draw, nobody in it — the budget is the one it always was.
+    checkSays(
+      { broken: true, what: "unnatural pose: two people sitting backwards in their seats" },
+      { broken: true, what: "unnatural pose: seats turned round to face each other" }
+    );
+    genImage = drawsOf(a, b, c);
+    out = await generateValidatedStill(seated(), 4, undefined, genImage);
+    expect(genImage).toHaveBeenCalledTimes(3);
+    expect(genImage.mock.calls[2][0].prompt as string).toContain(PERSON_FREE_FALLBACK);
+    expect(out.buffer.equals(c)).toBe(true);
   });
 
   it("who is asked, and whose words lose a smile: someone else in the picture, never a host take or the QR backdrop", async () => {

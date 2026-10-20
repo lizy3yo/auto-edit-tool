@@ -517,6 +517,8 @@ export interface StoryboardScene {
    * item drawn from its bare words has no time of its own: job 409's "The farmer complains, the
    * senator complains, the old complain, and the young…", inside a passage about a writer of ancient
    * times, came back as a farmer in overalls, an old man on a park bench and a young man in a hoodie.
+   * A list of steps carries it too: job 418's "They cut the log into short bolts," told of the oldest
+   * cabins, was drawn with a modern chainsaw.
    */
   listSetting?: string;
   /**

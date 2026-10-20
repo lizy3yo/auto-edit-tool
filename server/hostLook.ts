@@ -401,6 +401,8 @@ export type NamedPerson = {
   /** How many: 1, 2, or 3 for several (a crowd, "several shoppers"). */
   count: number;
   sex?: "f" | "m";
+  /** Named by what they do ("an older log restorer"), a word no list holds (`agentAt`). */
+  byWork?: boolean;
 };
 /** Who a description names: the people, and how many in all (1, 2, or 3 = several). */
 export type NamedPeople = {
@@ -431,6 +433,273 @@ function ownsBodyPart(tokens: string[], h: number): boolean {
     if (FOLLOW.has(b)) return false;
   }
   return false;
+}
+
+// ─── A person named by what they do ──────────────────────────────────────────────────────
+
+/**
+ * A word shaped like a person named by WHAT THEY DO — an agent noun ending "-er", "-or" or "-ist",
+ * one or several: a restorer, a collector, birdwatchers, a florist. Most words of that shape are
+ * things (a heater, a planter, a monitor) or no noun at all (other, under, older), so the shape never
+ * makes a person by itself: the words around it must (`agentAt`).
+ */
+const AGENT_SHAPE = /^([a-z][a-z-]*[a-z](?:er|or|ist))(s)?$/;
+/**
+ * Words of that shape known to sit where a person would — a thing that stands, works or wears
+ * ("an old heater standing in the corner", "a hanger wearing a coat"), a tree, a dog, a word that is
+ * no noun ("the other kneeling"). A small guard: the test is the words around the noun, this only
+ * keeps out the ones that pass it.
+ */
+const NOT_AN_AGENT = new Set(
+  (
+    // appliances, machines and tools
+    "heater sharpener planer drawer cooler burner computer sprayer opener sander router jointer grinder " +
+    "mixer blender dryer washer timer ladder stepladder extinguisher plunger compressor generator boiler " +
+    "radiator freezer locker dresser monitor detector sensor speaker recorder player printer scanner " +
+    "tractor mower trailer airliner motor meter thermometer adapter connector cleaner steamer smoker " +
+    "cooker warmer hanger walker stroller rocker tower shelter poster banner marker counter cutter " +
+    "runner paper reminder " +
+    // what holds or carries
+    "holder container planter feeder canister dispenser binder folder tumbler pitcher saucer platter " +
+    "hamper wrapper liner " +
+    // what is worn, which walks and wears with its wearer ("worn leather sneakers walking across the lot")
+    "sweater sneaker loafer slipper blazer suspender trouser jumper pullover romper garter holster " +
+    // trees, plants and animals — an animal eats, watches, sings and looks up like a person ("a deer
+    // eating the hostas", "a male warbler singing on a fence post", "a rooster watching from the fence")
+    "juniper alder conifer clover lavender retriever terrier pointer setter boxer lobster oyster " +
+    "deer reindeer steer heifer rooster otter beaver badger hamster gopher spider grasshopper alligator " +
+    "predator panther tiger viper adder critter warbler flycatcher kingfisher woodpecker " +
+    "sapsucker creeper plover sandpiper tanager thrasher " +
+    // what a script's prose says teaches, counts or explains ("Each chapter teaches one thing", "all
+    // those numbers are really doing is counting", jobs 220 and 351)
+    "chapter number letter " +
+    // no noun at all, a title ("Master Locksmith") and the camera ("angled toward the viewer")
+    "other another either neither whether rather together ever never however whatever under over " +
+    "after upper lower inner outer later earlier former latter water viewer master mister"
+  ).split(" ")
+);
+/**
+ * "A group of birders", "a crowd of onlookers": several people. Never "a pair of": a pair of
+ * scissors, pliers, clippers or waders is one thing.
+ */
+const MANY_OF = /^(?:group|crowd|team|line|handful|couple|row|circle)$/;
+/**
+ * What only a person does — never a tool, a machine or a container, which cut, split, hold, carry,
+ * stand, sit, lean, run, use fuel, offer shade and "let light in". Verbs of the body, the eyes and
+ * the voice, and of dealing with other people.
+ */
+const PERSON_DOING = new Set(
+  (
+    "talking talks speaking speaks chatting chats smiling smiles laughing laughs grinning grins nodding " +
+    "nods frowning frowns kneeling kneels knelt crouching crouches crouched squatting squats walking walks " +
+    "strolling strolls hiking wearing wears dressed explaining explains describing describes examining " +
+    "examines inspecting inspects admiring admires browsing browses studying writing writes greeting " +
+    "greets hugging hugs waving gesturing handing paying pays buying shopping signing counting watching " +
+    "listening listens teaching teaches demonstrating demonstrates thinking asking asks praying " +
+    "singing eating drinking sipping posing arranging whittling hewing knitting crocheting hunting fishing"
+  ).split(" ")
+);
+/** Looking is a person's only when it goes somewhere ("looking up at", not "looking worn"). */
+const LOOKING = /^(?:looking|looks|gazing|gazes|peering|peers|glancing|glances|staring|stares)$/;
+const LOOK_WAY =
+  /^(?:at|up|down|through|out|into|over|toward|towards|across|around|back|on|closely|intently|ahead|skyward)$/;
+/** "letting me try it", "lets you hold it": letting a person do something. */
+const LETTING = /^(?:let|lets|letting)$/;
+const LET_WHOM = /^(?:me|us|you|him|her|them)$/;
+/**
+ * What a person wears: "a birder in a winter coat", "a messenger in a tunic", "birders in winter
+ * coats" — a garment, never a cloth ("a table runner in soft flannel").
+ */
+const CLOTHING =
+  /^(?:coats?|jackets?|parkas?|shirts?|tunics?|robes?|cloaks?|aprons?|overalls|coveralls|uniforms?|vests?|sweaters?|cardigans?|hoodies?|hats?|caps?|bonnets?|dress|dresses|skirts?|blouses?|suits?|scrubs|waders|togas?|kimonos?|gowns?|boots|gloves|jeans|clothes|clothing)$/;
+/** A garment named as one worn ("in a coat", "in her apron") or as several ("in winter coats", "in overalls"). */
+const WORN_AS = /^(?:a|an|the|his|her|their|its|my|your|our)$/;
+/**
+ * A word before an "-ing" word that makes it a thing's name or a gerund: "writing materials", "before
+ * signing off", "your shopping list" (job 352), "a ledger beside counting beads".
+ */
+const NOT_ITS_DOING =
+  /^(?:a|an|the|this|that|its|your|my|our|after|before|for|with|without|from|of|about|by|into|onto|on|in|at|beside|near|under|over|behind|across|along|through|toward|towards|against|around|among|between|beneath|below|above|inside|outside)$/;
+/**
+ * Words before the noun that only a person takes: "an elderly carver", "a bearded trapper". Never
+ * "male" or "female", which a bird ("a male warbler") and a pipe fitting ("a male coupler") take too.
+ */
+const PERSON_ADJ =
+  /^(?:elderly|bearded|balding|middle-aged|pregnant|barefoot|retired|uniformed|fellow|[a-z]+-haired|[a-z]+-bearded|[a-z-]+-year-old)$/;
+/**
+ * How only a person stands or looks: "the Roman advisor standing somberly alone". Never a way a
+ * machine runs ("working quietly", "glowing warmly").
+ */
+const PERSON_MANNER =
+  /^(?:somberly|sombrely|sadly|happily|proudly|patiently|impatiently|nervously|anxiously|thoughtfully|cheerfully|eagerly|wearily|angrily|fondly|curiously|solemnly|grimly|wistfully|sheepishly|attentively)$/;
+/**
+ * "Older" or "younger" before the noun — how a person's age is said ("an older passenger"), where
+ * "old" is a thing's as often ("an old heater", "an old camper"). A weak sign.
+ */
+const AGE_ADJ = /^(?:older|younger)$/;
+/**
+ * Standing, working, waiting, alone: a person's, but a machine stands and works, and a thing stands
+ * alone ("a typewriter standing alone on the desk") — a weak sign that needs a person's beside it.
+ */
+const STANDS_OR_WORKS = /^(?:standing|stands|stood|working|works|waiting|waits|seated)$/;
+/**
+ * A part only a person has, for "the restorer's hands" — never one a machine has too (a head, a
+ * face, an arm, a foot, a back).
+ */
+const PERSON_ONLY_PART =
+  /^(?:hands?|fingers?|fingertips?|thumbs?|palms?|wrists?|forearms?|knuckles?|elbows?|knees?|lap|hair|beard|eyes|lips|chin|cheeks?|torso|shoulders)$/;
+/**
+ * People named by what they do that mean WHOEVER IS DOING THE SHOWN WORK — the worker's forearms, the
+ * maker's hands, the seller's palm at the stall: on a channel with a host on camera, the host, as
+ * "owner" and "vendor" are (`SELF_NOUNS`). Every other agent noun is a role, someone else.
+ */
+const DOER_NOUNS = new Set("worker maker doer user operator wearer giver receiver beginner learner seller".split(" "));
+
+/**
+ * The singular of a word shaped like an agent noun that no list names as a person, a thing or a
+ * part of the body ("birders" → "birder"), else undefined. Pure.
+ */
+function agentLemma(word: string): string | undefined {
+  const m = AGENT_SHAPE.exec(word);
+  if (!m || word.length < 4) return undefined;
+  const lemma = m[1];
+  // A door, a floor, "indoors", "the interior": the shape, never someone ("seated indoors talking").
+  if (/(?:oor|erior)$/.test(lemma)) return undefined;
+  if (PERSON_NOUN.has(lemma) || PERSON_NOUN.has(word) || BODY.has(lemma) || BODY.has(word)) return undefined;
+  if (NOT_AN_AGENT.has(lemma) || NOT_AN_AGENT.has(lemma.split("-").pop()!)) return undefined;
+  return lemma;
+}
+
+/** Words that end the stretch of words a noun's own signs are looked for in. */
+const CLAUSE_END = /^(?:while|as|where|when|which|that|who|whose)$/;
+const PERSON_PRONOUN = /^(?:he|she|his|her|him|hers|they|them|their)$/;
+
+/**
+ * The person an AGENT NOUN at `h` names, when the words around it say it is someone (2026-10-20,
+ * job 418 scene 2): "an older log restorer standing beside its door" named nobody — "restorer" is
+ * no listed role — so the picture had no person clause, the rewrite dropped him, and an empty cabin
+ * shipped under the label "A log restorer". A word of the shape (`AGENT_SHAPE`), not a listed person
+ * noun and not a known thing (`NOT_AN_AGENT`), is a person when, in its own stretch of words (up to
+ * a comma or another person):
+ *   - it owns a part only a person has ("the collector's hands", "a knitter's lap"), or
+ *   - "who" follows, or something only a person does ("a birder looking up at the trees", "a
+ *     messenger handing over a scroll", "letting me try it", "standing somberly"), or it is dressed
+ *     ("in a winter coat"), or a word before it only a person takes ("an elderly carver"), or
+ *   - two weak signs agree, one of them a person's — "older" or "from behind" — beside standing,
+ *     working, waiting, "alone" or several of them: "an older log restorer standing", "working at the
+ *     log wall, seen from behind", "a group of birdwatchers seen from behind".
+ * Never a thing that does any of it: "a heater glowing", "a planter holding basil", "a sprayer
+ * using compressed air", "a coffee maker on the counter", "a typewriter standing alone", "three
+ * timbers standing in the yard" (things stand in numbers as often as people). Holding and carrying
+ * are no sign: a holder, a planter and a trailer do both. Pure.
+ */
+function agentAt(tokens: string[], h: number): { lemma: string; plural: boolean } | undefined {
+  const tok = tokens[h];
+  if (!isWord(tok)) return undefined;
+  const word = bare(tok);
+  const lemma = agentLemma(word);
+  if (!lemma) return undefined;
+  const plural = lemma !== word && word === tok.toLowerCase();
+  // A capital mid-sentence is a name ("Baxter kneeling by the bin"), never "a baxter"; only a plural
+  // opening a sentence ("Birders gathered along the street") is the word itself.
+  if (/^[A-Z]/.test(tok)) {
+    const before = tokens[h - 1];
+    if (!plural || (before !== undefined && !/^[.!?]$/.test(before))) return undefined;
+  }
+  // The restorer's hands: a possessive is a person only before a part only a person has.
+  if (word !== tok.toLowerCase()) {
+    for (let k = 1; k <= 3; k++) {
+      const t = tokens[h + k];
+      if (!isWord(t)) return undefined;
+      if (PERSON_ONLY_PART.test(t.toLowerCase())) return { lemma, plural: false };
+      if (FOLLOW.has(t.toLowerCase())) return undefined;
+    }
+    return undefined;
+  }
+  // The noun must END its phrase: "a planter box", "a dealer warehouse" are things named for it.
+  const next = tokens[h + 1];
+  if (isWord(next)) {
+    const n = next.toLowerCase();
+    if (
+      !FOLLOW.has(n) &&
+      !PERSON_DOING.has(n) &&
+      !LOOKING.test(n) &&
+      !LETTING.test(n) &&
+      !STANDS_OR_WORKS.test(n) &&
+      !(/^[a-z]{4,}ing$/.test(n) && !NOT_DOING.test(n)) &&
+      !/^[a-z]{3,}ly$/.test(n) &&
+      n !== "alone" &&
+      n !== "who"
+    )
+      return undefined;
+  }
+  let strong = false;
+  const weak = new Set<string>();
+  // Before: a word only a person takes, an age, or several of them.
+  for (let k = h - 1; k >= Math.max(0, h - 4); k--) {
+    const t = tokens[k];
+    if (!isWord(t)) break;
+    const w = t.toLowerCase();
+    if (PERSON_ADJ.test(w)) strong = true;
+    else if (AGE_ADJ.test(w)) weak.add("age");
+    else if (plural && (NUMBERS.has(w) || (w === "of" && MANY_OF.test(tokens[k - 1]?.toLowerCase() ?? "")))) weak.add("many");
+    if (DETERMINERS.has(w) || w === "of" || FOLLOW.has(w)) break;
+  }
+  const otherPerson = (t: string, w: string) =>
+    PERSON_PRONOUN.test(w) || PERSON_NOUN.has(bare(t)) || BODY.has(bare(t)) || /^(?:someone|somebody)$/.test(w);
+  // After: the noun's own stretch of words, up to a comma, a new clause or another person.
+  let k = h + 1;
+  for (; k <= h + 9 && k < tokens.length; k++) {
+    const t = tokens[k];
+    if (!isWord(t)) break;
+    const w = t.toLowerCase();
+    if (CLAUSE_END.test(w) || otherPerson(t, w)) {
+      if (k === h + 1 && (w === "who" || w === "whose")) strong = true;
+      break;
+    }
+    // Its own doing, never a thing named for one or a gerund: "papers and writing materials", "a
+    // reminder with a knowing smile before signing off".
+    const prev = tokens[k - 1]?.toLowerCase() ?? "";
+    const nextWord = tokens[k + 1];
+    const modifier =
+      NOT_ITS_DOING.test(prev) ||
+      (/^(?:and|or)$/.test(prev) && isWord(nextWord) && !FOLLOW.has(nextWord.toLowerCase()) && !DETERMINERS.has(nextWord.toLowerCase()));
+    if (PERSON_DOING.has(w) && (!modifier || w === "wearing" || w === "dressed")) strong = true;
+    if (PERSON_MANNER.test(w)) strong = true;
+    if (LOOKING.test(w) && LOOK_WAY.test(nextWord?.toLowerCase() ?? "")) strong = true;
+    if (LETTING.test(w) && LET_WHOM.test(nextWord?.toLowerCase() ?? "")) strong = true;
+    if (w === "in") {
+      // "in a winter coat seen from behind", "in winter coats" — never "in a coat pocket", "in a hat
+      // box" or "in soft flannel".
+      let worn = false;
+      for (let j = k + 1; j <= k + 4 && isWord(tokens[j]); j++) {
+        const g = tokens[j]!.toLowerCase();
+        if (WORN_AS.test(g)) worn = true;
+        if (!CLOTHING.test(g)) continue;
+        const after = tokens[j + 1];
+        const a = after?.toLowerCase() ?? "";
+        if ((worn || /s$/.test(g)) && (!isWord(after) || FOLLOW.has(a) || /ing$/.test(a) || /ed$/.test(a))) strong = true;
+        break;
+      }
+    }
+    if (STANDS_OR_WORKS.test(w)) weak.add("stands");
+    if (w === "alone") weak.add("alone");
+    if (w === "behind" && tokens[k - 1]?.toLowerCase() === "from") weak.add("behind");
+  }
+  // "…working at the cabin's log wall, seen from behind": a framing note later in the sentence is
+  // about its person, when no other person is named before it.
+  for (; k < tokens.length && !/^[.!?;]$/.test(tokens[k]!); k++) {
+    const t = tokens[k]!;
+    if (isWord(t) && otherPerson(t, t.toLowerCase())) break;
+    if (t.toLowerCase() === "behind" && tokens[k - 1]?.toLowerCase() === "from") weak.add("behind");
+  }
+  // Two weak signs, one of them a person's: an age or "from behind" (the framing every picture of a
+  // person is told to use: 59 of the 61 stored descriptions "seen from behind" show someone).
+  // Standing alone is a thing's as often ("a typewriter standing alone on the desk"), and so is
+  // standing several at once ("three timbers standing in the yard", "a pair of scissors standing in
+  // a jar").
+  const personish = weak.has("age") || weak.has("behind");
+  return strong || (personish && weak.size >= 2) ? { lemma, plural } : undefined;
 }
 
 /** Whether the person noun at `h` (not a possessive) IS a person, not a word describing a thing. */
@@ -475,7 +744,15 @@ export function namedPeople(text: string | undefined): NamedPeople | undefined {
     const tok = tokens[h];
     if (!isWord(tok)) continue;
     const word = bare(tok);
-    const entry = PERSON_NOUN.get(word);
+    let entry = PERSON_NOUN.get(word);
+    // A person named by what they do ("an older log restorer standing beside its door"): someone
+    // else, or whoever does the shown work ("the worker's forearms"), when the words around it say
+    // it is a person at all (`agentAt`).
+    const agent = entry ? undefined : agentAt(tokens, h);
+    if (agent) {
+      const doer = DOER_NOUNS.has(agent.lemma.split("-").pop()!);
+      entry = { lemma: agent.lemma, kind: doer ? "self" : "role", plural: agent.plural };
+    }
     if (!entry) continue;
     const possessive = word !== tok.toLowerCase();
     let noun = entry.lemma;
@@ -492,7 +769,7 @@ export function namedPeople(text: string | undefined): NamedPeople | undefined {
       const after = PERSON_NOUN.get(bare(next));
       if (after && !COMPOUNDS[after.lemma]) continue;
     }
-    if (possessive ? !ownsBodyPart(tokens, h) : !headsPerson(tokens, h, entry.kind, entry.lemma)) continue;
+    if (!agent && (possessive ? !ownsBodyPart(tokens, h) : !headsPerson(tokens, h, entry.kind, entry.lemma))) continue;
     // The noun phrase: up to two describing words and a determiner before the noun.
     let start = joined ? h - 1 : h;
     for (let mods = 0; start > 0; ) {
@@ -548,7 +825,14 @@ export function namedPeople(text: string | undefined): NamedPeople | undefined {
     const phrase = opened || count > 1 ? words.join(" ") : `${/^[aeiou]/i.test(words[0]) ? "an" : "a"} ${words.join(" ")}`;
     // The host is one person: "background vendors" are other people.
     const kind: NounKind = entry.kind === "self" && count > 1 ? "generic" : entry.kind;
-    found.push({ phrase, noun, kind, count, sex: sexWord ? (FEMALE.has(sexWord) ? "f" : "m") : undefined });
+    found.push({
+      phrase,
+      noun,
+      kind,
+      count,
+      sex: sexWord ? (FEMALE.has(sexWord) ? "f" : "m") : undefined,
+      ...(agent ? { byWork: true } : {}),
+    });
   }
   if (!found.length) return undefined;
   // The same person named twice ("a visitor's legs … while the visitor leans away") is one person;
@@ -699,6 +983,10 @@ export function selfRolesOf(intro: string | undefined, title?: string, hostName?
     for (const w of t.toLowerCase().match(/[a-z]+(?:-[a-z]+)*/g) ?? []) {
       const e = PERSON_NOUN.get(w);
       if (e?.kind === "role") roles.add(e.lemma);
+      // A trade named by what the host does ("Dog Trainer", "I'm Ana, a florist"): a picture of
+      // "a trainer kneeling beside the dog" is the host, as a listed trade is (`agentAt`).
+      const agent = e ? undefined : agentLemma(w);
+      if (agent && !DOER_NOUNS.has(agent)) roles.add(agent);
     }
   };
   if (title) take(title);
@@ -719,6 +1007,31 @@ function withHostNamed(text: string, hostName: string | undefined): string {
   for (const w of name.split(/\s+/))
     if (w.length >= 3 && /^[A-Z]/.test(w)) out = out.replace(new RegExp(`\\b${esc(w)}\\b`, "g"), "the host");
   return out;
+}
+
+/**
+ * The people a picture's words name by what they do (`agentAt`) when its LINE speaks of nobody — the
+ * planner's word for whoever does the shown work ("a knitter's lap cradling needles" under "They come
+ * from four small habits nobody bothers to teach you", job 31 scene 7). On a craft channel that is
+ * the host, as a hobby word is (`ROLE_NOUNS` leaves them out), so `markHostBroll` counts them among
+ * the host's own roles. A line that names them ("A log restorer in Grayson County, Virginia, let me
+ * try it.", job 418 scene 2; "the big holiday tally birders" under "a group of birdwatchers", job
+ * 404 scene 10), or anyone else ("Ask the folks who head out every winter…", job 411 scene 10; "a
+ * man who…", "he"), is about someone in the story, never the host. Someone the planner or the line
+ * check named stays someone else either way (`castOfPicture`). Pure.
+ */
+export function rolesOnlyPictured(text: string | undefined, line: string | undefined): string[] {
+  const words = (line ?? "").toLowerCase().match(/[a-z]+(?:[-'’][a-z]+)*/g) ?? [];
+  const speaksOfSomeone = words.some(w => {
+    const e = personNounOf(w.replace(/['’]s$/, ""));
+    return (!!e && e.kind !== "self") || /^(?:he|she|he['’]s|she['’]s)$/.test(w);
+  });
+  if (speaksOfSomeone) return [];
+  // "birders" names the "birdwatcher": the same word before "-er", one the start of the other.
+  const stem = (lemma: string) => lemma.replace(/(?:er|or|ist)$/, "");
+  const said = words.map(w => agentLemma(w.replace(/['’]s$/, ""))).filter((l): l is string => !!l).map(stem);
+  const named = (noun: string) => said.some(s => s.length >= 4 && (stem(noun).startsWith(s) || s.startsWith(stem(noun))));
+  return (namedPeople(text)?.people ?? []).filter(p => p.byWork && p.kind === "role" && !named(p.noun)).map(p => p.noun);
 }
 
 /** Someone other than the host in a picture: who, and how many people in all (1, 2, or 3 = several). */
@@ -2480,7 +2793,14 @@ export function markHostBroll(
     // in it, and the host among them when one is (`castOfPicture`, job 399 scenes 8 and 14).
     let other =
       eligible && person
-        ? castOfPicture(text, s.otherPerson, { look, hostName: params.hostName, selfRoles, hostLed: on })
+        ? castOfPicture(text, s.otherPerson, {
+            look,
+            hostName: params.hostName,
+            // A person named by what they do that only the picture's words name is whoever does the
+            // shown work (`rolesOnlyPictured`); one the line names is someone in the story.
+            selfRoles: [...selfRoles, ...rolesOnlyPictured(text, s.scriptText)],
+            hostLed: on,
+          })
         : undefined;
     // …unless the line is the host telling their own story ("I … spent nursing a thimble of ginger
     // ale", job 417 scene 19): that one person is the host, and the words now say so

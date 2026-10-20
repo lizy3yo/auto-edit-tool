@@ -109,6 +109,21 @@ export const STILL_DEFECT_SYSTEM =
   "body (a hand in a vise's jaws)\n" +
   "- a tool held or angled in a way no real user holds it, or whose path runs into the table, the " +
   "bench or a hand; fingers in front of or right beside a blade, saw, bit or cutting edge\n" +
+  // 2026-10-20, job 418 scene 25: a person-free panel's froe with a bare wire hook on its handle end,
+  // balanced across the bolt's top with the handle out over nothing — the panel had asked for it "set
+  // into its top end with the handle angled, resting unattended". Named in words the redraw can read
+  // (`namedFaultClause`, `UNHELD_POSE`), so it is told how a tool nobody holds is put down. A tool on a
+  // wall's peg or rack, in its holder, or left in the work where it really stays is right — job 418's
+  // own back wall "hung an axe, a froe, and a drawknife" — and so is one leaning against a wall the way
+  // a person stands it there (job 162 scene 145's push saw "leans upright against the bare concrete
+  // wall"): it keeps that by itself, so "leans" alone is never the fault.
+  "- a tool with NO hand on it that hangs in mid-air or from a hook, wire or string fixed to " +
+  "nothing, or stands, balances or leans in its working pose at an angle it could not keep by " +
+  "itself (a handle sticking up or out over nothing from a blade that is not deep in the work); a " +
+  "tool lying on a surface or across the rim of its pot, sitting in its holder, hanging on a wall, " +
+  "peg or rack, leaning against a wall that holds it up, or left standing in the work where a real " +
+  "one stays by itself (an axe or a wedge driven into wood, a saw in its own cut, a spade in the " +
+  "soil) is right\n" +
   // Job 406 scene 9 passed with a chisel pushed straight at the other hand flat on the board. A
   // kitchen knife is not named: it cuts down beside the guide hand, and one being sharpened has
   // fingers on its flat — the line above already covers fingers right beside an edge.
@@ -152,6 +167,24 @@ export const STILL_DEFECT_SYSTEM =
   "head, an apron tied on the back)\n" +
   "- a head turned further round than a neck can turn, or facing a different way from the " +
   "shoulders; more than two arms or hands on one person\n" +
+  // 2026-10-20, the operator on job 417 ("they aren't even seated properly"): scene 2's two passengers
+  // sat backwards, facing their own seat backs, and passed with no flag; scene 8's row ahead was turned
+  // round to face the man behind it; job 402 scene 23 sat a woman sideways across her seat; job 417
+  // scenes 9 and 31 had two people talking side by side to a wall. Each is a pose no one takes for what
+  // they are doing, and the check now names it — in words the redraw can read (`namedFaultClause`).
+  // Seat-mates are the exception named: two passengers in one row (job 417 scene 2 drawn right, job 399
+  // scene 2's man) face forward while they talk, and a broken verdict there would redraw a right
+  // picture and, on a second one, ship it with nobody in it (`faultRedrawFor`'s "at rest").
+  "- a person in a pose nobody takes for what they are doing: sitting backwards or sideways in a " +
+  "seat that faces one way (facing their own seat back, or their legs across the seat); in rows of " +
+  "fixed seats that all face one way, one row turned round to face the others; a body passing " +
+  "through its seat, or sitting or leaning on nothing; a body twisted away from the work its own " +
+  "hands are doing; two people talking or handing something over who stand or sit side by side " +
+  "facing the same way instead of toward each other; a heavy thing held out at arm's length in one " +
+  "hand. A person seen from behind or beside who sits the way their seat faces, its back hiding " +
+  "them, is right, and so is someone asleep on their front or side; so are people side by side in " +
+  "one row of seats (a car, a bench, a pew, a row of fixed seats) who face the way the row faces " +
+  "while they talk, and seats built to face each other (a booth, a bay of four)\n" +
   "- a mirror that does not reflect what is in front of it\n" +
   CUT_OPEN_BROKEN +
   "Answer false for everything else: unusual but possible products or craftsmanship, odd " +
@@ -172,8 +205,10 @@ export const STILL_DEFECT_SYSTEM =
   'Return ONLY this JSON, no prose: {"overlay":true|false,"broken":true|false,"writing":true|false,"what":"..."}\n' +
   'what: 3-8 words naming the worst defect and where it sits (e.g. "white caption bar across ' +
   'the bottom", "cutting board floating above the table"); a fault in a tool, cable, wire or hose ' +
-  'names it (e.g. "saw blade resting on top of the plank", "power cord running into the tap"); "" ' +
-  "when both are false.";
+  'names it (e.g. "saw blade resting on top of the plank", "chisel hanging from a hook fixed to ' +
+  'nothing", "power cord running into the tap"); a ' +
+  'person in a pose nobody takes starts "unnatural pose:" and says who and how (e.g. "unnatural ' +
+  'pose: two people sitting backwards in their seats"); "" when both are false.';
 
 export interface StillDefectVerdict {
   overlay: boolean;

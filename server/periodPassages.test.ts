@@ -63,6 +63,53 @@ const film409 = () => [
   pic(33, TURN, "the host turning a page slowly at the desk", { humanPresent: true, hostCandidate: true }),
 ];
 
+/** Job 418's words — never in a rulebook either. */
+const CHANNEL_WORDS_418 = /froe|\boak\b|\bbolts?\b|chainsaw|cabin|appalach|\briv(?:e|ed|ing)\b|shingle/i;
+
+// Job 418's real list (sentence 9 of its script, 78-86 s), told of how the oldest mountain cabins were
+// roofed by hand. The setting is what the finder would answer; the stored list has none — it was dropped.
+const RIVING_SENTENCE =
+  "They cut the log into short bolts, split each bolt into pie wedges, and rived the boards along those same lines, so every board runs from bark toward heart and stays flat in the weather.";
+const RIVING = ["cut the log into short bolts", "split each bolt into pie wedges", "rived the boards along those same lines"];
+const MOUNTAINS = "the southern Appalachian mountains in the 1800s";
+const SAM_LOOK =
+  "A lean man in his sixties with fair skin, short grey hair, and a trimmed grey beard, wearing an olive button-up shirt over a dark grey t-shirt";
+
+/** Job 418 scenes 17-22 as stored (after the first cut on the final lengths). */
+const film418 = () => [
+  host(17, "What faded was the everyday habit, so we will go from that cabin roof down to its fire."),
+  pic(
+    18,
+    "Number one is the roof, split by hand from white oak or chestnut with a froe, and the direction of the split mattered most. They",
+    "Hands striking the back of an L-shaped froe blade, set across the end of a white oak bolt, with a wooden club, the split opening straight down the grain",
+    { humanPresent: true, keyThing: "oak log", buildStage: "making" }
+  ),
+  pic(19, "cut the log into short bolts,", "a white oak log being cut into short bolts in the woodlot", {
+    visualPrompt: "A white oak log being cut into short bolts in a wooded hillside clearing with felled trunks and stumps nearby.",
+    humanPresent: true,
+    listCut: true,
+    listKind: "steps",
+    keyThing: "oak log",
+    buildStage: "material",
+  }),
+  pic(
+    20,
+    "split each bolt into pie wedges,",
+    "Hands driving a froe into the end of a round oak bolt resting on a stump, the bolt already split into pie-shaped wedges radiating from the center",
+    { humanPresent: true, listCut: true, listKind: "steps", keyThing: "froe", buildStage: "making" }
+  ),
+  pic(
+    21,
+    "and rived the boards along those same lines,",
+    "Hands levering the right-angle handle of a froe to pry a thin pale board free along the grain of an oak wedge",
+    { humanPresent: true, listCut: true, listKind: "steps", keyThing: "split-oak board", buildStage: "making" }
+  ),
+  pic(22, "so every board runs from bark toward heart and stays flat in the weather.", "A pale rived oak board lying flat, straight grain running its full length, split surface without saw marks", {
+    keyThing: "split-oak board",
+    buildStage: "done",
+  }),
+];
+
 beforeEach(() => mockInvoke.mockReset());
 
 describe("the list finder says where and when a list's sentence is set", () => {
@@ -81,12 +128,40 @@ describe("the list finder says where and when a list's sentence is set", () => {
     expect(parseSpokenLists(answer(FOUR, ROME), [SERIES])).toEqual([{ sentence: 0, items: FOUR, setting: ROME }]);
     // The model stopping one member early still gets "the young…" back, setting and all.
     expect(parseSpokenLists(answer(FOUR.slice(0, 3), `"${ROME}."`), [SERIES])).toEqual([{ sentence: 0, items: FOUR, setting: ROME }]);
-    // Clean: a list of STEPS never takes one — each step is drawn as the host's own hands doing it,
-    // here and now, and a setting would dress the host's sleeves for another age.
-    const steps = ["Knead the dough", "shape the loaf", "bake it in the stone oven"];
-    expect(parseSpokenLists(answer(steps, "a medieval town, about 1300", "steps"), ["Knead the dough, shape the loaf, and bake it in the stone oven."])).toEqual([
-      { sentence: 0, items: steps, kind: "steps" },
+  });
+
+  it("job 418: a list of STEPS told of another time keeps its setting too", () => {
+    // Round 15: steps used to lose it here, and "They cut the log into short bolts," was drawn with a
+    // modern chainsaw inside a passage about how the oldest cabins were roofed by hand.
+    expect(parseSpokenLists(answer(RIVING, MOUNTAINS, "steps"), [RIVING_SENTENCE])).toEqual([
+      { sentence: 0, items: RIVING, kind: "steps", setting: MOUNTAINS },
     ]);
+    // The finder is asked for it, in words that name no channel.
+    expect(LISTS_SYSTEM).toMatch(/A sequence of steps gets one the\s+same way when it tells how something was done then or there/);
+    expect(LISTS_SYSTEM).toMatch(/here and now — steps the viewer is told to do today included/);
+    expect(LISTS_SYSTEM).not.toMatch(CHANNEL_WORDS_418);
+    // Its past-tense example is the WAY something was done, never a story told once: the rule that a
+    // story of what happened is no list ("I went home, made dinner, and slept") still stands beside it,
+    // so a story of long ago is not turned into steps drawn as the host's hands.
+    expect(LISTS_SYSTEM).toMatch(/the way it was done, which is a\s+sequence of steps, unlike a story of what happened once/);
+    expect(LISTS_SYSTEM).toMatch(/a story of what happened \("I went home, made dinner, and slept"\) — steps are things to DO/);
+  });
+
+  it("clean: a how-to of today keeps none, whatever the model wrote (Hank's job 326)", () => {
+    const howTo =
+      "Square up the scrap with a couple of saw cuts, give it a quick brush, drill the hole about halfway through at a slight angle, oil it, and put a felt dot on the bottom.";
+    const steps = [
+      "Square up the scrap with a couple of saw cuts",
+      "give it a quick brush",
+      "drill the hole about halfway through at a slight angle",
+      "oil it",
+      "put a felt dot on the bottom",
+    ];
+    for (const said of [null, undefined, "today", "the present day", "the video's own here and now"]) {
+      const got = parseSpokenLists(answer(steps, said, "steps"), [howTo]);
+      expect(got).toEqual([{ sentence: 0, items: steps, kind: "steps" }]);
+      expect(got![0]).not.toHaveProperty("setting");
+    }
   });
 
   it("clean: a list of the video's own here and now gets no setting, whatever the model wrote", () => {
@@ -162,18 +237,73 @@ describe("every item of the list is set where its sentence is (job 409, 156-164 
     expect(buildStillPrompt(r.scenes.find(s => s.listCut)!)).not.toMatch(/Like the sentence it is said in/);
   });
 
-  it("clean: a list of steps sets nothing, even one saved with a setting — each step is the host's own hands", () => {
-    const said = "Knead the dough, shape the loaf, and bake it in the stone oven.";
-    const r = applySpokenLists([pic(1, said, "the host's hands kneading dough on the counter", { humanPresent: true })], [
-      { sentence: 0, items: ["Knead the dough", "shape the loaf", "bake it in the stone oven"], kind: "steps", setting: "a medieval town, about 1300" },
+  it("job 418 (78 s): every step of a list told of another time carries it, done with that time's tools", () => {
+    const r = applySpokenLists(film418(), [{ sentence: 9, items: RIVING, kind: "steps", setting: MOUNTAINS }]);
+    const steps = r.scenes.filter(s => s.listCut);
+    expect(steps.map(s => s.scriptText)).toEqual([
+      "cut the log into short bolts,",
+      "split each bolt into pie wedges,",
+      "and rived the boards along those same lines,",
     ]);
-    const items = r.scenes.filter(s => s.listCut);
-    expect(items.length).toBeGreaterThanOrEqual(3);
-    for (const s of items) {
-      expect(s.listKind).toBe("steps");
-      expect(s.listSetting).toBeUndefined();
-      expect(buildStillPrompt(s)).not.toMatch(/Like the sentence it is said in/);
-    }
+    expect(steps.map(s => s.listKind)).toEqual(["steps", "steps", "steps"]);
+    expect(steps.map(s => s.listSetting)).toEqual([MOUNTAINS, MOUNTAINS, MOUNTAINS]);
+    // The pictures around the list are no steps and get nothing.
+    expect(r.scenes.filter(s => !s.listCut).map(s => s.listSetting)).toEqual([undefined, undefined, undefined]);
+    // The planner's own picture is kept: the setting rides beside it.
+    expect(steps[0].showSubject).toBe("a white oak log being cut into short bolts in the woodlot");
+    // As drawn: the host at work (`markHostBroll`), the steps told apart (`attachMemory`).
+    const cut = {
+      ...steps[0],
+      brollHostLook: SAM_LOOK,
+      listItems: { own: RIVING[0], others: RIVING.slice(1) },
+    } as StoryboardScene;
+    const prompt = buildStillPrompt(cut);
+    expect(prompt).toContain(
+      `Like the sentence it is said in, this step is set in ${MOUNTAINS} and done as it was done there and then: the tools, materials and way of working belong to that time and place`
+    );
+    expect(prompt).toMatch(/nothing from another time or place/);
+    // The host is drawn exactly as in the photo, so the setting never asks them to dress for that time.
+    expect(prompt).toContain(SAM_LOOK);
+    expect(prompt).not.toMatch(/dressed as people were there and then/);
+    // The line check is told the passage, as for a list of things (`fitPictureNotes`).
+    expect(fitPictureNotes(cut)).toBe(` (inside a passage set in ${MOUNTAINS})`);
+  });
+
+  it("job 418: a step drawn with no host, or with someone else in it, still dresses them for the time", () => {
+    const step = (over: Partial<StoryboardScene>) =>
+      ({
+        ...pic(19, "cut the log into short bolts,", "a white oak log being cut into short bolts in the woodlot", { humanPresent: true }),
+        listCut: true,
+        listKind: "steps",
+        listSetting: MOUNTAINS,
+        listItems: { own: RIVING[0], others: RIVING.slice(1) },
+        ...over,
+      }) as StoryboardScene;
+    // Anonymous hands (no host photo): their sleeves belong to that time.
+    expect(listItemClause(step({}))).toMatch(/this step is set in .* and done as it was done there and then: anyone in it is dressed as people were there and then, and the tools/);
+    // Someone else beside the host: everyone but the host is dressed for it.
+    expect(listItemClause(step({ otherPerson: "a neighbour", hostAmongOthers: { who: "the host", look: SAM_LOOK } }))).toMatch(
+      /anyone in it besides the host is dressed as people were there and then/
+    );
+    // An item of a list of THINGS with the host at work in it: the photo wins there too.
+    const thing = step({ listKind: undefined, brollHostLook: SAM_LOOK, listItems: { own: "an axe", others: ["a froe", "a drawknife"] } });
+    expect(listItemClause(thing)).toContain(`this picture is set in ${MOUNTAINS}: the tools, buildings and land belong to that time and place`);
+    // The rule names no channel: the clause alone, with a setting of no channel's either.
+    for (const over of [{}, { brollHostLook: SAM_LOOK }])
+      expect(listItemClause(step({ ...over, listSetting: "a far place, long ago", listItems: undefined }))).not.toMatch(CHANNEL_WORDS_418);
+  });
+
+  it("clean: a list of steps saved with no setting (every one before job 418's fix) gets none, and its prompt is as before", () => {
+    const stale = film418().map(s => (s.listCut ? { ...s, listSetting: MOUNTAINS } : s));
+    const r = applySpokenLists(stale, [{ sentence: 9, items: RIVING, kind: "steps" }]);
+    expect(r.scenes.map(s => s.listSetting)).toEqual(r.scenes.map(() => undefined));
+    const before =
+      ` This picture is one step of a sequence said one after another — it shows "cut the log into short bolts", and ` +
+      `the other steps ("split each bolt into pie wedges", "rived the boards along those same lines") each get their own picture. ` +
+      `Whatever the steps are done to is the very same one in every step.`;
+    const cut = { ...r.scenes.find(s => s.listCut)!, brollHostLook: SAM_LOOK, listItems: { own: RIVING[0], others: RIVING.slice(1) } };
+    expect(listItemClause(cut)).toBe(before);
+    expect(buildStillPrompt(cut)).not.toMatch(/Like the sentence it is said in/);
   });
 
   it("listItemClause: the setting follows the tell-apart clause; with none the clause is exactly as before", () => {

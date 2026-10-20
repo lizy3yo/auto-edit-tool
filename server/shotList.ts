@@ -4563,9 +4563,10 @@ export function leadIntoNext(
 
 /**
  * Hand tools a line may say a job is done WITH. Words that name nothing else only: no "level",
- * "square", "file", "iron", "club" or "hook", which a line uses for other things.
+ * "square", "file", "iron", "club" or "hook", which a line uses for other things. Also how a picture
+ * with nobody in it is found to name a tool (`unheldToolClause`).
  */
-const HAND_TOOL = String.raw`(?:(?:hand|coping|hack|bow|pull|rip|crosscut|jig|band|circular|chain)\s?saws?|saws?|chisels?|gouges?|froes?|mauls?|axes?|hatchets?|adzes?|draw\s?knife|drawknives|spokeshaves?|(?:hand\s+|block\s+|jack\s+|smoothing\s+)?planes?|drills?|screwdrivers?|hammers?|mallets?|wedges?|(?:knitting\s+|sewing\s+)?needles?|crochet\s+hooks?|scissors|shears|clippers|pruners|secateurs|trowels?|spades?|shovels?|rakes?|hoes?|paint\s?brush(?:es)?|brush(?:es)?|paint\s+rollers?|scrapers?|putty\s+knife|knife|knives|sanding\s+blocks?|sandpaper|rasps?|wrench(?:es)?|spanners?|pliers|soldering\s+irons?|whisks?|spatulas?|ladles?|rolling\s+pins?|graters?|peelers?|razors?|combs?|tweezers|awls?|staplers?|glue\s+guns?|wire\s+brush(?:es)?)`;
+export const HAND_TOOL = String.raw`(?:(?:hand|coping|hack|bow|pull|rip|crosscut|jig|band|circular|chain)\s?saws?|saws?|chisels?|gouges?|froes?|mauls?|axes?|hatchets?|adzes?|draw\s?knife|drawknives|spokeshaves?|(?:hand\s+|block\s+|jack\s+|smoothing\s+)?planes?|drills?|screwdrivers?|hammers?|mallets?|wedges?|(?:knitting\s+|sewing\s+)?needles?|crochet\s+hooks?|scissors|shears|clippers|pruners|secateurs|trowels?|spades?|shovels?|rakes?|hoes?|paint\s?brush(?:es)?|brush(?:es)?|paint\s+rollers?|scrapers?|putty\s+knife|knife|knives|sanding\s+blocks?|sandpaper|rasps?|wrench(?:es)?|spanners?|pliers|soldering\s+irons?|whisks?|spatulas?|ladles?|rolling\s+pins?|graters?|peelers?|razors?|combs?|tweezers|awls?|staplers?|glue\s+guns?|wire\s+brush(?:es)?)`;
 /**
  * "…with a drawknife to make shingles", "…using a sharp chisel,": the tool, one describing word
  * allowed before it, and only where the tool word ends the noun — never "a drill bit", "a plane seat"
@@ -4685,7 +4686,7 @@ function panelOnToolSentence(panel: string, line: string, at: number): boolean {
  * panel as "a split shingle lying on a log…, fresh pale wood curls scattered beside it", the drawknife
  * the line names nowhere in it. The panel rules ask for the tool; this is the guarantee, whatever
  * wrote the panel: the tool the line says the job is done with (`lineTool`), when the panel's words do
- * not name it, is added resting on the work, unattended — never held, so no hand is asked for. Only
+ * not name it, is added lying flat on the work, unattended — never held, so no hand is asked for. Only
  * when the panel is about the sentence the tool is said in (`panelOnToolSentence`); never a panel
  * drawn on the host's own body (hair, skin, nails), and never twice. A tool word that only names its
  * marks ("shaved thin by drawknife strokes", job 407 scene 19, whose film hung the drawknife on the
@@ -4694,6 +4695,12 @@ function panelOnToolSentence(panel: string, line: string, at: number): boolean {
  * had left it out and get it (this one, 407's, and a jigsaw, a pull saw and scissors on panels of the
  * work they did), and the cleat panels of jobs 118 and 122, whose chisel is in the other sentence, do
  * not. Pure.
+ *
+ * LYING FLAT, NOT "RESTING" (2026-10-20, job 418 scene 25): the panel writer took these words,
+ * "resting on the work, unattended", for a tool left in its working pose — "froe blade set into its
+ * top end with the handle angled, resting unattended on the work" — which no tool keeps with nobody
+ * holding it, and the picture maker hung the froe on a bare wire hook to keep it there. A tool put down
+ * lies flat (`UNHELD_TOOL_CLAUSE`).
  */
 export function withLineTool(panel: string, line: string | undefined, forbids?: string): string {
   const text = panel.trim();
@@ -4705,7 +4712,7 @@ export function withLineTool(panel: string, line: string | undefined, forbids?: 
   if (namesTool(text, toolStem(last))) return panel;
   const bare = tool.replace(/^pair\s+of\s+/, "");
   // A pair for a tool only said in the plural, a sheet of sandpaper, no article for a plural
-  // ("…with the chisels" → "chisels resting on the work", never "a chisels").
+  // ("…with the chisels" → "chisels lying flat on the work", never "a chisels").
   const what = PAIR_TOOL.test(last)
     ? `a pair of ${bare}`
     : last === "sandpaper"
@@ -4713,7 +4720,7 @@ export function withLineTool(panel: string, line: string | undefined, forbids?: 
       : toolStem(last) !== last
         ? bare
         : `${/^[aeiou]/.test(bare) ? "an" : "a"} ${bare}`;
-  return `${text.replace(/[\s.,;:]+$/, "")}, ${what} resting on the work, unattended.`;
+  return `${text.replace(/[\s.,;:]+$/, "")}, ${what} lying flat on the work, unattended.`;
 }
 
 /**
@@ -4749,8 +4756,21 @@ them. Judge every PANEL by all the rules above, and also:
   part the line is about (hair, skin, nails): it is drawn on the host, close, the face not shown — a
   panel showing it that way is RIGHT; never rewrite it into a product or a part lying on its own.
 - A TOOL the line says the job is done with ("trimmed with scissors", "smoothed with a scraper")
-  stays in the panel, resting on the work, unattended, and the work is at the stage the line says —
-  part-done while it is being done. A panel of the result alone, the named tool left out, is WRONG.
+  stays in the panel, put down the way a person leaves it — lying flat on the work, unattended — and
+  the work is at the stage the line says, part-done while it is being done.
+  A panel of the result alone, the named tool left out, is WRONG.
+- A TOOL IN A PANEL HAS NOBODY HOLDING IT, so it lies flat on the work, a bench or the ground beside
+  it, sits in its own jar, rack or holder, or
+  stays standing in the work only where a real one stays by itself (an axe or a wedge driven
+  into wood, a saw in its own cut, a spade pushed into soil). A panel that leaves a tool in its
+  working pose with no hand on it ("its handle angled up", "poised over the work", "set at its
+  working angle"), in mid-air, or hanging from something the line never hangs it on, is WRONG:
+  rewrite it with the tool put down.
+- A HOLDER the line says the work sits in, on or against while it is done ("clamped in a vise",
+  "laid across two sawhorses") is in the panel, holding the work, written by its parts — what it is
+  made of and how it holds the work — so it can be drawn. When the line offers two, the panel shows
+  the first one alone. A panel that runs the two into one thing ("a sawhorse vise" for "in a vise or
+  across sawhorses"), or leaves out the holder its line is about, is WRONG.
 - A panel is beside the host for its WHOLE line, so it shows what MOST of the line is about, by how
   long each part is said. A PANEL marked (ends on "…") ends on the first words of the next sentence
   ("…, but on the shelf above it sat"): they lead into the pictures after it and are never the
@@ -4801,7 +4821,7 @@ export function applyPanelFixes(scenes: StoryboardScene[], fixes: PictureFix[], 
     const others = named.map(t => t.name).filter(name => name !== primary?.name);
     s.otherKeyThings = others.length ? others : undefined;
     s.buildStage = f.stage !== undefined ? f.stage ?? undefined : was.thing === primary?.name ? was.stage : undefined;
-    // The tool the line names stays, resting on the work (`withLineTool`, job 414 scene 22).
+    // The tool the line names stays, lying flat on the work (`withLineTool`, job 414 scene 22).
     const show = withLineTool(f.show, s.scriptText ?? s.narration, s.forbids);
     s.splitVisual = show;
     s.splitVisualSeed = show;
