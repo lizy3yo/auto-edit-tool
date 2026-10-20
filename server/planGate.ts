@@ -822,6 +822,11 @@ const PREPOSITION = new Set([
   "through", "like", "between", "behind", "beside", "inside", "outside", "without", "toward",
   "towards", "across", "around", "among", "near",
 ]);
+/** Words that open a noun phrase: an article, a demonstrative, a possessive or a quantifier. */
+const NOUN_PHRASE_START = new Set([
+  "a", "an", "the", "this", "that", "these", "those", "my", "your", "his", "her", "its", "our",
+  "their", "some", "any", "every", "each", "another", "no",
+]);
 /**
  * Words the picture after a host part may open on when the host stops on no punctuation: a joining
  * word (a new clause, the next item) or the start of a noun phrase — the thing the picture shows.
@@ -829,8 +834,7 @@ const PREPOSITION = new Set([
 const BREAK_START = new Set([
   "and", "but", "or", "nor", "yet", "plus", "then", "because", "while", "whereas", "although",
   "though", "unless", "until", "which", "who", "whose", "where", "when", "if",
-  "a", "an", "the", "this", "that", "these", "those", "my", "your", "his", "her", "its", "our",
-  "their", "some", "any", "every", "each", "another", "no",
+  ...Array.from(NOUN_PHRASE_START),
 ]);
 /**
  * More words a picture may open on — without them ~40 hand-offs the shot list made at exactly such
@@ -853,11 +857,14 @@ const PREP_START = new Set([
  * subject ("…for every hour | I sat at that machine", job 159; "…a crowd | I didn't know lived in
  * my town", job 153). Never "you" or "it", objects as often ("…and bought | it off me", job 173).
  */
-const CLAUSE_START = new Set([
+const CLAUSE_WORD = new Set([
   "whether", "so", "as", "than", "since", "once", "how", "why", "before", "after", "till",
+]);
+const SUBJECT_START = new Set([
   "i", "i'm", "i'll", "i'd", "i've", "we", "we're", "we'll", "we'd", "we've", "they", "they're",
   "they'll", "they'd", "they've", "he", "he's", "he'll", "he'd", "she", "she's", "she'll", "she'd",
 ]);
+const CLAUSE_START = new Set([...Array.from(CLAUSE_WORD), ...Array.from(SUBJECT_START)]);
 /** A verb or a subject pronoun — what never follows a preposition as its object. */
 const verbOrSubject = (w: string) => LIST_ITEM_CLAUSE.test(w) || /n't$/.test(w);
 /**
@@ -876,16 +883,75 @@ const NUMBERED = new Set([
   "episode", "volume", "section", "lesson", "rule", "room", "aisle", "gate", "exit", "route",
 ]);
 /**
+ * Words that say nothing on their own until the clause after them says what they are: an
+ * indefinite pronoun ("anything", "someone"), and — after "the", "this", "every"… — "one", "kind",
+ * "sort", "type", "way" ("the one I sold", "the kind your grandmother kept", "the only way it
+ * holds"). Job 414's cold open stopped "…looking for anything | a store sold, and you will come up
+ * nearly empty-handed.": "a" read as a picture's new noun phrase, but "a store sold" is what
+ * "anything" means, and the host's last word on camera said nothing.
+ */
+const EMPTY_PRONOUN = new Set([
+  "anything", "something", "everything", "nothing", "anyone", "someone", "everyone", "anybody",
+  "somebody", "everybody", "nobody", "whatever", "whoever", "whichever",
+]);
+const EMPTY_HEAD = new Set(["one", "ones", "kind", "kinds", "sort", "sorts", "type", "types", "way"]);
+const HEAD_DETERMINER = new Set(["the", "this", "that", "these", "those", "every", "each", "any", "no"]);
+/**
+ * "Way" waits for a clause only after "the" ("the way my grandfather did it"), and never in a set
+ * phrase: "…on the way | the truck…", "…all the way | the boards…", "…by the way". "That way" and
+ * "this way" say how, and a new clause may follow them.
+ */
+const WAY_PHRASE = new Set(["on", "by", "all", "along", "in", "of", "out"]);
+/** The relative words that open a describing clause: "anything | that a store sold". */
+const RELATIVE_WORD = new Set(["that", "which", "who", "whom", "whose"]);
+
+/**
+ * Does `b` end on a word that means nothing until a clause describes it (`EMPTY_PRONOUN`, or an
+ * `EMPTY_HEAD` after a determiner in the same phrase, one describing word allowed between: "the
+ * only one", but never "the number one")?
+ */
+function endsOnEmptyHead(b: string[]): boolean {
+  const n = b.length;
+  const l = plainWord(b[n - 1]);
+  if (EMPTY_PRONOUN.has(l)) return true;
+  if (!EMPTY_HEAD.has(l) || n < 2) return false;
+  const det = (w: string | undefined) => !endMark(w) && HEAD_DETERMINER.has(plainWord(w));
+  const d1 = b[n - 2];
+  const d2 = n >= 3 ? b[n - 3] : undefined;
+  // "…the boards, one | at a time": the comma ends the phrase "the" opened.
+  const at = det(d1) ? 1 : det(d2) && !endMark(d1) && !NUMBERED.has(plainWord(d1)) ? 2 : 0;
+  if (!at) return false;
+  if (l !== "way") return true;
+  return plainWord(b[n - at - 1]) === "the" && !WAY_PHRASE.has(plainWord(b[n - at - 2]));
+}
+
+/**
+ * Does `a` open the clause that describes such a word — a relative word ("…anyone | who…"), or a
+ * clause with no relative word, opened by its own subject: a noun phrase ("…anything | a store
+ * sold"), a count ("…anything | two hands can carry"), a subject pronoun ("…something | I made")
+ * or a name ("…everything | Grandpa built")? A joining word, a clause word or a preposition opens
+ * something else and stays a break ("…I lost everything | and started over").
+ */
+function opensDescribingClause(a: string[]): boolean {
+  const first = a[0];
+  const w = plainWord(first);
+  if (RELATIVE_WORD.has(w) || NOUN_PHRASE_START.has(w) || SUBJECT_START.has(w)) return true;
+  if (COUNT_WORD.test(w)) return true;
+  return /^[A-ZÀ-ÖØ-Þ]/.test(first.replace(/^["'“‘(]+/, "")) && !/^i(?:'[a-z]+)?$/.test(w);
+}
+
+/**
  * Is the cut between `before` and `after` a natural break — a place a host may stop mid-sentence
  * and hand over (the shot list's own shape: right before a named thing, at a comma, before "and")?
  * Yes when `before` ends on clause punctuation, or `after` is a list item (`list` — the list
  * hand-off) or opens on a dash. Otherwise only when `before` leaves no phrase open (`OPEN_ENDING`)
  * and `after` opens on a joining word, an article, possessive or count, a preposition with its
  * object, a clause word, or a name — never on a preposition's bare object (job 408: "…for people in
- * | older houses"). Job 400 (1:31) stopped "…that the arithmetic | was never your problem." — subject | verb, no
- * break. Words alone decide, never the picture's
- * description: job 400's opening "…in the greeting card | aisle of a pharmacy" split a compound
- * noun, and its picture said "aisle". Pure.
+ * | older houses"), and never between a word that says nothing on its own and the clause describing
+ * it (job 414: "…looking for anything | a store sold,"). Job 400 (1:31) stopped "…that the
+ * arithmetic | was never your problem." — subject | verb, no break. Words alone decide, never the
+ * picture's description: job 400's opening "…in the greeting card | aisle of a pharmacy" split a
+ * compound noun, and its picture said "aisle". Pure.
  */
 export function breakBetween(before: string, after: string, opts: { list?: boolean } = {}): boolean {
   const b = wordsOf(before);
@@ -900,6 +966,10 @@ export function breakBetween(before: string, after: string, opts: { list?: boole
   if (OPEN_ENDING.has(l)) return false;
   const w = plainWord(first);
   if (!w) return false;
+  // Never between a word that says nothing on its own and the clause that says what it is (job
+  // 414's opening, "…looking for anything | a store sold,"). Only the clause: a preposition after
+  // one ("…anything | on the bottom shelf") is left as the preposition rule below has it.
+  if (endsOnEmptyHead(b) && opensDescribingClause(a)) return false;
   if (BREAK_START.has(w) || CLAUSE_START.has(w)) return true;
   if (COUNT_WORD.test(w) && !NUMBERED.has(l)) return true;
   if (PREP_START.has(w) && a.length > 1 && !verbOrSubject(plainWord(a[1]))) return true;
