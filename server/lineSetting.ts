@@ -22,6 +22,7 @@
  * name holds one ("forest green", "16:9 landscape framing", "a stack of exotic woods", "a houseplant
  * habit"), and never a setting the picture only implies. Pure — unit-tested.
  */
+import { abbreviationBreakAt } from "../shared/sentenceEnds";
 
 /** The settings a line can turn between, in pairs. */
 export type LineSetting = "indoors" | "outdoors" | "long ago" | "today";
@@ -154,7 +155,10 @@ export function settingClash(line: string | undefined, picture: string | undefin
   return saidSettings(line).find(k => shown.includes(OPPOSITE[k]) && !shown.includes(k));
 }
 
-/** The sentences of a line. A price ("$1.50") or a short form ("St. Louis") is not a break. */
+/**
+ * The sentences of a line. A price ("$1.50"), a short form ("St. Louis") or an initial ("On a U. S.
+ * airline", job 417 — "S. airline" is no sentence of its own) is not a break (`abbreviationBreakAt`).
+ */
 function sentencesOf(text: string): string[] {
   const out: string[] = [];
   const re = /[.!?…]["'’”)\]]*\s+(?=["'“‘(]?[A-Z0-9])/g;
@@ -162,7 +166,7 @@ function sentencesOf(text: string): string[] {
   let m: RegExpExecArray | null;
   while ((m = re.exec(text))) {
     const sentence = text.slice(from, m.index + 1);
-    if (/\b(?:mr|mrs|ms|dr|st|mt|ft|vs|approx|etc|no|jr|sr)\.$/i.test(sentence)) continue;
+    if (abbreviationBreakAt(text, m.index + m[0].length)) continue;
     out.push(sentence.trim());
     from = m.index + m[0].length;
   }

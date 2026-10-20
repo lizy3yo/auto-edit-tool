@@ -31,6 +31,7 @@
  * Nothing here names a channel or a craft.
  */
 import type { StoryboardScene } from "@shared/types";
+import { abbreviationBreakAt, endsOnAbbreviation, rejoinAbbreviations } from "@shared/sentenceEnds";
 import { invokeClaude } from "./claude";
 import { safeParseJSON } from "./jsonRepair";
 import { namedPeople, showsPerson } from "./hostLook";
@@ -85,14 +86,19 @@ const GAP_MAX_WORDS = 3;
 /** The words that join list items. */
 const JOINERS = new Set(["and", "or", "plus", "maybe", "then", "also", "even", "nor"]);
 
-/** The film's running text cut into sentences (a sentence ends on . ! or ? before a space). Pure. */
+/**
+ * The film's running text cut into sentences (a sentence ends on . ! or ? before a space) — never
+ * at an initial or a short form ("On a U. S. airline, …", job 417), whose full stop ends none. Pure.
+ */
 export function splitSentences(text: string): string[] {
-  return text
-    .replace(/\s+/g, " ")
-    .trim()
-    .split(/(?<=[.!?]["')\]]?)\s+/)
-    .map(s => s.trim())
-    .filter(Boolean);
+  return rejoinAbbreviations(
+    text
+      .replace(/\s+/g, " ")
+      .trim()
+      .split(/(?<=[.!?]["')\]]?)\s+/)
+      .map(s => s.trim())
+      .filter(Boolean)
+  );
 }
 
 // ─── The shape rules ────────────────────────────────────────────────────────────────────────────
@@ -602,7 +608,13 @@ const SERIES_OPENER = new Set(["a", "an", "the", "my", "your", "our", "his", "he
 /** The most words one clause of such a series may have: an opener, who or what, and the shared word. */
 const SERIES_CLAUSE_MAX_WORDS = 6;
 /** Where the series' last member stops: the next comma, semicolon, colon or dash, or the sentence's end. */
-const MEMBER_END = /[,;:—–]|\s-\s|[.!?](?=["')\]]?(?:\s|$))/;
+const MEMBER_END = /[,;:—–]|\s-\s|[.!?](?=["')\]]?(?:\s|$))/g;
+/** Where in `rest` the member stops (`MEMBER_END`, never an initial's or short form's full stop), or -1. */
+function memberEnd(rest: string): number {
+  for (const m of Array.from(rest.matchAll(MEMBER_END)))
+    if (m[0] !== "." || !abbreviationBreakAt(rest, m.index! + 1)) return m.index!;
+  return -1;
+}
 /** Words that open a clause of its own right after "the truth is" / "the point was" ("…is EVERYONE complains"). */
 const OWN_CLAUSE_OPENER = new Set([
   "that", "everyone", "everybody", "nobody", "no", "none", "someone", "somebody", "people", "there",
@@ -650,7 +662,7 @@ export function withLastSeriesMember(sentence: string, items: string[]): string[
   const open = cursor + 1;
   if (open >= toks.length || !openers.has(toks[open])) return items;
   const rest = sentence.slice(spans[open].start);
-  const stop = rest.search(MEMBER_END);
+  const stop = memberEnd(rest);
   const member = (stop < 0 ? rest : rest.slice(0, stop)).trim();
   const words = tokenSpans(member).map(t => t.tok);
   if (words.length < 2 || words.length > LIST_ITEM_MAX_WORDS) return items;
@@ -1736,9 +1748,9 @@ export function applySpokenLists(
     if (r.end < G.length && G[r.end].scene === r.last) {
       const tail = (lastScene.scriptText ?? "").slice(G[r.end].start).trim();
       const next = scenes[r.last + 1];
-      const newSentence = /[.!?]["')\]]?\s*$/.test(
-        (lastScene.scriptText ?? "").slice(0, G[r.end].start).trim()
-      );
+      const said = (lastScene.scriptText ?? "").slice(0, G[r.end].start).trim();
+      // "…, and the U. S." ends no sentence: its full stop is the word's (`endsOnAbbreviation`).
+      const newSentence = /[.!?]["')\]]?\s*$/.test(said) && !endsOnAbbreviation(said, tail);
       if (lastScene.hostPresent && (newSentence || tokenSpans(tail).length >= HOST_HANDOFF_MIN_WORDS)) {
         // The host speaks on after the list: they come back for the rest of their line.
         items.push({

@@ -9785,3 +9785,31 @@ describe("round 15: a cart someone pushes never rolls by itself (job 417 scenes 
     expect(scenes[0].splitSelfMoving).toBe(false);
   });
 });
+
+describe("round 15: 'U. S.' is one word — no beat, picture or host take ends on 'U.' (job 417 scenes 16-17)", () => {
+  // The script spelt "U. S." with a space. The storyboard's sentence units ended on "U.", the beat
+  // closed there ("Number one. The whole can. On a lot of U." | "S. airlines, the flight attendant
+  // pours…"), and the cut landed inside the spoken "U.S." (58.78-59.06): the host's take stopped
+  // mid-word. The real sentence ends of the same line stay ends, and so does a letter said as a letter.
+  const SCRIPT =
+    "Number one. The whole can. On a lot of U. S. airlines, the flight attendant pours your soda into a plastic cup packed with ice, fills it about halfway, and the rest of the can rolls off down the aisle on the cart. On many of those carriers, you can have the whole thing just by asking.";
+
+  it("417: the beat closes after 'U. S. airlines,', never on 'U.'", async () => {
+    const { segmentScriptByDuration, splitIntoUnits } = await import("./longformVideo");
+    const beats = segmentScriptByDuration(splitIntoUnits(SCRIPT), SCRIPT).map(c => SCRIPT.slice(c.start, c.end).trim());
+    expect(beats[0]).toBe("Number one. The whole can. On a lot of U. S. airlines,");
+    expect(beats.some(b => /\b[US]\.$/.test(b) || /^S\./.test(b))).toBe(false);
+  });
+
+  it("417 as stored: the host line ending 'On a lot of U.' ends no sentence, and the gate says so", async () => {
+    const { endsSentence } = await import("./longformVideo");
+    const { breakBetween } = await import("./planGate");
+    const host = "Number one. The whole can. On a lot of U.";
+    const next = "S. airlines, the flight attendant pours your soda into a plastic cup packed with ice,";
+    expect(endsSentence(host, next)).toBe(false);
+    expect(breakBetween(host, next)).toBe(false);
+    // Negative: "The whole can." and job 310's "…in a small X. Snug," still end their sentences.
+    expect(endsSentence("Number one. The whole can.", "On a lot of U. S. airlines,")).toBe(true);
+    expect(endsSentence("clockwise, that crosses over itself in a small X.", "Snug, but loose enough")).toBe(true);
+  });
+});

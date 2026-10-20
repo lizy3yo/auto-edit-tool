@@ -20,6 +20,7 @@
  * assets, split screens and the cold open (the hook stays on camera).
  */
 import type { BuildStage, KeyThing, RecurringPerson, StoryboardScene } from "@shared/types";
+import { abbreviationBreakAt, endsOnAbbreviation, splitsInitials } from "@shared/sentenceEnds";
 import { invokeClaude } from "./claude";
 import { NOTHING_CUT_OPEN_RULE } from "./cutOpen";
 import { safeParseJSON } from "./jsonRepair";
@@ -288,7 +289,9 @@ const LIST_ITEM_START =
  */
 export function spokenListItems(text: string | undefined): string[] | null {
   const t = (text ?? "").trim().replace(/[.!?…]["'”’)\]]*$/, "");
-  if (!t || /[.!?…]\s/.test(t)) return null; // one sentence only
+  // One sentence only — an initial's or a short form's full stop ("U. S.", "Dr.") ends none.
+  if (!t || Array.from(t.matchAll(/[.!?…]\s/g)).some(m => !abbreviationBreakAt(t, m.index! + m[0].length)))
+    return null;
   const items = t
     .split(/\s*[,;]\s*/)
     .flatMap(p => p.split(/\s+(?:and|or)\s+(?=(?:a|an|the|some|your|my|his|her|their|our)\b)/i))
@@ -768,7 +771,12 @@ export function applyShotPlan(
         hostEnd = nextAt;
         shotsLeft = shotsLeft.slice(1);
       }
-      if (hostEnd < HOST_HANDOFF_MIN_WORDS || hostEnd >= spans.length) {
+      // Never between the letters of one spoken word spelt with spaces ("U. | S.", job 417).
+      if (
+        hostEnd < HOST_HANDOFF_MIN_WORDS ||
+        hostEnd >= spans.length ||
+        splitsInitials(text, spans[hostEnd].start)
+      ) {
         out.push(s);
         continue;
       }
@@ -795,7 +803,7 @@ export function applyShotPlan(
           continue;
         }
         const at = findPhraseAt(spans, shot.from, cursor + 1);
-        if (at < 0) continue;
+        if (at < 0 || splitsInitials(text, spans[at].start)) continue;
         pieces.push({ at, host: false, shot });
         cursor = at;
       }
@@ -806,7 +814,7 @@ export function applyShotPlan(
           return;
         }
         const at = findPhraseAt(spans, shot.from, cursor + 1);
-        if (at < 0) return;
+        if (at < 0 || splitsInitials(text, spans[at].start)) return;
         pieces.push({ at, host: false, shot });
         cursor = at;
       });
@@ -3698,10 +3706,16 @@ export function ownTypedPanel(s: StoryboardScene, typed: string, things: KeyThin
   return true;
 }
 
-/** A line that ends a sentence (so the next picture starts a new one). */
-const endsSentence = (t: string | undefined) => /[.!?]["')\]]?\s*$/.test((t ?? "").trim());
+/**
+ * A line that ends a sentence (so the next picture starts a new one) — never on an initial or a
+ * short form, whose full stop belongs to the word ("…On a lot of U." | "S. airlines", job 417).
+ * `next` is the line after it, when known.
+ */
+const endsSentence = (t: string | undefined, next?: string) =>
+  /[.!?]["')\]]?\s*$/.test((t ?? "").trim()) && !endsOnAbbreviation(t, next);
 /** A sentence's end at the end of a trimmed text, a closing quote or bracket of any kind allowed. */
-const SENTENCE_END = /[.!?]["'’”)\]]*$/;
+const sentenceEnded = (t: string, next?: string) =>
+  /[.!?]["'’”)\]]*$/.test(t) && !endsOnAbbreviation(t, next);
 
 /**
  * ONE IDEA, ONE PICTURE (2026-10-02, the operator: whether two pictures of one sentence become one
@@ -3736,7 +3750,7 @@ export function applyPictureJoins(
       fitCandidate(s) &&
       !prev.listCut &&
       !s.listCut &&
-      !endsSentence(prev.scriptText) &&
+      !endsSentence(prev.scriptText, s.scriptText) &&
       lens[k] + sec(s) <= maxAt(prev);
     if (!ok) {
       remap.set(id, out.length);
@@ -3778,10 +3792,13 @@ export function applyPictureJoins(
 
 /**
  * The token at `at` starts a new sentence: the words before it end on ".", "!" or "?" (a closing
- * quote or bracket allowed) and a space — "$1.50" is one price, not two sentences. Pure.
+ * quote or bracket allowed) and a space — "$1.50" is one price, not two sentences, and an initial's
+ * or a short form's full stop ends none ("U. S. airlines", "St. Louis", `abbreviationBreakAt`). Pure.
  */
 function startsSentenceAt(text: string, spans: TokenSpan[], at: number): boolean {
-  return at > 0 && /[.!?]["'’”)\]]*\s/.test(text.slice(spans[at - 1].end, spans[at].start));
+  if (at <= 0) return false;
+  const gap = /[.!?]["'’”)\]]*\s/.exec(text.slice(spans[at - 1].end, spans[at].start));
+  return !!gap && !abbreviationBreakAt(text, spans[at - 1].end + gap.index + gap[0].length);
 }
 
 /**
@@ -3845,7 +3862,7 @@ export function applyPictureSplits(
     let cursor = 0;
     for (const cut of cuts) {
       const at = findPhraseAt(spans, cut.from, cursor + 1);
-      if (at < 0) continue;
+      if (at < 0 || splitsInitials(text, spans[at].start)) continue;
       // A joined picture is one sentence made one picture on purpose ("Sell your furniture | on
       // Facebook Marketplace"): it is cut again only where a new sentence starts.
       if (s.joinedLine && !startsSentenceAt(text, spans, at)) continue;
@@ -3880,7 +3897,7 @@ export function applyPictureSplits(
         !!prev &&
         fitCandidate(prev) &&
         !!(prev.scriptText ?? "").trim() &&
-        !SENTENCE_END.test((prev.scriptText ?? "").trim()) &&
+        !sentenceEnded((prev.scriptText ?? "").trim(), text) &&
         startsSentenceAt(text, spans, bounds[1]) &&
         // Only the end of that sentence: no sentence of its own starts inside the lead.
         !spans.slice(1, bounds[1]).some((_, j) => startsSentenceAt(text, spans, j + 1)) &&
@@ -4011,7 +4028,7 @@ export async function fitPicturesToLines(
       const said = (s.scriptText ?? "").trim().replace(/\s+/g, " ");
       const prev = scenes[i - 1];
       const sameSentence =
-        !!prev && fitCandidate(prev) && !prev.listCut && !s.listCut && !endsSentence(prev.scriptText);
+        !!prev && fitCandidate(prev) && !prev.listCut && !s.listCut && !endsSentence(prev.scriptText, s.scriptText);
       const secs = s.audioDuration ? ` (${s.audioDuration.toFixed(1)} s)` : "";
       if (s.hostPresent || !fitCandidate(s) || i < from) {
         lines.push(`HOST/OTHER: "${said}"`);
@@ -4320,9 +4337,6 @@ export function oneThingPanels(
 
 // ─── Does each split panel show what its line is about? ─────────────────────────────────
 
-/** A full stop that belongs to a short title or name, not to a sentence end ("Mr.", "St.", "e.g."). */
-const ABBREVIATION_END = /(?:\b(?:Mr|Mrs|Ms|Dr|St|Mt|Ft|Jr|Sr|Prof|Rev|No|vs)|\b[A-Za-z]\.[A-Za-z])\.["'”’)\]]*$/;
-
 /**
  * THE LINE'S LAST WORDS LEAD INTO THE NEXT ONE (2026-10-20, job 414 scene 4). A split panel sits
  * beside its host take for the whole line, and a host take may stop mid-sentence where the shot list
@@ -4349,7 +4363,7 @@ export function leadIntoNext(
   // The LAST sentence end followed by more words (greedy). A title's or a place name's full stop
   // ends no sentence: "…drove all the way to St. Louis to buy" is one sentence, cut mid-clause.
   const m = /^(.*[.!?]["'”’)\]]*)\s+(\S.*)$/.exec(text);
-  if (!m || ABBREVIATION_END.test(m[1])) return undefined;
+  if (!m || endsOnAbbreviation(m[1], m[2])) return undefined;
   const words = m[2].trim();
   const all = text.split(" ").length;
   const n = words.split(" ").length;
@@ -5050,12 +5064,11 @@ export function joinShortSplits(
     !s.assetImageUrl &&
     !s.cta &&
     !s.qrHero;
-  const endsSentence = (t: string | undefined) => /[.!?]["')\]]?\s*$/.test((t ?? "").trim());
   let changed = false;
   for (let i = 1; i < out.length; i++) {
     const a = out[i - 1];
     const b = out[i];
-    if (!joinable(a) || !joinable(b) || endsSentence(a.scriptText)) continue;
+    if (!joinable(a) || !joinable(b) || endsSentence(a.scriptText, b.scriptText)) continue;
     if (Math.min(len[i - 1], len[i]) >= SPLIT_PART_MIN_SEC) continue;
     const limit =
       movingPicture(a) || movingPicture(b) ? Math.min(maxAt(a), MOVING_PICTURE_MAX_SEC) : maxAt(a);
@@ -5086,8 +5099,6 @@ export function joinShortSplits(
 export const SENTENCE_START_MAX_WORDS = 4;
 /** …and the longest they may run: on the voice when the word timeline knows, else their share of the picture. */
 export const SENTENCE_START_MAX_SEC = 1.5;
-/** Short forms whose full stop ends no sentence ("Mr. Hale", "St. Louis", "saws, drills, etc. and"). */
-const SHORT_FORM = /^(?:mr|mrs|ms|dr|st|mt|ft|jr|sr|vs|etc|no|approx|lt|capt|gen|prof|rev|ave|rd|inc|co|ltd)$/;
 
 /**
  * A SENTENCE STARTS ON ITS OWN PICTURE (2026-10-20, job 414 scenes 28-29). The storyboard cuts the
@@ -5139,13 +5150,13 @@ export function carrySentenceStarts(
     // The shot list's own cut inside one beat.
     if (a.shotGroup !== undefined && a.shotGroup === b.shotGroup) continue;
     const text = (a.scriptText ?? "").trim();
-    if (!text || SENTENCE_END.test(text)) continue;
+    if (!text || sentenceEnded(text, b.scriptText)) continue;
     const spans = tokenSpans(text);
     let at = -1;
     // A title's or a place's short form ends on a full stop and is no sentence end: "…down to St.
-    // Louis" would hand "Louis" to the next picture.
+    // Louis" would hand "Louis" to the next picture (`startsSentenceAt` asks `abbreviationBreakAt`).
     for (let k = spans.length - 1; k > 0 && spans.length - k <= SENTENCE_START_MAX_WORDS; k--)
-      if (startsSentenceAt(text, spans, k) && !SHORT_FORM.test(spans[k - 1].tok)) {
+      if (startsSentenceAt(text, spans, k)) {
         at = k;
         break;
       }
@@ -5357,7 +5368,7 @@ export function parseContextGroups(
     let ended = false;
     ids.forEach((id, k) => {
       if (ended) return;
-      const opens = id > 0 ? endsSentence(saidOf?.(id - 1)) : /^\W*[A-Z0-9]/.test(saidOf?.(id) ?? "");
+      const opens = id > 0 ? endsSentence(saidOf?.(id - 1), saidOf?.(id)) : /^\W*[A-Z0-9]/.test(saidOf?.(id) ?? "");
       const move = saidOf && settingMove(saidOf(id), show, opens);
       if (move) {
         if (held || move.turn) ended = true;
