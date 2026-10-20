@@ -430,10 +430,43 @@ describe("414: the axe, the froe and the drawknife are things of their own after
     expect(at(board, 6).otherKeyThings).toEqual(["froe"]);
     expect(at(board, 17).otherKeyThings).toEqual(["froe"]);
     expect(sources(board, 17)).toEqual([6]);
-    // 20 is a step: never drawn from another list's item, so from the froe's next picture (scene 17).
+    // 20 is a step of another list: the froe's item ("a froe,") lends it the froe, the thing its own
+    // words name — the froe's first picture, as for any picture of it.
     expect(at(board, 20).otherKeyThings).toEqual(["froe"]);
-    expect(sources(board, 20)).toEqual([17]);
+    expect(sources(board, 20)).toEqual([6]);
     expect(requiredThingsFor(at(board, 17))).toContain("froe");
+  });
+
+  it("20 keeps the froe when 17 failed its check — the stored film's case: scene 17 shipped flagged and is no memory", () => {
+    const board = job414();
+    at(board, 17).memoryUnfit = true;
+    attachMemory(board, [], K414);
+    expect(sources(board, 20)).toEqual([6]);
+  });
+
+  it("an item of another list lends only the thing its own words name, never what stands beside it", () => {
+    // Job 336: "Coasters, | ornaments," on the workbench, then "Smalls to the markets, …" — the ornaments'
+    // item lends the ornaments; neither item lends the workbench under it to a later list's item.
+    const board = [
+      pic(12, "a short stack of walnut coasters on the workbench", { scriptText: "Coasters,", keyThing: "coasters", otherKeyThings: ["workbench"], listCut: true, pictureUrl: url(336, 12) }),
+      pic(13, "small carved wooden ornaments grouped on the workbench", { scriptText: "ornaments,", keyThing: "ornaments", otherKeyThings: ["workbench"], listCut: true, pictureUrl: url(336, 13) }),
+      pic(35, "an outdoor craft fair table under a canopy at a market row", { keyThing: "craft fair table", pictureUrl: url(336, 35) }),
+      pic(40, "coasters and ornaments displayed together on the craft fair table", {
+        scriptText: "Smalls to the markets,",
+        keyThing: "coasters",
+        otherKeyThings: ["craft fair table", "ornaments"],
+        listCut: true,
+      }),
+      pic(41, "finished pieces set out on the workbench, sorted by where each one will sell", {
+        scriptText: "and the rest by the bench,",
+        keyThing: "coasters",
+        otherKeyThings: ["workbench"],
+        listCut: true,
+      }),
+    ];
+    // The coasters only inherited: never their item (it shows the coasters). The ornaments from theirs.
+    expect(sources(board, 40)).toEqual([35, 13]);
+    expect(sources(board, 41)).toEqual([]);
   });
 
   it("17's prompt names the froe in its reference as the very same one", async () => {
@@ -567,5 +600,58 @@ describe("a screen filed under its own device is never handed the device as 'the
     ];
     expect(memoryViewFor(board, board[1])).toBe(SCREEN_ITEM_VIEW);
     expect(sources(board, 35)).toEqual([4]);
+  });
+});
+
+describe("a list item showing a device keeps only the device's memory (the rows as stored)", () => {
+  it("295-4: the tablet showing the shop page is never handed the cutting board to copy as an object", () => {
+    // Before items kept their other things' memory it had none; handed the board with "draw the SAME
+    // cutting board … from a different camera position", the picture maker built the tablet out of it.
+    const board = [
+      pic(2, "The walnut and maple cutting board leaning against the garage wall.", { keyThing: "cutting board", pictureUrl: url(295, 2) }),
+      pic(4, "The wood-grain tablet propped on the workbench, its glowing screen showing an Etsy-style white page: a grid of square product photos with the walnut and maple striped cutting board in the first tile", {
+        scriptText: "Etsy,",
+        keyThing: "digital device",
+        otherKeyThings: ["cutting board", "workbench"],
+        listCut: true,
+      }),
+    ];
+    expect(ownKeyThing(board[1])).toBeUndefined();
+    expect(sources(board, 4)).toEqual([]);
+  });
+
+  it("412-15: the step 'run it back,' on the phone's screen gets no nightstand, cat or bed as 'the item for sale'", () => {
+    const board = [
+      pic(3, "cat walking across sleeping owner's legs in bed", { keyThing: "cat", otherKeyThings: ["bed"], pictureUrl: url(412, 3) }),
+      pic(12, "quiet bedroom at pre-dawn with unmade bed and nightstand", { keyThing: "nightstand", otherKeyThings: ["bed"], pictureUrl: url(412, 12) }),
+      pic(14, "host holding phone near nightstand watching video of cat on bed", {
+        keyThing: "phone",
+        otherKeyThings: ["nightstand", "cat", "bed"],
+        pictureUrl: url(412, 14),
+      }),
+      pic(15, "the host's thumb dragging back along a cat-on-bed video playing on the phone screen beside the nightstand", {
+        scriptText: "run it back,",
+        keyThing: "phone",
+        otherKeyThings: ["nightstand", "cat", "bed"],
+        listCut: true,
+        listKind: "steps",
+      }),
+      pic(16, "the phone in the host's hand playing a slow-motion clip of the grey-and-white cat stepping across a bed", {
+        scriptText: "slow it down,",
+        keyThing: "phone",
+        otherKeyThings: ["cat", "bed"],
+        listCut: true,
+        listKind: "steps",
+      }),
+    ];
+    expect(sources(board, 15)).toEqual([]);
+    // The next step is about the phone itself: the phone's picture, never the real cat or bed its clip shows.
+    expect(sources(board, 16)).toEqual([14]);
+  });
+
+  it("413-31 has no device: the step keeps the mower's memory", () => {
+    const board = job413();
+    attachMemory(board, [], K413);
+    expect(sources(board, 31)).toEqual([28]);
   });
 });

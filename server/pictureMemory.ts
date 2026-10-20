@@ -96,7 +96,8 @@ export function memorySourcesFor(
   const i = scenes.indexOf(s);
   if (i <= 0) return [];
   // A list item is never drawn from another item's picture: each item is its own thing — but a STEP
-  // is drawn from the steps before it in its own list (`sameSteps`): they are done to one thing.
+  // is drawn from the steps before it in its own list (`sameSteps`): they are done to one thing; and an
+  // item of ANOTHER list lends only the thing its own words name (below).
   // …nor is a screen ever a memory SOURCE: the thing on it is a small photo, not the thing.
   // …nor a picture FURTHER ALONG than this one (`laterStage`): build videos open on the finished
   // piece, and Hank's job 268 drew "hands drilling a hole into a charred cedar block" from the hook's
@@ -114,19 +115,20 @@ export function memorySourcesFor(
   // 402 scene 33 drew its cookie packet from scene 29's, a hand passing the packet to a passenger, and
   // the hand came along under the card — for 19.6 s a hand held the QR code.
   const backdrop = !!s.qrHero && !s.coverHero && !s.assetImageUrl && !s.hostPresent;
-  const before = scenes
+  const fit = scenes
     .slice(0, i)
     .filter(
       x =>
         source(x) &&
         !isScreen(x) &&
-        !(s.listCut && x.listCut && !sameSteps(scenes, x, s)) &&
+        !(s.listCut && x.listCut && sameList(scenes, x, s) && !sameSteps(scenes, x, s)) &&
         !laterStage(x, s) &&
         !x.memoryUnfit &&
         !insideView(x.showSubject) &&
         !insideView(x.visualPrompt) &&
         !(backdrop && withSomeone(x))
     );
+  const before = fit.filter(x => !(s.listCut && x.listCut && !sameSteps(scenes, x, s)));
   const out: StoryboardScene[] = [];
   const add = (x: StoryboardScene | undefined) => {
     if (x && !out.includes(x) && out.length < MAX_MEMORY_REFS) out.push(x);
@@ -155,8 +157,29 @@ export function memorySourcesFor(
   // "ankle," under the cat it only inherited, keeps the bed of scene 2. Never from a picture that shows
   // the thing an item only inherited, though: handed the pile, a coaster is drawn as the pile (Dale's
   // job 397).
-  for (const t of s.otherKeyThings ?? [])
-    if (!lendsNoPicture(t)) add(memoryOf(before.filter(x => shows(x, t) && (!!own || !shows(x, s.keyThing!))), t));
+  // A list item showing a DEVICE (a phone, a tablet, a laptop, its screen) whose own thing lends it
+  // nothing — one it only inherited, or the device itself — keeps only the device's memory: anything
+  // else it names may be what the screen shows, and it has no screen view to say so (`memoryViewFor`).
+  // Asked of the device in its words, not of `isScreen`: "the wood-grain tablet …, its glowing screen
+  // showing an Etsy-style white page: a grid of square product photos with the walnut and maple board"
+  // names no app or listing. Job 295 scene 4, that "Etsy," filed under the device with the cutting board
+  // in its words, would be told "draw the SAME cutting board … from a different camera position" — the
+  // instruction under which the picture maker built the tablet out of the board (job 295); job 412
+  // scene 15, the step "run it back," on the phone's screen, would be handed the nightstand, the cat and
+  // the bed as "the item for sale". Before list items kept the other things' memory, both had none.
+  // An item of ANOTHER list lends a list item the thing its own words name, as any picture of it would:
+  // job 414 scene 20, the step "and rived the boards along those same lines," levering a froe, has the
+  // froe's item picture ("a froe,", scene 6) to follow when the froe's next picture (scene 17) failed its
+  // check — it was drawn from none and came back an all-metal L. Never an item of its own list (above).
+  const onDevice =
+    !!s.listCut &&
+    (!own || namesDevice(own)) &&
+    namesDevice(s.hostPresent ? s.splitVisual ?? "" : s.showSubject ?? s.visualPrompt ?? "");
+  for (const t of s.otherKeyThings ?? []) {
+    if (lendsNoPicture(t) || (onDevice && !namesDevice(t))) continue;
+    const lends = (x: StoryboardScene) => before.includes(x) || namesItemThing(x.scriptText ?? x.narration, t);
+    add(memoryOf(fit.filter(x => lends(x) && shows(x, t) && (!!own || !shows(x, s.keyThing!))), t));
+  }
   return out;
 }
 
@@ -166,7 +189,11 @@ export function memorySourcesFor(
  * before it (job 413 scenes 31-32: the gas can drained into, then stored sealed). Pure.
  */
 function sameSteps(scenes: StoryboardScene[], x: StoryboardScene, s: StoryboardScene): boolean {
-  if (x.listKind !== "steps" || s.listKind !== "steps") return false;
+  return x.listKind === "steps" && s.listKind === "steps" && sameList(scenes, x, s);
+}
+
+/** Whether picture `x` is an earlier item of the same spoken list as `s`: every picture from `x` to `s` is a list item. Pure. */
+function sameList(scenes: StoryboardScene[], x: StoryboardScene, s: StoryboardScene): boolean {
   const [a, b] = [scenes.indexOf(x), scenes.indexOf(s)];
   if (a < 0 || a >= b) return false;
   for (let k = a; k <= b; k++) if (!scenes[k].listCut) return false;

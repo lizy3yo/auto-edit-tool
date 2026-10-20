@@ -8021,3 +8021,82 @@ describe("round 14: every thing a picture shows keeps its memory (the verificati
     expect(memorySourcesFor(b, b[2])).toEqual([]);
   });
 });
+
+describe("round 14 review: a list item on a device, and a step after a failed picture (jobs 295, 412, 414)", () => {
+  const row = (index: number, show: string, over: Partial<StoryboardScene> = {}) =>
+    ({ index, narration: "n", scriptText: "n", showSubject: show, visualPrompt: show, ...over }) as StoryboardScene;
+  const src = (i: number) => `https://r2/still-src-${i}.png`;
+
+  it("295: 'Etsy,' on the tablet is never handed the cutting board as an object to copy — the tablet was built out of it", async () => {
+    const { memorySourcesFor } = await import("./pictureMemory");
+    const b = [
+      row(2, "The walnut and maple cutting board leaning against the garage wall.", { keyThing: "cutting board", pictureUrl: src(2) }),
+      row(4, "The wood-grain tablet propped on the workbench, its glowing screen showing an Etsy-style white page: a grid of square product photos with the walnut and maple striped cutting board in the first tile", {
+        scriptText: "Etsy,",
+        keyThing: "digital device",
+        otherKeyThings: ["cutting board", "workbench"],
+        listCut: true,
+      }),
+    ];
+    expect(memorySourcesFor(b, b[1])).toEqual([]);
+  });
+
+  it("412: 'run it back,' on the phone's screen is handed no nightstand, cat or bed as 'the item for sale'", async () => {
+    const { memorySourcesFor } = await import("./pictureMemory");
+    const b = [
+      row(3, "cat walking across sleeping owner's legs in bed", { keyThing: "cat", otherKeyThings: ["bed"], pictureUrl: src(3) }),
+      row(12, "quiet bedroom at pre-dawn with unmade bed and nightstand", { keyThing: "nightstand", otherKeyThings: ["bed"], pictureUrl: src(12) }),
+      row(15, "the host's thumb dragging back along a cat-on-bed video playing on the phone screen beside the nightstand", {
+        scriptText: "run it back,",
+        keyThing: "phone",
+        otherKeyThings: ["nightstand", "cat", "bed"],
+        listCut: true,
+        listKind: "steps",
+      }),
+    ];
+    expect(memorySourcesFor(b, b[2])).toEqual([]);
+  });
+
+  it("414: 'and rived the boards…' keeps the froe the viewer saw at 'a froe,' when the froe's next picture failed its check", async () => {
+    const { attachMemory, memorySourcesFor } = await import("./pictureMemory");
+    const steel: KeyThing[] = [
+      { name: "steel tools", look: "an axe, a froe, and a drawknife hanging together on the cabin's back interior wall", main: true },
+      { name: "white oak bolt", look: "a short pale log section with straight grain" },
+      { name: "split shingle", look: "a thin pale wood board, one end shaved thinner" },
+    ];
+    const b = [
+      row(5, "an axe (for the steel tools)", { scriptText: "an axe,", keyThing: "steel tools", listCut: true, pictureUrl: src(5) }),
+      row(6, "a close-up of a froe hanging on the cabin's back log wall: its straight flat steel blade with a wooden handle set upright", {
+        scriptText: "a froe,",
+        keyThing: "steel tools",
+        partOf: "steel tools",
+        listCut: true,
+        pictureUrl: src(6),
+      }),
+      row(7, "a close-up of a drawknife hanging on the cabin's back log wall", {
+        scriptText: "and a drawknife,",
+        keyThing: "steel tools",
+        partOf: "steel tools",
+        listCut: true,
+        pictureUrl: src(7),
+      }),
+      row(17, "the host's hands holding a froe upright by its wooden handle, its flat blade driven into the end of a short pale white oak bolt", {
+        keyThing: "white oak bolt",
+        buildStage: "making",
+        memoryUnfit: true,
+        pictureUrl: src(17),
+      }),
+      row(19, "a white oak bolt being split into pie-shaped wedges", { scriptText: "split each bolt into pie wedges,", keyThing: "white oak bolt", listCut: true, listKind: "steps", buildStage: "making", pictureUrl: src(19) }),
+      row(20, "the host's hands levering a froe's handle sideways as its blade splits a thin board off a pale oak wedge", {
+        scriptText: "and rived the boards along those same lines,",
+        keyThing: "split shingle",
+        listCut: true,
+        listKind: "steps",
+        buildStage: "making",
+      }),
+    ];
+    attachMemory(b, [], steel);
+    // It was drawn from no picture of the froe and came back an all-metal L.
+    expect(memorySourcesFor(b, b[5]).map(s => s.index)).toEqual([6]);
+  });
+});
