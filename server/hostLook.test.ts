@@ -107,7 +107,7 @@ describe("a held thing has a holder; a thing with no hand rests", () => {
     expect(lying.humanPresent).toBeFalsy();
   });
   it("tells a person-free picture that nothing hovers", () => {
-    expect(NO_FIGURES_SUFFIX).toMatch(/never hovering in the air or pressed against the work on its own/);
+    expect(NO_FIGURES_SUFFIX).toMatch(/never hovering in the air, hanging from nothing, propped at an angle only a hand could hold, or pressed against the work on its own/);
   });
 });
 

@@ -458,7 +458,7 @@ describe("a panel is about its whole line, and keeps the tool its line names (jo
     expect(sent).toContain(`#1 PANEL (6.7 s): said "${LINE_22}" | shows: ${SHINGLE_22}`);
   });
 
-  it("414 scene 22: the check's rewrite of the result alone gets the drawknife, resting on the work", async () => {
+  it("414 scene 22: the check's rewrite of the result alone gets the drawknife, lying flat on the work", async () => {
     const scenes = [
       panel(22, LINE_22, "a pale board on a stump, one end tapered, a drawknife beside it", { audioDuration: 6.6774 }),
     ];
@@ -469,7 +469,7 @@ describe("a panel is about its whole line, and keeps the tool its line names (jo
     });
     const r = await fitSplitPanelsToLines(scenes, { keyThings: CABIN_THINGS });
     expect(r).toEqual({ checked: 1, fixed: 1 });
-    const want = `${SHINGLE_22}, a drawknife resting on the work, unattended.`;
+    const want = `${SHINGLE_22}, a drawknife lying flat on the work, unattended.`;
     expect(scenes[0].splitVisual).toBe(want);
     // A later redraw rewrites from the same words.
     expect(scenes[0].splitVisualSeed).toBe(want);
@@ -521,12 +521,12 @@ describe("a panel is about its whole line, and keeps the tool its line names (jo
     expect(withLineTool(HAIR, "Trim the ends with a pair of scissors every eight weeks.")).toBe(HAIR);
     // Never twice.
     const once = withLineTool(SHINGLE_22, LINE_22);
-    expect(once).toBe(`${SHINGLE_22}, a drawknife resting on the work, unattended.`);
+    expect(once).toBe(`${SHINGLE_22}, a drawknife lying flat on the work, unattended.`);
     expect(withLineTool(once, LINE_22)).toBe(once);
     // A tool said only in the plural is drawn as a pair.
     expect(
       withLineTool("Finished rag quilt squares laid flat, their exposed seams standing proud", "where you can get at it with your scissors.")
-    ).toBe("Finished rag quilt squares laid flat, their exposed seams standing proud, a pair of scissors resting on the work, unattended.");
+    ).toBe("Finished rag quilt squares laid flat, their exposed seams standing proud, a pair of scissors lying flat on the work, unattended.");
   });
 
   it("a tool word that only names its marks puts no tool in the picture (job 407 scene 19, the same line)", () => {
@@ -535,23 +535,23 @@ describe("a panel is about its whole line, and keeps the tool its line names (jo
     const STROKES =
       "A pale oak board held flat on a work surface, one end shaved thin by drawknife strokes, wood curls resting on the board and ground nearby.";
     expect(withLineTool(STROKES, LINE_22)).toBe(
-      "A pale oak board held flat on a work surface, one end shaved thin by drawknife strokes, wood curls resting on the board and ground nearby, a drawknife resting on the work, unattended."
+      "A pale oak board held flat on a work surface, one end shaved thin by drawknife strokes, wood curls resting on the board and ground nearby, a drawknife lying flat on the work, unattended."
     );
     expect(withLineTool("a pine board with a slot, fresh saw marks along its edge", "Cut the slot with a handsaw.")).toBe(
-      "a pine board with a slot, fresh saw marks along its edge, a handsaw resting on the work, unattended."
+      "a pine board with a slot, fresh saw marks along its edge, a handsaw lying flat on the work, unattended."
     );
     // A sawhorse is no saw.
     expect(withLineTool("a pine board cut in two on sawhorses", "Cut the board with a saw.")).toBe(
-      "a pine board cut in two on sawhorses, a saw resting on the work, unattended."
+      "a pine board cut in two on sawhorses, a saw lying flat on the work, unattended."
     );
   });
 
   it("a tool said in the plural or as a sheet reads as English; a tool said as a figure of speech is none", () => {
     expect(withLineTool("a pine box with clean corners", "Pare the corners with the chisels, then oil it.")).toBe(
-      "a pine box with clean corners, chisels resting on the work, unattended."
+      "a pine box with clean corners, chisels lying flat on the work, unattended."
     );
     expect(withLineTool("a pine box with softened edges", "Smooth the edges with some sandpaper.")).toBe(
-      "a pine box with softened edges, a sheet of sandpaper resting on the work, unattended."
+      "a pine box with softened edges, a sheet of sandpaper lying flat on the work, unattended."
     );
     for (const idiom of [
       "Some buyers come with an axe to grind, and they will leave a bad review.",
@@ -576,7 +576,7 @@ describe("a panel is about its whole line, and keeps the tool its line names (jo
     const b = panel(2, LINE_22, SHINGLE_22);
     const cta = { ...panel(3, LINE_22, SHINGLE_22), cta: true } as StoryboardScene;
     expect(keepPanelTools([a, b, cta], s => s !== b)).toBe(1);
-    expect(a.splitVisual).toMatch(/a drawknife resting on the work, unattended\.$/);
+    expect(a.splitVisual).toMatch(/a drawknife lying flat on the work, unattended\.$/);
     expect(b.splitVisual).toBe(SHINGLE_22);
     expect(cta.splitVisual).toBe(SHINGLE_22);
   });
@@ -588,5 +588,44 @@ describe("a panel is about its whole line, and keeps the tool its line names (jo
     expect(PANEL_FIT_RULES).toMatch(/A PANEL marked \(ends on "…"\)/);
     expect(PANEL_FIT_RULES).not.toMatch(CHANNEL_OBJECTS);
     expect(PANEL_FIT_RULES).not.toMatch(/\b(?:shingles?|drawknife|cabin|roof|oak|poplar|back wall|froe)\b/i);
+  });
+
+  // Job 418 scene 25 (round 15): the panel beside "When you rive, the bolt sits in a fork or against a
+  // stump, never in your hand" read "Oak bolt wedged upright in a stump fork, froe blade set into its top
+  // end with the handle angled, resting unattended on the work" — a tool in its working pose with no hand
+  // on it, and the line's two holders run into one — and this pass let it through. The picture maker
+  // hung the froe on a bare wire hook and bored a hole in the stump for the bolt.
+  it("418 scene 25: the panel pass refuses a tool left in its working pose with nobody holding it, and two holders run into one", async () => {
+    expect(PANEL_FIT_RULES).toMatch(/put down the way a person leaves it — lying flat on the work, unattended/);
+    expect(PANEL_FIT_RULES).toMatch(/A TOOL IN A PANEL HAS NOBODY HOLDING IT, so it lies flat on the work, a bench or the ground/);
+    expect(PANEL_FIT_RULES).toMatch(/stays standing in the work only where a real one stays by itself/);
+    expect(PANEL_FIT_RULES).toMatch(/A panel that leaves a tool in its\s+working pose with no hand on it/);
+    expect(PANEL_FIT_RULES).toMatch(/hanging from something the line never hangs it on, is WRONG:\s+rewrite it with the tool put down/);
+    expect(PANEL_FIT_RULES).toMatch(/A HOLDER the line says the work sits in, on or against while it is done/);
+    expect(PANEL_FIT_RULES).toMatch(/written by its parts — what it is\s+made of and how it holds the work/);
+    expect(PANEL_FIT_RULES).toMatch(/When the line offers two, the panel shows\s+the first one alone/);
+    expect(PANEL_FIT_RULES).toMatch(/runs the two into one thing/);
+    // Neutral words only.
+    expect(PANEL_FIT_RULES).not.toMatch(/\b(?:froe|fork|stump|bolt|riv(?:e|ing)|club|hook)\b/i);
+    expect(PANEL_FIT_RULES).not.toMatch(CHANNEL_OBJECTS);
+    // The pass's rewrite is what the panel becomes. The line names no tool its job is done WITH, so
+    // nothing is added to it (`withLineTool`).
+    const LINE_25 = "When you rive, the bolt sits in a fork or against a stump, never in your hand.";
+    const PANEL_25 =
+      "Oak bolt wedged upright in a stump fork, froe blade set into its top end with the handle angled, resting unattended on the work.";
+    const FIXED_25 = "An oak bolt standing on end, wedged between the two arms of a forked log, a froe lying flat on the log beside it";
+    const scenes = [panel(25, LINE_25, PANEL_25, { audioDuration: 7.03 })];
+    mockInvoke.mockResolvedValueOnce({
+      text: JSON.stringify({
+        pictures: [{ id: 0, about: "holding the bolt in a fork while riving", shows_it: false, show: FIXED_25, thing: "froe" }],
+      }),
+    });
+    const r = await fitSplitPanelsToLines(scenes, { keyThings: [{ name: "froe", look: "an L-shaped splitting blade" }] });
+    expect(r).toEqual({ checked: 1, fixed: 1 });
+    expect(scenes[0].splitVisual).toBe(FIXED_25);
+    expect(withLineTool(PANEL_25, LINE_25)).toBe(PANEL_25);
+    const sent = mockInvoke.mock.calls.at(-1)![0];
+    expect(sent.systemSuffix).toBe(PANEL_FIT_RULES);
+    expect(sent.userMessage).toContain(`#0 PANEL (7.0 s): said "${LINE_25}" | shows: ${PANEL_25}`);
   });
 });

@@ -8800,9 +8800,9 @@ describe("a split panel is built from its line, and keeps the tool its line name
     expect(leadIntoNext("The Japanese look people paid me for wasn't the precision work. It was the fire,")).toBeUndefined();
   });
 
-  it("414 scene 22: the panel keeps the drawknife, resting on the work; a panel that has it, or is about another sentence, is left alone", async () => {
+  it("414 scene 22: the panel keeps the drawknife, lying flat on the work; a panel that has it, or is about another sentence, is left alone", async () => {
     const { withLineTool } = await import("./shotList");
-    expect(withLineTool(SHINGLE_22, LINE_22)).toBe(`${SHINGLE_22}, a drawknife resting on the work, unattended.`);
+    expect(withLineTool(SHINGLE_22, LINE_22)).toBe(`${SHINGLE_22}, a drawknife lying flat on the work, unattended.`);
     // A panel that has the drawknife is left alone.
     const KEPT = "a pale board on a stump, one end tapered, a drawknife lying across it";
     expect(withLineTool(KEPT, LINE_22)).toBe(KEPT);
@@ -8811,7 +8811,7 @@ describe("a split panel is built from its line, and keeps the tool its line name
     const STROKES =
       "A pale oak board held flat on a work surface, one end shaved thin by drawknife strokes, wood curls resting on the board and ground nearby.";
     expect(withLineTool(STROKES, LINE_22)).toBe(
-      `${STROKES.replace(/\.$/, "")}, a drawknife resting on the work, unattended.`
+      `${STROKES.replace(/\.$/, "")}, a drawknife lying flat on the work, unattended.`
     );
     // A tool said as a figure of speech puts nothing in the picture.
     expect(withLineTool("a booth at a weekend market", "Some buyers come with an axe to grind.")).toBe(
@@ -9992,5 +9992,62 @@ describe("job 418 #19: a list of STEPS told of another time is done with that ti
     // Every list of steps stored before this fix had its setting dropped: replayed, nothing changes.
     const r = applySpokenLists(board418(), [{ sentence: 1, kind: "steps", items: STEPS }]);
     expect(r.scenes.some(s => s.listSetting)).toBe(false);
+  });
+});
+
+// ─── Round 15: a tool nobody holds is put down (job 418 #25) ─────────────────────────────────────
+
+describe("job 418 #25: a person-free panel puts its tool down and shows the holder its line names", () => {
+  // Sawdust Sam's practice film on the round-14 code (108.30-115.33 s): beside "When you rive, the bolt
+  // sits in a fork or against a stump, never in your hand", the panel was written "Oak bolt wedged
+  // upright in a stump fork, froe blade set into its top end with the handle angled, resting unattended
+  // on the work" — the MUST SHOW line's tool with the hand taken out of it. For 7 s on half the screen
+  // the froe hung on a bare wire hook, its handle out over nothing, a board peeled off with no tool in
+  // it, and the "fork" was a hole bored in the stump; flagged broken on all three draws, it shipped.
+  const LINE = "When you rive, the bolt sits in a fork or against a stump, never in your hand.";
+  const PANEL =
+    "Oak bolt wedged upright in a stump fork, froe blade set into its top end with the handle angled, resting unattended on the work.";
+  const scene25 = () =>
+    ({
+      index: 25,
+      hostPresent: true,
+      narration: "When you rive, the bolt sits in a",
+      scriptText: LINE,
+      visualPrompt: "the channel's host, exactly as in their host photo, seated in a chair talking directly to the camera",
+      showSubject: "An oak bolt wedged upright in the fork of a stump, a froe blade set into its top end and a hand on the right-angle handle",
+      splitVisual: PANEL,
+    }) as StoryboardScene;
+
+  it("the writer and the panel pass are told it, the picture maker is told it, and the hook is no longer offered", async () => {
+    const { SPLIT_PANEL_PERSON_FREE_DIRECTIVE, UNHELD_TOOL_CLAUSE, NO_FIGURES_SUFFIX } = await import("./longformVideo");
+    const { PANEL_FIT_RULES } = await import("./shotList");
+    for (const rules of [SPLIT_PANEL_PERSON_FREE_DIRECTIVE, PANEL_FIT_RULES]) {
+      expect(rules).toMatch(/lies flat on the work, a bench or the ground/);
+      expect(rules).toMatch(/only where a real one stays by itself/);
+      expect(rules).toMatch(/working pose/);
+      expect(rules).toMatch(/HOLDER the (?:narration|line) says the work sits in, on or against/);
+      expect(rules).toMatch(/run(?:s)? (?:the two )?(?:together )?into one thing/);
+      expect(rules).not.toMatch(/\b(?:froe|fork|stump|bolt|riv(?:e|ing)|club|hook)\b/i);
+    }
+    const prompt = buildStillPrompt(buildSplitRightScene(scene25()), false, undefined, undefined, true);
+    expect(prompt).toContain(UNHELD_TOOL_CLAUSE);
+    expect(prompt).toContain(NO_FIGURES_SUFFIX);
+    expect(prompt).not.toMatch(/hangs from a hook/);
+  });
+
+  it("the check names the hung tool and its first redraw is told how a tool is put down; someone at work keeps the tool's own rule", async () => {
+    const { faultRedrawFor, namedFaultClause, UNHELD_TOOL_CLAUSE, SPLIT_STRIKE_CLAUSE, CONNECTING_LINES_CLAUSE } = await import(
+      "./longformVideo"
+    );
+    expect(STILL_DEFECT_SYSTEM).toMatch(/a tool with NO hand on it that hangs in mid-air or from a hook, wire or string fixed to\s+nothing/);
+    const what = "froe hanging from a wire hook above the bolt";
+    expect(faultRedrawFor({}, { broken: true, what }, { broken: 0, writing: 0 }, new Set(), true, false)).toBe("named fault");
+    const clause = namedFaultClause(what, PANEL, false);
+    expect(clause).toContain(UNHELD_TOOL_CLAUSE);
+    expect(clause).not.toContain(CONNECTING_LINES_CLAUSE);
+    // Hands at the froe (job 414 scene 17) are still told how it is struck in.
+    expect(namedFaultClause(what, "hands splitting a bolt with a froe", true)).toContain(SPLIT_STRIKE_CLAUSE);
+    // A tool lying put down with nobody at it is no fault to name (job 418 scene 23's drawknife).
+    expect(namedFaultClause("drawknife lying across the board", "a drawknife resting across it", false)).toBeUndefined();
   });
 });

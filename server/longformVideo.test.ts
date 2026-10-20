@@ -2881,11 +2881,11 @@ describe("enhanceBrollPrompts — a split panel from its line, keeping the tool 
     expect(scenes[0].splitVisual).toBe(PHONE);
   });
 
-  it("414 scene 22: a rewrite of the result alone gets the drawknife back, resting on the work", async () => {
+  it("414 scene 22: a rewrite of the result alone gets the drawknife back, lying flat on the work", async () => {
     mockInvoke.mockResolvedValue({ text: SHINGLE } as any);
     const scenes = [panelScene(22, LINE_22, HANDS_22)];
     await enhanceBrollPrompts(scenes, baseParams);
-    expect(scenes[0].splitVisual).toBe(`${SHINGLE}, a drawknife resting on the work, unattended.`);
+    expect(scenes[0].splitVisual).toBe(`${SHINGLE}, a drawknife lying flat on the work, unattended.`);
     // The seed a redraw rewrites from is untouched.
     expect(scenes[0].splitVisualSeed).toBe(HANDS_22);
     // A rewrite that kept the tool is left as written.
@@ -2899,10 +2899,48 @@ describe("enhanceBrollPrompts — a split panel from its line, keeping the tool 
 
   it("the panel directive weighs most of the line and keeps the named tool, in neutral words", () => {
     expect(SPLIT_PANEL_PERSON_FREE_DIRECTIVE).toMatch(/a TOOL the narration says the job is done with/);
-    expect(SPLIT_PANEL_PERSON_FREE_DIRECTIVE).toMatch(/stays in the panel, resting on the work, unattended/);
+    expect(SPLIT_PANEL_PERSON_FREE_DIRECTIVE).toMatch(/stays in the panel, put down — lying flat on the work, unattended/);
     expect(SPLIT_PANEL_PERSON_FREE_DIRECTIVE).toMatch(/what MOST of it is about, by how long each part is said/);
     expect(SPLIT_PANEL_PERSON_FREE_DIRECTIVE).toMatch(/A MUST SHOW line, when given, IS that subject/);
     expect(SPLIT_PANEL_PERSON_FREE_DIRECTIVE).not.toMatch(/\b(?:shingles?|drawknife|cabin|roof|oak|poplar|back wall|froe)\b/i);
+  });
+
+  // Job 418 scene 25 (round 15): "When you rive, the bolt sits in a fork or against a stump, never in your
+  // hand." The MUST SHOW line had "a froe blade set into its top end and a hand on the right-angle
+  // handle"; the writer took the hand out and left the tool where the hand held it — "froe blade set into
+  // its top end with the handle angled, resting unattended on the work" — and "the fork of a stump" ran
+  // the line's two holders into one, drawn as a hole bored in the stump.
+  it("418 scene 25: the panel writer is told a tool nobody holds is put down, and the holder the line names is one real thing", async () => {
+    // Nothing is left "exactly as the action left it": the work is, what was in the hands is put down.
+    expect(SPLIT_PANEL_PERSON_FREE_DIRECTIVE).not.toMatch(/in place exactly as the action left it/);
+    expect(SPLIT_PANEL_PERSON_FREE_DIRECTIVE).toMatch(
+      /the work as the action left it, and whatever was in the hands put down the way a person puts it down/
+    );
+    expect(SPLIT_PANEL_PERSON_FREE_DIRECTIVE).toMatch(/NOBODY HOLDS a tool in this panel, so it lies flat on the work, a bench or the ground/);
+    expect(SPLIT_PANEL_PERSON_FREE_DIRECTIVE).toMatch(/stays standing in the work only where a real one stays by itself/);
+    expect(SPLIT_PANEL_PERSON_FREE_DIRECTIVE).toMatch(
+      /Never leave a tool in its working pose with the hand taken out \(its handle angled up, poised over the work/
+    );
+    expect(SPLIT_PANEL_PERSON_FREE_DIRECTIVE).toMatch(/hanging from anything unless the narration says it hangs/);
+    // The MUST SHOW line's own tool, held in it, is put down with the hand taken out.
+    expect(SPLIT_PANEL_PERSON_FREE_DIRECTIVE).toMatch(
+      /A MUST SHOW line, when given, IS that subject: keep it, drawn with no person and any tool in it put down/
+    );
+    expect(SPLIT_PANEL_PERSON_FREE_DIRECTIVE).toMatch(/a HOLDER the narration says the work sits in, on or against/);
+    expect(SPLIT_PANEL_PERSON_FREE_DIRECTIVE).toMatch(/written by its parts — what it is made of and how it holds the work/);
+    expect(SPLIT_PANEL_PERSON_FREE_DIRECTIVE).toMatch(/describe the first one alone, never the two run together into one thing/);
+    // Neutral words: none of the film's own things.
+    expect(SPLIT_PANEL_PERSON_FREE_DIRECTIVE).not.toMatch(/\b(?:froe|fork|stump|bolt|riv(?:e|ing)|club|hook)\b/i);
+    // The writer of that line's panel is handed it.
+    mockInvoke.mockResolvedValue({ text: "An oak bolt standing on end in a forked log, a froe lying flat on the log beside it." } as any);
+    const LINE_25 = "When you rive, the bolt sits in a fork or against a stump, never in your hand.";
+    const NEED_25 =
+      "An oak bolt wedged upright in the fork of a stump, a froe blade set into its top end and a hand on the right-angle handle";
+    const scenes = [panelScene(25, LINE_25, NEED_25)];
+    await enhanceBrollPrompts(scenes, baseParams);
+    expect(panelMessage()).toContain(SPLIT_PANEL_PERSON_FREE_DIRECTIVE);
+    expect(panelMessage()).toContain(`Scene narration: "${LINE_25}"`);
+    expect(scenes[0].splitVisual).toBe("An oak bolt standing on end in a forked log, a froe lying flat on the log beside it.");
   });
 });
 

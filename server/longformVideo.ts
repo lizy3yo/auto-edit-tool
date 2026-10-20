@@ -66,6 +66,7 @@ import {
   videoKind,
   fitPicturesToLines,
   fitSplitPanelsToLines,
+  HAND_TOOL,
   judgeSelfMoving,
   keepPanelTools,
   oneThingPanels,
@@ -238,6 +239,28 @@ export const THINGS_AT_REST_CLAUSE =
   "is cutting into anything.";
 
 /**
+ * A TOOL NOBODY HOLDS IS PUT DOWN (2026-10-20, job 418 scene 25). Under "When you rive, the bolt sits
+ * in a fork or against a stump, never in your hand", the person-free panel was written "froe blade set
+ * into its top end with the handle angled, resting unattended on the work" — a lever tool in its
+ * working pose with the hand taken out, which no real tool keeps — and `NO_FIGURES_SUFFIX` offered the
+ * picture maker one way to keep it there, "rests on a surface or hangs from a hook": all three draws
+ * came back with the froe on a bare wire hook, its handle out over nothing, refused as broken, and the
+ * last one shipped. A tool with nobody holding it lies on a surface, sits in its own holder, or stays
+ * in the work only where a real one stays by itself; it hangs only where the description hangs it.
+ * Every picture with nobody in it whose words name a tool carries it (`unheldToolClause`), and the
+ * first draw the check finds with such a tool hung or propped is redrawn told it (`namedFaultClause`).
+ * Noun-free on purpose: a tool named here as an example is a tool the picture maker could add.
+ */
+export const UNHELD_TOOL_CLAUSE =
+  "Nobody holds anything in this picture, so every tool in it is put down the way a person leaves " +
+  "one: lying on a surface — flat on the work, a bench, a table or the ground beside the work — " +
+  "resting in its own box, rack, jar or holder or across the rim of its own pot, or standing in the " +
+  "work only where a real one stays there by itself, driven in or standing in its own cut. It hangs " +
+  "only where the description hangs it, from something fixed to a wall, beam or rack — never in " +
+  "mid-air or from something attached to nothing — and it is never left standing, balanced or " +
+  "leaning in its working pose at an angle only a hand could hold.";
+
+/**
  * A REDRAW THAT CHANGES WHAT CAUSED THE FAULT (2026-10-18, the audit). A picture whose check names
  * the same fault twice used to be kept on the spot (`REDRAW_SAME_FAULTS`), since a third draw from
  * the same prompt bought nothing; the replay of 54 practice films found that the main way a picture
@@ -269,6 +292,10 @@ export const THINGS_AT_REST_CLAUSE =
  * backwards in their seats, now named by the check, `STILL_DEFECT_SYSTEM`): the same named-fault
  * reroll, told the natural pose and that the camera, never the body, keeps the face out
  * (`NATURAL_POSE_FIX`). Only in a picture with someone drawn in it — the same `atWork`.
+ *
+ * …AND SO IS A TOOL LEFT HUNG OR PROPPED UP WITH NOBODY IN THE PICTURE (2026-10-20, job 418 scene 25:
+ * a panel's froe on a bare wire hook, its handle out over nothing, broken on all three draws): told
+ * how a tool nobody holds is put down (`UNHELD_TOOL_CLAUSE`, `UNHELD_POSE` in `namedFaultClause`).
  */
 export type FaultRedraw = "at rest" | "soft print" | "named fault";
 export function faultRedrawFor(
@@ -417,6 +444,15 @@ const SHAVING_TOOL = /\b(?:draw\s?knife|drawknives|spokeshaves?|planes?|planing)
  */
 const BODY_COUNT_FAULT =
   /\b(?:extra|third|too\s+many|too\s+few|six|seven|eight)[\s-]+(?:fingers?|fingered|thumbs?|hands?|handed|arms?|armed|legs?)\b|\b(?:fingers?|thumbs?|hands?|arms?)\s+(?:fused|merged|duplicated)\b/i;
+/**
+ * A tool the check found HUNG, BALANCED OR PROPPED UP with no hand on it — left in a pose only a hand
+ * could hold (job 418 scene 25: the froe on a bare wire hook, its handle out over nothing). In a
+ * picture with nobody in it that is the one tool fault a redraw can be told the fix for: put it down
+ * (`UNHELD_TOOL_CLAUSE`). Before the rule for lines, since the "wire" such a tool hangs from connects
+ * nothing. A tool lying on the work is no such fault — with nobody at it, that is how a tool is left.
+ */
+const UNHELD_POSE =
+  /\b(?:hang(?:s|ing)?|hung|suspended|dangl(?:es|ing)|float(?:s|ing)|hover(?:s|ing)|balanc(?:ed|es|ing)|propped|lean(?:s|ing)|stand(?:s|ing)\s+(?:up|upright|on)|upright|angled|poised|mid-?air|in\s+(?:the\s+)?air|hooks?|no\s+hand|nobody\s+holding|unheld|by\s+itself|on\s+its\s+own)\b/i;
 
 /**
  * The clause the first broken draw of a tool or a line is redrawn with (`faultRedrawFor`'s "named
@@ -428,7 +464,9 @@ const BODY_COUNT_FAULT =
  * any tool's rule the same fault names. Undefined for any other fault, a fault with no
  * words, a finger or a hand too many (`BODY_COUNT_FAULT`), and a tool in a picture with nobody in it —
  * a tool with no hand on it cannot be put to work, so that frame keeps its plain reroll and then the
- * at-rest draw. Pure.
+ * at-rest draw — unless the check found that tool hung, balanced or propped up (`UNHELD_POSE`, job 418
+ * scene 25): nobody can put it to work, but it can be put down, and it is told how
+ * (`UNHELD_TOOL_CLAUSE`). Pure.
  */
 export function namedFaultClause(
   what: string | undefined,
@@ -449,7 +487,10 @@ export function namedFaultClause(
   // A person's pose (`POSE_FAULT`, job 417 scene 2) is told the natural pose and where the camera goes,
   // beside a tool's own rule when the same fault names one too.
   const pose = atWork && POSE_FAULT.test(fault) ? [NATURAL_POSE_FIX] : [];
-  if (connectingLinesClause(fault)) rules = [CONNECTING_LINES_CLAUSE];
+  // A tool hung or propped up with nobody in the picture is put down (`UNHELD_POSE`, job 418 scene 25)
+  // — never told the rule for lines because it hangs from a "wire".
+  if (!atWork && TOOL_FAULT.test(faultTool) && UNHELD_POSE.test(fault)) rules = [UNHELD_TOOL_CLAUSE];
+  else if (connectingLinesClause(fault)) rules = [CONNECTING_LINES_CLAUSE];
   else if (atWork && TOOL_FAULT.test(faultTool)) {
     const kinds = (t: string) => [
       ...(SPLITTING_TOOL.test(t) || (SPLITTING_WEDGE.test(t) && SPLIT_CUE.test(t)) ? [SPLIT_STRIKE_CLAUSE] : []),
@@ -476,6 +517,26 @@ export function namedFaultRedraw(
   if (prompt.includes(NAMED_FAULT_START)) return prompt;
   const clause = namedFaultClause(what, words, atWork);
   return clause ? `${prompt} ${clause}` : prompt;
+}
+
+/**
+ * A hand tool a picture's words name: one a line says a job is done with (`HAND_TOOL`), a bit, or a
+ * "tool" — never a word that only names the marks one left ("axe-hewn", "saw cuts", "tool marks") or
+ * what is made with one ("sawdust", "sawhorses"). Built on first use: `HAND_TOOL` is shotList's.
+ */
+let pictureTool: RegExp | undefined;
+const TOOL_MARKS = String.raw`(?![\w-]|\s+(?:marks?|strokes?|cuts?|kerfs?|scratch(?:es)?|grooves?|dust|shavings?|chips?|tracks?|scars?)\b)`;
+/**
+ * `UNHELD_TOOL_CLAUSE` (with its leading space) for a picture drawn with NOBODY in it — no hands
+ * either — whose own words name a tool: a split panel, a picture of things, the picture behind the big
+ * QR card, a redraw with nobody in it. "" for a picture of someone at work (their tool is in their
+ * hands, `TOOL_CONTACT_CLAUSE`) and for a picture that names no tool, which is never told about tools.
+ * A slice of food, pine needles and an aircraft name none (`toolWords`). Pure.
+ */
+export function unheldToolClause(scene: Pick<StoryboardScene, "humanPresent">, words: string): string {
+  if (scene.humanPresent) return "";
+  pictureTool ??= new RegExp(String.raw`\b(?:${HAND_TOOL}|tools?|(?:drill|router)\s+bits?)${TOOL_MARKS}`, "i");
+  return pictureTool.test(toolWords(words, AIRCRAFT.test(words))) ? ` ${UNHELD_TOOL_CLAUSE}` : "";
 }
 import {
   deriveStyleBible,
@@ -6238,21 +6299,37 @@ export const SPLIT_PANEL_PERSON_FREE_DIRECTIVE =
   "with.\n" +
   "IMPORTANT: when the narration's subject is a PERSON DOING SOMETHING, show the physical thing " +
   "that action happens to or leaves behind — the garment, material, tool, food, container, " +
-  "surface, or finished result — unattended and at rest, in place exactly as the action left it. " +
+  "surface, or finished result — unattended and at rest: the work as the action left it, and " +
+  "whatever was in the hands put down the way a person puts it down. " +
   "Never substitute a diagram, chart, illustration, cross-section, or anatomical rendering; the " +
   "panel is always a real photograph of real objects.\n" +
   // Job 414 scene 22 (2026-10-20): "got shaved thin at one end with a drawknife" became a finished
   // piece on its own — the tool left with the hands. `withLineTool` puts back what still gets through.
   'IMPORTANT: a TOOL the narration says the job is done with ("trimmed with scissors", "smoothed ' +
-  'with a scraper") stays in the panel, resting on the work, unattended, and the work is shown at ' +
-  "the stage the narration describes — part-done while it is being done. Never the finished result " +
-  "alone with the named tool left out.\n" +
+  'with a scraper") stays in the panel, put down — lying flat on the work, unattended — and the ' +
+  "work is shown at the stage the narration describes — part-done while it is being done. Never the " +
+  "finished result alone with the named tool left out.\n" +
+  // Job 418 scene 25 (2026-10-20): under "the bolt sits in a fork or against a stump, never in your
+  // hand", the MUST SHOW line's tool "and a hand on the handle" was kept with the hand taken out —
+  // "froe blade set into its top end with the handle angled, resting unattended on the work" — a lever
+  // tool in its working pose with nobody holding it. The picture maker hung it on a bare wire hook, and
+  // the "fork" became a hole bored in the stump. A tool nobody holds is put down (`UNHELD_TOOL_CLAUSE`
+  // says the same to the picture maker), and the holder the line names is drawn as one real thing.
+  "IMPORTANT: NOBODY HOLDS a tool in this panel, so it lies flat on the work, a bench or the ground " +
+  "beside it, or stays standing in the work only where a real one stays by itself (an axe or a wedge " +
+  "driven into wood, a saw standing in its own cut, a spade pushed into soil). Never leave a tool in " +
+  "its working pose with the hand taken out (its handle angled up, poised over the work, set at its " +
+  "working angle), in mid-air, or hanging from anything unless the narration says it hangs.\n" +
+  'IMPORTANT: a HOLDER the narration says the work sits in, on or against ("clamped in a vise", ' +
+  '"laid across two sawhorses") is in the panel holding the work, written by its parts — what it is ' +
+  "made of and how it holds the work — so it can be drawn. When the narration offers two, describe " +
+  'the first one alone, never the two run together into one thing ("a sawhorse vise").\n' +
   // Job 414 scene 4: eight seconds about a building from outside, then the first words of the next
   // sentence ("But on the back wall hung") — and the panel showed only those.
   "IMPORTANT: the narration decides the SUBJECT — what MOST of it is about, by how long each part " +
   'is said, never a few closing words that only begin the next sentence ("…, but on the shelf ' +
   'above it sat"); the original prompt only supplies wording. A MUST SHOW line, when given, IS that ' +
-  "subject: keep it, drawn with no person. If " +
+  "subject: keep it, drawn with no person and any tool in it put down. If " +
   "the original prompt is about something this narration is not about, DISCARD it entirely and " +
   'describe the narrated subject instead — here that outranks the "do not add new objects" rule.\n' +
   // Job 406 scene 19 (2026-10-18): the line offered a choice ("a guided sharpening system or a belt
@@ -6471,10 +6548,11 @@ const CONNECTING_LINE =
  * display rack, wire-rimmed glasses, a cable-knit sweater or a cable stitch, a pipe wrench or clamp, a
  * tobacco pipe — and a line the words say is NOT there. The replay found five smoke alarms described
  * "no visible wiring" or "no wires or connections" (jobs 229, 259, 381, 393, 394): told how wires run,
- * the picture maker would be handed the wires the line rules out.
+ * the picture maker would be handed the wires the line rules out. Nor a wire HOOK: job 418 scene 25's
+ * froe "hanging from a wire hook" is a tool hung up, never a lead to run to the part it serves.
  */
 const NOT_A_CONNECTING_LINE =
-  /\b(?:(?:no|without|never)\s+(?:visible\s+|exposed\s+|loose\s+|hanging\s+|trailing\s+)?(?:wires?|wiring|cables?|cords?|hoses?|pipes?)(?:\s+(?:or|and|nor)\s+\w+)?|wire[\s-]+(?:brush(?:es)?|wheels?|racks?|mesh|baskets?|shel(?:f|ves|ving)|fenc(?:e|es|ing)|whisks?|frames?|hangers?|cutters?|strippers?|wool|rimmed|framed|grilles?|grills?|grates?|guards?|display)|cables?[\s-]+(?:knit|stitch(?:es|ing)?|needles?|patterns?|cars?|ties?)|(?:chicken|barbed|baling|fence|fencing|picture|floral|craft|jewelry|jewellery|beading|armature)\s+wires?|pipe\s+(?:wrench(?:es)?|cutters?|cleaners?|clamps?)|(?:tobacco|smoking|corncob)\s+pipes?)/gi;
+  /\b(?:(?:no|without|never)\s+(?:visible\s+|exposed\s+|loose\s+|hanging\s+|trailing\s+)?(?:wires?|wiring|cables?|cords?|hoses?|pipes?)(?:\s+(?:or|and|nor)\s+\w+)?|wire[\s-]+(?:brush(?:es)?|wheels?|racks?|mesh|baskets?|shel(?:f|ves|ving)|fenc(?:e|es|ing)|whisks?|frames?|hangers?|hooks?|cutters?|strippers?|wool|rimmed|framed|grilles?|grills?|grates?|guards?|display)|cables?[\s-]+(?:knit|stitch(?:es|ing)?|needles?|patterns?|cars?|ties?)|(?:chicken|barbed|baling|fence|fencing|picture|floral|craft|jewelry|jewellery|beading|armature)\s+wires?|pipe\s+(?:wrench(?:es)?|cutters?|cleaners?|clamps?)|(?:tobacco|smoking|corncob)\s+pipes?)/gi;
 
 /**
  * `CONNECTING_LINES_CLAUSE` (with its leading space) when a picture's own words name a cable, wire,
@@ -7186,16 +7264,20 @@ export const NO_OTHER_FIGURES_SUFFIX =
   "background, no reflection of anyone, and no face anywhere in the frame. No mirror, window " +
   "glass or other shiny surface anywhere the host could be reflected in it.";
 
+// "…or hangs from a hook" was taken as the way to keep a tool up with no hand on it: job 418 scene
+// 25's froe came back on a bare wire hook, three draws running (`UNHELD_TOOL_CLAUSE`). Something
+// hangs only where its description hangs it.
 export const NO_FIGURES_SUFFIX =
   "No person is visible in this shot: no face, head, hair, shoulders, torso, or legs, no " +
   "whole or partial human figure, no silhouette, no reflection of a person, and no people in " +
   "the background. Bare hands and forearms working at the task are the ONLY human parts that " +
   "may appear, and only where the action needs them — one person's pair at most, each hand on " +
   "its own forearm, never a third hand or arm. Nothing is held up by itself: a tool or object " +
-  "with no hand on it rests on a surface or hangs from a hook — never hovering in the air or " +
-  "pressed against the work on its own. Clothing, shoes and jewellery with nobody in them hang " +
-  "on a hanger or hook, lie flat or folded, or sit on a dress form or stand — never filled out, " +
-  "standing up, stepping or moving as if someone unseen were wearing them.";
+  "with no hand on it rests on a surface or in its own holder, or hangs where the description " +
+  "hangs it — never hovering in the air, hanging from nothing, propped at an angle only a hand " +
+  "could hold, or pressed against the work on its own. Clothing, shoes and jewellery with nobody " +
+  "in them hang on a hanger or hook, lie flat or folded, or sit on a dress form or stand — never " +
+  "filled out, standing up, stepping or moving as if someone unseen were wearing them.";
 
 /**
  * Self-contained lip-sync directive — the ENTIRE InfiniteTalk host prompt (see
@@ -7774,8 +7856,11 @@ export function buildStillPrompt(
   // A LINE ENDS AT THE PART IT SERVES (`connectingLinesClause`, job 413 scene 29: the spark plug wire
   // drawn running into the carburetor's fuel inlet) — only when the picture's own words name one.
   const lines = !aggressive ? connectingLinesClause(`${shown ?? ""} ${visual}`) : "";
+  // A TOOL NOBODY HOLDS IS PUT DOWN (`unheldToolClause`, job 418 scene 25: a panel's froe hung on a
+  // bare wire hook, its handle out over nothing) — a picture with nobody in it whose words name a tool.
+  const unheld = !aggressive ? unheldToolClause(scene, `${shown ?? ""} ${visual}`) : "";
   return withAllowedText(
-    `${lead}${visual}${scrubLegibleWriting(namedLookClause(scene))}${look}${place}${another}${outside}${lines}${item}${angleSuffix}${personSuffix}${memory}${app} ${amateurIphoneLook(subject, motion)} ${framing} ${noFigures} ${NO_BOOK_SUFFIX}`,
+    `${lead}${visual}${scrubLegibleWriting(namedLookClause(scene))}${look}${place}${another}${outside}${lines}${unheld}${item}${angleSuffix}${personSuffix}${memory}${app} ${amateurIphoneLook(subject, motion)} ${framing} ${noFigures} ${NO_BOOK_SUFFIX}`,
     scene.pictureText,
     scene.blurPrint
   );

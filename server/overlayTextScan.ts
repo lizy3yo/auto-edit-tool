@@ -109,6 +109,18 @@ export const STILL_DEFECT_SYSTEM =
   "body (a hand in a vise's jaws)\n" +
   "- a tool held or angled in a way no real user holds it, or whose path runs into the table, the " +
   "bench or a hand; fingers in front of or right beside a blade, saw, bit or cutting edge\n" +
+  // 2026-10-20, job 418 scene 25: a person-free panel's froe with a bare wire hook on its handle end,
+  // balanced across the bolt's top with the handle out over nothing — the panel had asked for it "set
+  // into its top end with the handle angled, resting unattended". Named in words the redraw can read
+  // (`namedFaultClause`, `UNHELD_POSE`), so it is told how a tool nobody holds is put down. A tool on a
+  // wall's peg or rack, in its holder, or left in the work where it really stays is right — job 418's
+  // own back wall "hung an axe, a froe, and a drawknife".
+  "- a tool with NO hand on it that hangs in mid-air or from a hook, wire or string fixed to " +
+  "nothing, or stands, balances or leans in its working pose at an angle it could not keep by " +
+  "itself (a handle sticking up or out over nothing from a blade that is not deep in the work); a " +
+  "tool lying on a surface or across the rim of its pot, sitting in its holder, hanging on a wall, " +
+  "peg or rack, or left standing in the work where a real one stays by itself (an axe or a wedge " +
+  "driven into wood, a saw in its own cut, a spade in the soil) is right\n" +
   // Job 406 scene 9 passed with a chisel pushed straight at the other hand flat on the board. A
   // kitchen knife is not named: it cuts down beside the guide hand, and one being sharpened has
   // fingers on its flat — the line above already covers fingers right beside an edge.
@@ -190,7 +202,8 @@ export const STILL_DEFECT_SYSTEM =
   'Return ONLY this JSON, no prose: {"overlay":true|false,"broken":true|false,"writing":true|false,"what":"..."}\n' +
   'what: 3-8 words naming the worst defect and where it sits (e.g. "white caption bar across ' +
   'the bottom", "cutting board floating above the table"); a fault in a tool, cable, wire or hose ' +
-  'names it (e.g. "saw blade resting on top of the plank", "power cord running into the tap"); a ' +
+  'names it (e.g. "saw blade resting on top of the plank", "chisel hanging from a hook fixed to ' +
+  'nothing", "power cord running into the tap"); a ' +
   'person in a pose nobody takes starts "unnatural pose:" and says who and how (e.g. "unnatural ' +
   'pose: two people sitting backwards in their seats"); "" when both are false.';
 
