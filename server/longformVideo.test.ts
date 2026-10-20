@@ -4655,6 +4655,27 @@ describe("guardPitchVisuals", () => {
     expect(mine.showSubject).toBe("the roof of a cedar feeder");
   });
 
+  it("outside the pitch a word that only has 'book' in it is no book: the panel stays (job 120 scene 52's seed)", () => {
+    // The old guard read "notebook" as a book and swapped this panel for the cutaway beside it.
+    const NOTES =
+      "A handwritten ledger or notebook open on the sewing room work table, showing simple arithmetic and time notations in neat handwriting, natural light falling across the page.";
+    const scenes = [
+      sc(52, {
+        hostPresent: true,
+        scriptText:
+          "That works out to about eleven dollars an hour, which surprised me plenty, seeing as it's the plainest thing I sew.",
+        splitVisual: NOTES,
+      }),
+      sc(53, { stillImage: true, visualPrompt: "a worn cotton bread cloth draped over a kitchen rail" }),
+    ];
+    expect(guardPitchVisuals(scenes, SUBJECT, ["Plain Sewing: 50 Simple Projects for the Home"])).toEqual([]);
+    expect(scenes[0].splitVisual).toBe(NOTES);
+    // …while a real book under the same line, one it never speaks of, still goes
+    scenes[0].splitVisual = "a sewing pattern book open on the work table";
+    expect(guardPitchVisuals(scenes, SUBJECT)).toEqual([52]);
+    expect(scenes[0].splitVisual).not.toMatch(/book|bread cloth/);
+  });
+
   it("leaves host shots, cover reveals, assets, clean prompts and non-pitch beats alone", () => {
     const scenes = [
       sc(1, {
