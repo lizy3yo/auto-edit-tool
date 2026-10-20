@@ -18435,6 +18435,10 @@ async function runUnifiedPipeline(
   // Enrich every b-roll visualPrompt with sensory detail, lighting mood, and (for video)
   // a motion cue before any clip is submitted. Runs in parallel; failures are silent.
   // (Over-long scenes were already split + re-voiced by splitOverlongScenes, above the balancers.)
+  // The host plan above sends host beats to the pictures after the season-and-hour step ran, and a
+  // beat the shot list once wrote still carries its own words: those hold their line's season and
+  // hour too (`holdLineSeasons` — a picture already holding one is left as it is).
+  holdLineSeasons(scenes, params.keyThings);
   const enhanceResult = await enhanceBrollPrompts(scenes, params);
   if (enhanceResult.failedScenes.length) {
     appendJobWarning(jobId, enhanceWarningFor(enhanceResult));

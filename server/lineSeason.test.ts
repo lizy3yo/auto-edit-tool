@@ -84,6 +84,19 @@ describe("the season a line sets its picture in (lineSeason)", () => {
     expect(lineSeason("What finally saved me was a little spring-loaded pair of snips.")).toBeUndefined();
     expect(lineSeason("he has quietly worked out that he has about seventeen summers left.")).toBeUndefined();
   });
+
+  it("a fall that is a tumble is never autumn; 'of the spring' is the coil, 'of spring' the season", () => {
+    // A home-safety line about a fall is about the tumble: "in autumn" on a grab bar would be held.
+    expect(lineSeason("She broke her hip in the fall, and she was alone for two days.")).toBeUndefined();
+    expect(lineSeason("During the fall she hit her head on the edge of the tub.")).toBeUndefined();
+    expect(lineSeason("Most of them happen on the stairs, and the worst is over in the fall itself.")).toBeUndefined();
+    expect(lineSeason("She never got over the shock of the fall.")).toBeUndefined();
+    expect(lineSeason("The tension of the spring holds the gate shut.")).toBeUndefined();
+    // The season still reads where nothing speaks of a tumble — job 404's robins, a market in the fall.
+    expect(lineSeason("Every fall, the robins that worked your lawn all summer seem to vanish.")?.season).toBe("autumn");
+    expect(lineSeason("In the fall I sell more of these than anything else.")?.season).toBe("autumn");
+    expect(lineSeason("And that first robin of spring you’ll be so happy to see in March?")?.season).toBe("spring");
+  });
 });
 
 describe("the hour a line sets its picture at (lineHour)", () => {
@@ -112,6 +125,19 @@ describe("the hour a line sets its picture at (lineHour)", () => {
     expect(lineHour("Don't run the dryer at night.")).toBeUndefined();
     expect(lineHour("It hunts at dusk and sleeps through the night.")).toBeUndefined();
     expect(lineHour("It took three evenings, and it paid me about a dollar an hour.")).toBeUndefined();
+  });
+
+  it("the night beside the day holds none — but the small hours 'in the morning' are the night", () => {
+    // Two moments: the picture is the sanding, by day.
+    expect(lineHour("Last night I glued up the panel, and this morning I sanded it smooth.")).toBeUndefined();
+    expect(lineHour("It runs all night and shuts off by itself in daylight.")).toBeUndefined();
+    // Job 412 scene 27 and job 400 scene 11: "in the morning" is the small hours' own words.
+    expect(
+      lineHour(
+        "And three in the morning sits close enough to her pre-dawn window that her body starts stirring right when yours is at its deepest."
+      )
+    ).toEqual({ hour: "night", said: "at night" });
+    expect(lineHour("the kitchen table at two in the morning when the house is too quiet.")).toEqual({ hour: "night", said: "at night" });
   });
 });
 
@@ -163,6 +189,38 @@ describe("a picture whose own words name none gets its line's (holdLineSeasons)"
     // Without that key thing it is the season.
     expect(holdLineSeasons([latch])).toBe(1);
     expect(latch.showSubject).toBe("the gate latch on the post, in spring");
+  });
+
+  it("a key thing's name is matched on the season word only — never its 'early' — and 'fall' is autumn", () => {
+    const tomato = pic(5, "In early summer the vines need tying every week.", "tomato vines tied to a stake in the bed");
+    expect(holdLineSeasons([tomato], [{ name: "early girl tomato", look: "a round red tomato" }])).toBe(1);
+    expect(tomato.showSubject).toBe("tomato vines tied to a stake in the bed, in early summer");
+    const mat = pic(6, "In the fall I set the mats out by every door.", "a rubber mat by the back door");
+    expect(holdLineSeasons([mat], [{ name: "fall mat", look: "a ribbed black rubber mat" }])).toBe(0);
+    expect(mat.showSubject).toBe("a rubber mat by the back door");
+  });
+
+  it("run again — as it is right before the prompt writer — it adds nothing to a picture it held", () => {
+    // Every form the step writes reads as held on the second run: the night, before dawn, dusk, a
+    // season with its "late", autumn.
+    const b = [
+      pic(1, "Close the bedroom doors at night.", "a white bedroom door in the hallway"),
+      pic(2, "She is up before dawn every day.", "a kettle on the stove"),
+      pic(3, "Walk down to the coop at dusk, once the girls have gone up to roost.", "the coop door"),
+      pic(4, "The sap only runs in late winter, when the nights still freeze.", "a bucket hung on a maple tap"),
+      pic(5, "In the fall I sell more of these than anything else.", "a folding table of wooden bowls"),
+    ];
+    expect(holdLineSeasons(b)).toBe(5);
+    const after = b.map(s => s.showSubject);
+    expect(after).toEqual([
+      "a white bedroom door in the hallway, at night",
+      "a kettle on the stove, before dawn",
+      "the coop door, at dusk",
+      "a bucket hung on a maple tap, in late winter",
+      "a folding table of wooden bowls, in autumn",
+    ]);
+    expect(holdLineSeasons(b)).toBe(0);
+    expect(b.map(s => s.showSubject)).toEqual(after);
   });
 });
 

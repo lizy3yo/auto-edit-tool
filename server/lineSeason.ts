@@ -57,9 +57,27 @@ const STILL_A_TIME = new Set(
  */
 const NOT_ITS_SEASON =
   /\b(?:before|until|till|by|for|ahead of|after|since|than|unlike|instead of|rather than|compared (?:to|with)|ready for|prepare for|preparing for|get ready for)\s+(?:(?:the|this|next|last|that|another)\s+)?(?:(?:early|late|mid)[-\s]?)?$|\b(?:expecting|expected|due|planned|planning|scheduled|booked)\s+(?:in|this|next|for)\s+(?:the\s+)?(?:(?:early|late|mid)[-\s]?)?$/i;
-/** "spring" and "fall" are a season only in a frame: "in the fall", "this spring", "late fall", "spring and summer". */
+/**
+ * "spring" and "fall" are a season only in a frame: "in the fall", "this spring", "late fall", "spring
+ * and summer", "the first robin of spring". "Of THE spring" / "of the fall" is the coil, the water or the
+ * tumble ("the tension of the spring", "the shock of the fall"), never the season.
+ */
 const SEASON_FRAME_BEFORE =
-  /\b(?:in|during|through|throughout|over|this|last|next|every|each|that|one|all|early|late|mid|of)\s+(?:the\s+)?(?:(?:early|late|mid)[-\s]?)?$|\b(?:spring|summer|autumn|fall|winter)\s+(?:and|or|to|into|through)\s+$/i;
+  /\b(?:(?:in|during|through|throughout|over)\s+(?:the\s+)?|(?:this|last|next|every|each|that|one|all|early|late|mid|of)\s+)(?:(?:early|late|mid)[-\s]?)?$|\b(?:spring|summer|autumn|fall|winter)\s+(?:and|or|to|into|through)\s+$/i;
+/**
+ * A "fall" that is a TUMBLE: its sentence speaks of falling down or getting hurt ("she broke her hip in
+ * the fall", "during the fall she hit her head on the tub"). A home-safety line about a fall is about the
+ * tumble, never autumn — and "in autumn" added to a grab bar beside the tub would be a wrong season the
+ * picture check then holds the picture to. Read in the sentence that holds the word.
+ */
+const TUMBLE =
+  /\b(?:fell|fallen|slip(?:s|ped|ping|pery)?|tripp(?:ed|ing)|tumbl\w*|stumbl\w*|hips?|wrists?|injur\w*|hurt|broke|broken|fractur\w*|bruis\w*|ladders?|stairs?|staircase|step ?stools?|landed|(?:lose|loses|lost|losing)\s+(?:\w+\s+)?balance|grab bars?|bath ?tubs?|tub|ambulance|hospital)\b/i;
+/** The sentence holding position `at`. */
+const sentenceAt = (text: string, at: number) => {
+  const start = Math.max(text.lastIndexOf(".", at), text.lastIndexOf("!", at), text.lastIndexOf("?", at)) + 1;
+  const ends = [".", "!", "?"].map(c => text.indexOf(c, at)).filter(i => i >= 0);
+  return text.slice(start, ends.length ? Math.min(...ends) : text.length);
+};
 const SEASON_FRAME_AFTER = /^\s+(?:and|or|to|into|through)\s+(?:(?:early|late)\s+)?(?:spring|summer|autumn|fall|winter)\b/i;
 const QUALIFIER = /\b(early|late|mid)[-\s]?$/i;
 /** A word ruling it out, a few words back in the same clause: "it never sings in winter", "don't run it at night". */
@@ -99,6 +117,7 @@ export function lineSeason(text: string | undefined): HeldSeason | undefined {
     if (!m[2] && next && !/^[,.;:!?—)]/.test(after) && !STILL_A_TIME.has(next)) continue;
     const ambiguous = /^(?:spring|fall)$/i.test(word) && !m[2];
     if (ambiguous && !SEASON_FRAME_BEFORE.test(before) && !SEASON_FRAME_AFTER.test(after)) continue;
+    if (/^fall$/i.test(word) && TUMBLE.test(sentenceAt(text, at))) continue;
     if (NOT_ITS_SEASON.test(before)) continue;
     if (RULED_OUT.test(clauseBefore(text, at))) continue;
     const q = QUALIFIER.exec(before)?.[1]?.toLowerCase();
@@ -133,7 +152,9 @@ const HOURS: { hour: Hour; re: RegExp }[] = [
  * as said — every night hour reads "at night" or "before dawn", which is what the picture shows. Job
  * 405 scene 28, "three in the morning sits close enough to her pre-dawn window", is the night twice.
  * Dawn and dusk together are the low light of either, held as the first; the night beside another
- * hour holds none ("it hunts at dusk and sleeps through the night"). Pure.
+ * hour holds none ("it hunts at dusk and sleeps through the night"), and neither does the night beside
+ * the day ("last night I glued it up, and this morning I sanded it": the picture is the sanding, by
+ * day) — the small hours "in the morning" are the night's own words, not the day. Pure.
  */
 export function lineHour(text: string | undefined): HeldHour | undefined {
   if (!text?.trim()) return undefined;
@@ -149,8 +170,12 @@ export function lineHour(text: string | undefined): HeldHour | undefined {
   found.sort((a, b) => a.at - b.at);
   const kinds = new Set(found.map(f => f.hour));
   if (kinds.has("night") && kinds.size > 1) return undefined;
+  if (kinds.has("night") && DAY_WORDS.test(text.replace(SMALL_HOURS_ALL, " "))) return undefined;
   return { hour: found[0].hour, said: found[0].said };
 }
+
+/** The day said beside the night: "this morning", "that afternoon", "by day", "in daylight" — never bare "day". */
+const DAY_WORDS = /\b(?:mornings?|afternoons?|noon|midday|daylight|daytime|by day|during the day)\b/i;
 
 /**
  * Signs of a warm or a cold season in a picture's own words, said any way at all ("a green summer
@@ -213,7 +238,8 @@ export function holdLineSeasons(scenes: StoryboardScene[], keyThings?: KeyThing[
       season &&
       !WARM_SIGNS.test(own) &&
       !COLD_SIGNS.test(own) &&
-      !season.said.split(" ").some(w => thingWords.has(w))
+      // The season word itself, as the line may say it ("fall" is autumn), never its "early"/"late".
+      ![season.season, ...(season.season === "autumn" ? ["fall"] : [])].some(w => thingWords.has(w))
     )
       add.push(`in ${season.said}`);
     const hour = lineHour(line);
