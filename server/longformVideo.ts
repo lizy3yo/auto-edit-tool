@@ -67,6 +67,7 @@ import {
   fitPicturesToLines,
   fitSplitPanelsToLines,
   judgeSelfMoving,
+  pushedThingMoves,
   keepPanelTools,
   oneThingPanels,
   ownTypedPicture,
@@ -3623,7 +3624,11 @@ export function assignSplitMotion(
   if (!pacing.splitScreen.motion.enabled || acc <= 0) return 0;
   const motionTarget = pacing.splitScreen.motion.share * acc;
   for (const s of spreadOrder(
-    scenes.filter(s => s.hostPresent && s.splitVisual && s.splitSelfMoving === true)
+    // Judged moving, and never a cart or a door on its way (`pushedThingMoves`): a panel judged
+    // before that backup — job 417's cart "rolling toward the rear" — would glide along by itself.
+    scenes.filter(
+      s => s.hostPresent && s.splitVisual && s.splitSelfMoving === true && !pushedThingMoves(s.splitVisual)
+    )
   )) {
     if (motionSeconds >= motionTarget) break;
     if (Math.abs(motionSeconds + dur(s) - motionTarget) < Math.abs(motionSeconds - motionTarget)) {

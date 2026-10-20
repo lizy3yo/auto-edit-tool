@@ -388,6 +388,97 @@ export const contactToolWork = (show: string): boolean =>
   CONTACT_TOOL_WORK.test(show.replace(/\bcutting (?:boards?|mats?|tables?)\b/gi, "board"));
 
 /**
+ * A thing that rolls or travels only when a person pushes, pulls, carries or rides it. A golf
+ * cart, a motorbike, a station wagon and a horse-drawn cart move under power of their own (or an
+ * animal's) and are left to the judge.
+ */
+const WHEELED_THING = String.raw`(?:(?<!\b(?:golf|go|horse|horse-drawn|ox|donkey|pony|mine)[\s-])carts?|troll(?:ey|ie)s?(?![\s-]?(?:cars?|bus(?:es)?)\b)|wheelchairs?|strollers?|prams?|pushchairs?|baby (?:buggy|buggies|carriages?)|wheelbarrows?|(?:bi|tri)cycles?|(?<!\b(?:dirt|motor|pit|quad|e|electric)[\s-])bikes?|skateboards?|kick scooters?|sleds?|sledges?|toboggans?|(?<!\b(?:station|covered)\s)wagons?|hand trucks?|dollies|luggage|suitcases?|baggage|carry-ons?)`;
+/**
+ * A door, gate or drawer — it swings or slides only when someone moves it (2026-10-01, the
+ * operator: "a door needs hand so it should not move"). An automatic, revolving, garage, lift or
+ * train door has a motor and is left to the judge.
+ */
+const SWUNG_THING = String.raw`(?:(?<!\b(?:automatic|revolving|elevator|lift|garage|train|subway|bus)\s)(?:doors?|gates?)|drawers?)`;
+/** Words saying a wheeled thing is on its way — said AFTER it ("a cart being pushed", "…, rolling"). */
+const ON_ITS_WAY = new RegExp(
+  String.raw`\b(?:roll(?:s|ing)?(?![\s-](?:pins?|hills?|fields?|countryside|meadows?)\b)|rolled(?![\s-]up\b)|pushed|pulled|wheeled|dragged|towed|hauled|carried|ridden|pedall?ed|trundl(?:es|ing|ed)|glid(?:es|ing|ed)|coast(?:s|ing)|careen(?:s|ing|ed)|mov(?:es|ing)|on the move|in motion|underway|making its way|working its way|on its way|(?:head(?:s|ing)|go(?:es|ing)|com(?:es|ing)|travell?(?:s|ing)|rac(?:es|ing)|speed(?:s|ing)|zoom(?:s|ing)|whizz(?:es|ing)|cruis(?:es|ing)|rattl(?:es|ing)|clatter(?:s|ing))\s+(?:down|up|along|toward|towards|across|through|past|by|round|around|into|out|back|over|off|away|forward|in))\b`,
+  "gi"
+);
+/**
+ * Words saying a door, gate or drawer is swinging or sliding — only these: a door "pulled away"
+ * from its frame or with "a rolled towel" under it is not on its way anywhere.
+ */
+const SWINGING = new RegExp(
+  String.raw`\b(?:(?:swing(?:s|ing)?|swung|slid(?:e|es|ing)?|slam(?:s|ming|med)?|creak(?:s|ing)?|pushed|pulled|kicked|flung)\s+(?:open|shut|closed|out)|(?:open|clos)(?:es|ing)\s+(?:by itself|on its own|slowly))\b`,
+  "gi"
+);
+/** Someone doing the moving, said BEFORE it ("pushing the cart", "wheeling her suitcase"). */
+const MOVING_IT = new RegExp(
+  String.raw`\b(?:push(?:es|ing|ed)?|pull(?:s|ing|ed)?|wheel(?:s|ing|ed)?|drag(?:s|ging|ged)?|tow(?:s|ing|ed)?|haul(?:s|ing|ed)?|rid(?:e|es|ing)|rode|pedall?(?:s|ing|ed)?|roll(?:s|ing|ed)?|steer(?:s|ing|ed)?|trundl(?:e|es|ing|ed))\s+(?:the|a|an|her|his|their|its|your|my|our|one|another|that|this)\s+(?:(?!(?:of|on|in|at|with|by|from|near|beside|under|behind|and|or)\b)[\w-]+\s+){0,3}(?:${WHEELED_THING}|${SWUNG_THING})\b`,
+  "i"
+);
+/**
+ * What really moves on its own — an engine, an animal, water, fire, smoke, steam, weather. Named
+ * between the pushed thing and the motion words, it is what those words are about ("a shopping cart
+ * by the stream, water moving over the stones"); named as the agent ("pulled by a horse") or the
+ * mover ("a tractor pulling a wagon"), it is the one moving.
+ */
+const SELF_MOVER = String.raw`\b(?:traffic|cars?|trucks?|lorr(?:y|ies)|bus(?:es)?|vans?|tractors?|trains?|trams?|(?:air|aero)?planes?|airliners?|jets?|helicopters?|boats?|ships?|ferr(?:y|ies)|motorcycles?|motorbikes?|water|waves?|tides?|rivers?|streams?|creeks?|current|rain|raindrops|snow(?:flakes)?|sleet|hail|wind|breeze|gusts?|smoke|steam|fog|mist|clouds?|flames?|fire|sparks?|embers?|leaves|grass|branches|birds?|dogs?|cats?|horses?|ponies|donkeys?|oxen|cows?|cattle|sheep|lambs?|goats?|pigs?|chickens?|hens?|ducks?|geese|deer|fish|squirrels?|bees?|butterfl(?:y|ies)|animals?)\b`;
+const NAMES_SELF_MOVER = new RegExp(SELF_MOVER, "i");
+const BY_A_SELF_MOVER = new RegExp(String.raw`^\W*by\s+(?:[\w-]+\s+){0,3}?${SELF_MOVER}`, "i");
+/** Something powered that carries the pushed thing along — the carrier is what moves. */
+const CARRIED_ALONG =
+  /\b(?:conveyors?|carousels?|escalators?|travelators?|moving (?:walkways?|sidewalks?|belts?)|baggage claim|(?:baggage|luggage) belts?)\b/i;
+const WHEELED_THING_G = new RegExp(String.raw`\b${WHEELED_THING}\b`, "gi");
+const SWUNG_THING_G = new RegExp(String.raw`\b${SWUNG_THING}\b`, "gi");
+
+/**
+ * The first of `motion`'s words in `after` that are about the thing just named: never an adjective
+ * of something else ("a rolled towel", "the moving van"), never past a thing that really moves on
+ * its own, and never a move made BY one ("pulled by a horse"). Null when there is none. Pure.
+ */
+function itsOwnMove(after: string, motion: RegExp): RegExpMatchArray | null {
+  for (const move of Array.from(after.matchAll(motion))) {
+    const before = after.slice(0, move.index!);
+    if (NAMES_SELF_MOVER.test(before)) return null;
+    if (/\b(?:a|an|the)\s+$/i.test(before)) continue;
+    if (BY_A_SELF_MOVER.test(after.slice(move.index! + move[0].length))) return null;
+    return move;
+  }
+  return null;
+}
+
+/**
+ * The words show a thing that moves only when someone pushes, pulls, carries or rides it — a cart
+ * or trolley, a wheelchair, a stroller, a wheelbarrow, a bicycle, luggage, a door — on its way:
+ * "rolling", "being pushed", "moving down the aisle", or someone "pushing the cart". Such a picture
+ * is NEVER a video of something moving by itself: the moving cutaway and the split panel show no one,
+ * so the thing would glide along on its own. Job 417 (2026-10-19): the self-moving judge said yes to
+ * "a stainless-steel airline beverage cart being pushed past a woman passenger…" and to a split
+ * panel's "Beverage cart positioned midway down the narrow aisle … rolling toward the rear." — a
+ * real render plays that panel as a cart rolling down the aisle with nobody pushing it; job 402
+ * had made "beverage cart with soda can on it wheeled down cabin aisle" a video. The model's
+ * judgement (`SELF_MOVING_SYSTEM`) says so first; this is its backup, as `contactToolWork` is for
+ * a tool biting in. A thing merely standing there ("a parked stroller", "a rolling suitcase by the
+ * door"), or carried by something powered (a conveyor, a carousel), or moved by an engine, an
+ * animal, water or the wind is left to the judge. Pure.
+ */
+export function pushedThingMoves(show: string | undefined): boolean {
+  for (const sentence of (show ?? "").split(/(?<=[.!?])\s+/)) {
+    if (CARRIED_ALONG.test(sentence)) continue;
+    const doer = MOVING_IT.exec(sentence);
+    if (doer && !NAMES_SELF_MOVER.test(sentence.slice(0, doer.index))) return true;
+    for (const [things, motion] of [
+      [WHEELED_THING_G, ON_ITS_WAY],
+      [SWUNG_THING_G, SWINGING],
+    ] as const)
+      for (const m of Array.from(sentence.matchAll(things)))
+        if (itsOwnMove(sentence.slice(m.index! + m[0].length), motion)) return true;
+  }
+  return false;
+}
+
+/**
  * What kind of VIDEO a shot of `show` may be — the one rule every path that makes a moving shot
  * goes through (the shot list, the context groups, the storyboard parser, the plan gate's top-up
  * and fixes, and the dispatcher right before a clip is paid for). A video is only ever of something
@@ -412,7 +503,10 @@ export function videoKind(
     // A person anywhere in the words (`showsPerson`: "an older couple walking"); the raw person
     // words too, so a pronoun read as an animal's never turns a picture into a video.
     SHOWS_PERSON.test(show) ||
-    showsPerson(show)
+    showsPerson(show) ||
+    // A cart, a stroller or a door on its way: someone is moving it, whatever the judge said
+    // (job 417's "beverage cart being pushed past…").
+    pushedThingMoves(show)
   )
     return "none";
   return opts.selfMoving === false ? "none" : "object";
@@ -4569,12 +4663,16 @@ const SELF_MOVING_MODEL = () =>
 const SELF_MOVING_SYSTEM = `You read the pictures planned for a video, one per line, and decide for
 each whether something in it MOVES BY ITSELF in the moment it shows — movement a camera would catch
 over a few seconds with no person causing it: a flame, smoke, steam, flowing or falling water, rain
-or snow falling, leaves or grass in the wind, traffic going past.
+or snow falling, leaves or grass in the wind, a car, bus, train or plane going past under its own
+power.
 
 Say NO when a person would have to move it (a door, a gate, a drawer, a lid, a tool, a pot being
 stirred, a page turned), when something that can move is shown still (a parked car, a closed tap, an
 unlit stove, a calm pond, a device that only detects or displays), and when nothing moves at all.
-When unsure, NO.
+Anything that moves only when someone pushes, pulls, carries or rides it — a cart or trolley, a
+wheelchair, a stroller, a wheelbarrow, a bicycle, a shopping cart, luggage — is NO whatever the words
+say ("rolling", "being pushed", "moving along"): the video shows nobody, so it would glide along by
+itself. When unsure, NO.
 
 Answer with JSON only: {"moving":[the ids that move by themselves]}`;
 
@@ -4593,14 +4691,19 @@ function selfMovingCandidates(scenes: StoryboardScene[]): { id: number; text: st
   return out;
 }
 
-/** Put the answer on the pictures that were asked about (the others keep theirs). Pure. */
+/**
+ * Put the answer on the pictures that were asked about (the others keep theirs). A thing someone has
+ * to push on its way is never moving by itself, whatever the model answered (`pushedThingMoves`: job
+ * 417's split panel of a cart "rolling toward the rear" was judged yes, and a split panel is the one
+ * place nothing else stops it — `assignSplitMotion` trusts this flag). Pure.
+ */
 export function applySelfMoving(scenes: StoryboardScene[], asked: number[], moving: number[]): void {
   const yes = new Set(moving);
   for (const id of asked) {
     const s = scenes[id];
     if (!s) continue;
-    if (s.hostPresent) s.splitSelfMoving = yes.has(id);
-    else s.selfMoving = yes.has(id);
+    if (s.hostPresent) s.splitSelfMoving = yes.has(id) && !pushedThingMoves(s.splitVisual);
+    else s.selfMoving = yes.has(id) && !pushedThingMoves(s.showSubject ?? s.visualPrompt);
   }
 }
 

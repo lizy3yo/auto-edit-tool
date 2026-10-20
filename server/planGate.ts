@@ -54,6 +54,7 @@ import {
   MOTION_MIN_SEC,
   MOVING_PICTURE_MAX_SEC,
   contactToolWork,
+  pushedThingMoves,
   SHOT_MIN_SEC,
   splitPicture,
   settleVideoKind,
@@ -1702,7 +1703,8 @@ export function settleMotion(scenes: StoryboardScene[]): number {
   let changed = 0;
   for (const s of scenes) {
     if (s.hostPresent) {
-      if (s.splitMotion && s.splitSelfMoving !== true) {
+      // A person-free panel of a cart or a door on its way would show it gliding by itself.
+      if (s.splitMotion && (s.splitSelfMoving !== true || pushedThingMoves(s.splitVisual))) {
         s.splitMotion = undefined;
         changed++;
       }

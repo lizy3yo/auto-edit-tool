@@ -1094,6 +1094,80 @@ describe("what moves by itself is judged per picture, not from a word list (2026
   });
 });
 
+describe("a thing someone pushes never moves by itself (job 417, 2026-10-19)", () => {
+  // The judge said yes to a cart "being pushed" and to a person-free split panel of a cart "rolling
+  // toward the rear": a real render would play a cart gliding down the aisle with nobody pushing it.
+  const PANEL_28 =
+    "Beverage cart positioned midway down the narrow aisle between passenger seat rows in an airline cabin, stocked with cups, cans, and bottles, rolling toward the rear.";
+  const PICTURE_3 =
+    "a stainless-steel airline beverage cart being pushed past a woman passenger sitting alone in an empty seat row near the front of the cabin";
+  const WING_13 = "the wing of an airliner, seen from a passenger's seat through the cabin window, climbing above clouds";
+
+  it("finds a cart, a stroller, luggage or a door on its way, whatever the words", async () => {
+    const { pushedThingMoves } = await import("./shotList");
+    for (const show of [
+      PANEL_28,
+      PICTURE_3,
+      "a flight attendant pushing the beverage cart back toward the galley past rows of passengers with drinks", // 417 #29
+      "beverage cart wheeled slowly down the narrow aisle", // 402 #2
+      "beverage cart with soda can on it wheeled down cabin aisle", // 402 #16, a moving cutaway
+      "the beverage cart rolling away down the aisle in the background", // 399, 410
+      "solid wood front door with brass handle swinging open, dog's nose waiting at the threshold", // 357 #10
+      "a wheelchair rolling down a hospital corridor",
+      "a stroller being pushed along the boardwalk",
+      "a wheelbarrow of soil trundling across the yard",
+      "an old bicycle coasting down a country lane",
+      "a suitcase moving across the station floor",
+      "a shopping cart rattling across the empty parking lot",
+      "someone wheeling a suitcase through the terminal",
+      "a kitchen drawer sliding open",
+    ])
+      expect(pushedThingMoves(show), show).toBe(true);
+  });
+
+  it("leaves alone what moves under its own power, a thing standing still, and what a carrier moves", async () => {
+    const { pushedThingMoves } = await import("./shotList");
+    for (const show of [
+      WING_13, // 417 #13: an engine, judged moving, stays
+      "an airplane climbing through clouds in flight", // 402 #11
+      "smoke rising from a smoldering mattress",
+      "a car driving down a wet road at dusk",
+      "a golf cart driving along the fairway",
+      "a motorbike speeding down the highway",
+      "a beverage cart parked in the galley, steam rising from a coffee pot on it",
+      "a rolling suitcase standing by the front door",
+      "a parked stroller beside a fountain, water splashing in the basin",
+      "a shopping cart left beside the stream, water moving over the stones",
+      "suitcases coming round the baggage carousel",
+      "a cart pulled by a horse down a country lane",
+      "a tractor pulling a hay wagon across the field",
+      "automatic doors sliding open at the shop entrance",
+      "the sliding glass door opening onto the deck",
+      // Stored storyboards (jobs 12, 242): a door with no swing in its words.
+      "A closed wooden door to a spare room, a rolled towel wedged tightly underneath its base, resting on worn floorboards.",
+      "A close view of pine wood at a door frame showing a split where the factory strike plate was pulled away from the frame",
+    ])
+      expect(pushedThingMoves(show), show).toBe(false);
+  });
+
+  it("is never a video, and the judge's yes on it is overruled — a plane and steam keep theirs", async () => {
+    const { videoKind, applySelfMoving, parseSelfMoving } = await import("./shotList");
+    expect(videoKind(PANEL_28, "object", { selfMoving: true })).toBe("none");
+    expect(videoKind("beverage cart with soda can on it wheeled down cabin aisle", "object")).toBe("none");
+    expect(videoKind(WING_13, "object", { selfMoving: true })).toBe("object");
+    const scenes = [
+      scene(1, "a", { showSubject: PICTURE_3 }),
+      scene(2, "b", { showSubject: WING_13 }),
+      scene(3, "c", { hostPresent: true, splitVisual: PANEL_28 }),
+      scene(4, "d", { hostPresent: true, splitVisual: "steam curling up from a pot on the stove" }),
+    ];
+    const asked = [0, 1, 2, 3];
+    applySelfMoving(scenes, asked, parseSelfMoving('{"moving":["#0","#1","#2","#3"]}', asked));
+    expect(scenes.map(s => s.selfMoving)).toEqual([false, true, undefined, undefined]);
+    expect(scenes.map(s => s.splitSelfMoving)).toEqual([undefined, undefined, false, true]);
+  });
+});
+
 describe("every picture shows what its line is about (Frederick's job 259)", () => {
   it("keeps only real fixes and puts the new picture, its key things and the video rule on it", async () => {
     const { parsePictureFixes, applyPictureFixes } = await import("./shotList");

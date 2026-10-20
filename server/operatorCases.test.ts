@@ -9728,3 +9728,52 @@ describe("round 15: the person the lines follow, and 'you', keep one look (jobs 
     ]);
   });
 });
+
+describe("round 15: a cart someone pushes never rolls by itself (job 417 scenes 3 and 28, job 402)", () => {
+  // The self-moving judge said yes to "a … beverage cart being pushed past …" and to the split
+  // panel "Beverage cart … rolling toward the rear." A real render plays a person-free panel judged
+  // moving as a video: a cart gliding down the aisle with nobody pushing it (402 had the same).
+  const PANEL_28 =
+    "Beverage cart positioned midway down the narrow aisle between passenger seat rows in an airline cabin, stocked with cups, cans, and bottles, rolling toward the rear.";
+  const panel = (index: number, splitVisual: string, over: Partial<StoryboardScene> = {}) =>
+    ({ index, narration: "n", visualPrompt: "host", hostPresent: true, audioDuration: 7.64, splitVisual, ...over }) as StoryboardScene;
+
+  it("417 (2:12): the cart panel is judged still and never chosen to move; a steam panel still moves", async () => {
+    const { applySelfMoving } = await import("./shotList");
+    const { assignSplitMotion } = await import("./longformVideo");
+    const { DEFAULT_LONGFORM_PACING, resolveLongformPacing } = await import("@shared/pacing");
+    const pacing = resolveLongformPacing({
+      ...DEFAULT_LONGFORM_PACING,
+      splitScreen: { enabled: true, hostShare: 0.5, motion: { enabled: true, share: 0.5 } },
+    });
+    // The model answered yes to both.
+    const scenes = [panel(1, PANEL_28), panel(2, "steam curling up from a kettle on the stove")];
+    applySelfMoving(scenes, [0, 1], [0, 1]);
+    expect(scenes.map(s => s.splitSelfMoving)).toEqual([false, true]);
+    assignSplitMotion(scenes, pacing);
+    expect(scenes.map(s => !!s.splitMotion)).toEqual([false, true]);
+    // A storyboard judged before the backup (splitSelfMoving already true) is not moved either.
+    const stored = [panel(1, PANEL_28, { splitSelfMoving: true })];
+    assignSplitMotion(stored, pacing);
+    expect(stored[0].splitMotion).toBeUndefined();
+  });
+
+  it("402 #16: a moving cutaway of a cart 'wheeled down cabin aisle' becomes a photo; a plane climbing stays a video", async () => {
+    const { settleMotion } = await import("./planGate");
+    const cart = pic(16, "and the cart keeps moving", "beverage cart with soda can on it wheeled down cabin aisle", {
+      stillImage: false,
+      objectMotion: true,
+      selfMoving: true,
+    });
+    const plane = pic(11, "somewhere over the middle of the country", "an airplane climbing through clouds in flight", {
+      stillImage: false,
+      objectMotion: true,
+      selfMoving: true,
+    });
+    const split = panel(28, PANEL_28, { splitSelfMoving: true, splitMotion: true });
+    expect(settleMotion([cart, plane, split])).toBe(2);
+    expect(cart.stillImage).toBe(true);
+    expect(plane.stillImage).toBe(false);
+    expect(split.splitMotion).toBeUndefined();
+  });
+});
