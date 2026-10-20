@@ -14,16 +14,21 @@
  */
 import { insideView } from "./cutOpen";
 import { PART_VIEW } from "./namedLooks";
-import type { KeyThing, MemoryRef, StoryboardScene, ThingLook } from "@shared/types";
-import { REDRAW_CAMERAS } from "./pictureVariety";
+import type { KeyThing, MemoryRef, PlaceLook, StoryboardScene, ThingLook } from "@shared/types";
+import { nearCopyCameraIndex, REDRAW_CAMERAS } from "./pictureVariety";
 import {
   BUILD_STAGES,
+  anotherOfItsKind,
   keyThingsIn,
+  namesDevice,
   nearlySameSubject,
+  othersOfKindIn,
   repeatsTopic,
   sameSubject,
   showsScreen,
+  topicWords,
   viewIndexOf,
+  withoutPersonLines,
 } from "./shotList";
 import { namesSomeone } from "./hostLook";
 
@@ -53,8 +58,11 @@ export const MEMORY_VIEWS = [
 
 /**
  * The earlier cutaways `s` is drawn from: the first picture of its key thing (the memory) and the
- * latest one before `s` when that is a different picture. Empty when `s` shows no key thing or is
- * its first picture. Pure — unit-tested.
+ * latest one before `s` when that is a different picture, then the memory of every other key thing
+ * in it — at most `MAX_MEMORY_REFS`. A list item after its list's group picture is drawn from that
+ * picture (`listSetFor`), a picture gathering the list just said from its items' pictures
+ * (`listGroupFor`), a picture of no key thing from the one it continues (`keylessContinued`). Empty
+ * when nothing earlier shows what it shows. Pure — unit-tested.
  */
 export function memorySourcesFor(
   scenes: StoryboardScene[],
@@ -64,20 +72,32 @@ export function memorySourcesFor(
   // close-up is the same machine, cutter or pile as in the group (`listSetFor`).
   const set = listSetFor(scenes, s);
   if (set) return [set];
-  if (!s.keyThing || !drawn(s)) return [];
+  // A picture that GATHERS the items of the list just said is drawn from each item's own picture
+  // (`listGroupFor`, job 414 scene 8).
+  const group = listGroupFor(scenes, s);
+  if (group) return group;
+  // A picture of NO key thing is drawn from the picture it CONTINUES, and only that (`keylessContinued`).
+  if (!s.keyThing) {
+    const from = source(s) ? keylessContinued(scenes, s) : undefined;
+    return from ? [from] : [];
+  }
+  if (!drawn(s)) return [];
   // A LIST ITEM is its own thing: it is drawn from a key thing's memory only when its OWN words name
   // that thing, or it is a part of it (`partOf`). Dale's job 397: "Smalls, about $10 to $40.
   // Coasters, ornaments, small cutting boards." — the coasters and the ornaments both inherited the
   // pile of small pieces as their key thing, were drawn from that pile picture, and came back as the
-  // same picture twice.
-  if (!ownKeyThing(s)) return [];
+  // same picture twice. Only the key thing it INHERITED lends nothing: the other key things its own
+  // description names still lend theirs, below (job 412 scene 4, "ankle," keeps the bed).
+  const own = ownKeyThing(s);
   // A SCREEN picture gets its item's memory for what is ON the screen only (`SCREEN_ITEM_VIEW`): with
   // none, Dale's bookcase listing showed four random items (job 306); told to draw "the SAME" board
   // as an object, the picture maker built the tablet out of it (job 295). A screen is still never a
   // memory SOURCE (below).
   const i = scenes.indexOf(s);
   if (i <= 0) return [];
-  // A list item is never drawn from another item's picture: each item is its own thing.
+  // A list item is never drawn from another item's picture: each item is its own thing — but a STEP
+  // is drawn from the steps before it in its own list (`sameSteps`): they are done to one thing; and an
+  // item of ANOTHER list lends only the thing its own words name (below).
   // …nor is a screen ever a memory SOURCE: the thing on it is a small photo, not the thing.
   // …nor a picture FURTHER ALONG than this one (`laterStage`): build videos open on the finished
   // piece, and Hank's job 268 drew "hands drilling a hole into a charred cedar block" from the hook's
@@ -95,30 +115,240 @@ export function memorySourcesFor(
   // 402 scene 33 drew its cookie packet from scene 29's, a hand passing the packet to a passenger, and
   // the hand came along under the card — for 19.6 s a hand held the QR code.
   const backdrop = !!s.qrHero && !s.coverHero && !s.assetImageUrl && !s.hostPresent;
-  const before = scenes
+  const fit = scenes
     .slice(0, i)
     .filter(
       x =>
         source(x) &&
         !isScreen(x) &&
-        !(s.listCut && x.listCut) &&
+        !(s.listCut && x.listCut && sameList(scenes, x, s) && !sameSteps(scenes, x, s)) &&
         !laterStage(x, s) &&
         !x.memoryUnfit &&
         !insideView(x.showSubject) &&
         !insideView(x.visualPrompt) &&
         !(backdrop && withSomeone(x))
     );
+  const before = fit.filter(x => !(s.listCut && x.listCut && !sameSteps(scenes, x, s)));
   const out: StoryboardScene[] = [];
   const add = (x: StoryboardScene | undefined) => {
     if (x && !out.includes(x) && out.length < MAX_MEMORY_REFS) out.push(x);
   };
-  // Its own thing: the memory (`memoryOf`) and the latest picture before it.
-  const same = before.filter(x => shows(x, s.keyThing!));
-  add(memoryOf(same, s.keyThing));
-  add(same[same.length - 1]);
-  // Every other key thing in it: that thing's memory (the heater beside the mattress).
-  for (const t of s.otherKeyThings ?? []) add(memoryOf(before.filter(x => shows(x, t)), t));
+  // Its own thing: the memory (`memoryOf`) and the latest picture before it. Never a PLACE or the
+  // weather (`lendsNoPicture`): job 411's lawn handed scene 2's whole yard to every picture set on it.
+  // Never the DEVICE a screen picture is filed under: its references are what is ON the screen, and the
+  // device is "an ordinary real device" (`SCREEN_ITEM_VIEW`) — job 412 scene 15, the step "run it back,"
+  // on the phone's screen, would have been handed the phone's own picture as "the item for sale".
+  if (own && !(isScreen(s) && namesDevice(own))) {
+    const same = lendsNoPicture(own) ? [] : before.filter(x => shows(x, own));
+    add(memoryOf(same, own));
+    // …the latest before it, or — marked to continue — the picture its topic continues (`topicPictureBefore`):
+    // job 412 scene 8 ("cat continuing steady walk across owner's body in bed") came after a list cut out
+    // of its beat, "ankle, knee, hip, ribs", and was drawn from the "ribs" close-up as its latest picture
+    // and as the one it continued, so its camera and its checks looked at a paw while it copied scene 3.
+    const chain = s.sameShot && !s.listCut ? topicPictureBefore(scenes, s) : undefined;
+    add(chain && same.includes(chain) ? chain : same[same.length - 1]);
+  }
+  // Every other key thing in it: that thing's memory (the heater beside the mattress) — a place's
+  // never (job 411 scene 16: "a green lawn in a Gulf Coast yard" drawn from the northern lawn in snow).
+  // A LIST ITEM KEEPS THEM whatever its own key thing lends: job 413 scene 31, the step "drain it
+  // outside," filed under the gas can, "the host's hands draining gasoline from the mower into the red
+  // gas can", gave up the mower's memory with the can's, was drawn from no picture at all and came back
+  // with a black-deck mower where every other mower picture had the faded red deck; job 412 scene 4,
+  // "ankle," under the cat it only inherited, keeps the bed of scene 2. Never from a picture that shows
+  // the thing an item only inherited, though: handed the pile, a coaster is drawn as the pile (Dale's
+  // job 397).
+  // A list item showing a DEVICE (a phone, a tablet, a laptop, its screen) whose own thing lends it
+  // nothing — one it only inherited, or the device itself — keeps only the device's memory: anything
+  // else it names may be what the screen shows, and it has no screen view to say so (`memoryViewFor`).
+  // Asked of the device in its words, not of `isScreen`: "the wood-grain tablet …, its glowing screen
+  // showing an Etsy-style white page: a grid of square product photos with the walnut and maple board"
+  // names no app or listing. Job 295 scene 4, that "Etsy," filed under the device with the cutting board
+  // in its words, would be told "draw the SAME cutting board … from a different camera position" — the
+  // instruction under which the picture maker built the tablet out of the board (job 295); job 412
+  // scene 15, the step "run it back," on the phone's screen, would be handed the nightstand, the cat and
+  // the bed as "the item for sale". Before list items kept the other things' memory, both had none.
+  // An item of ANOTHER list lends a list item the thing its own words name, as any picture of it would:
+  // job 414 scene 20, the step "and rived the boards along those same lines," levering a froe, has the
+  // froe's item picture ("a froe,", scene 6) to follow when the froe's next picture (scene 17) failed its
+  // check — it was drawn from none and came back an all-metal L. Never an item of its own list (above).
+  const onDevice =
+    !!s.listCut &&
+    (!own || namesDevice(own)) &&
+    namesDevice(s.hostPresent ? s.splitVisual ?? "" : s.showSubject ?? s.visualPrompt ?? "");
+  for (const t of s.otherKeyThings ?? []) {
+    if (lendsNoPicture(t) || (onDevice && !namesDevice(t))) continue;
+    const lends = (x: StoryboardScene) => before.includes(x) || namesItemThing(x.scriptText ?? x.narration, t);
+    add(memoryOf(fit.filter(x => lends(x) && shows(x, t) && (!!own || !shows(x, s.keyThing!))), t));
+  }
   return out;
+}
+
+/**
+ * Whether picture `x` is an earlier STEP of the same spoken list of steps as `s` — every picture from
+ * `x` to `s` is an item of that list. Steps are done to one thing, so one is drawn from the steps
+ * before it (job 413 scenes 31-32: the gas can drained into, then stored sealed). Pure.
+ */
+function sameSteps(scenes: StoryboardScene[], x: StoryboardScene, s: StoryboardScene): boolean {
+  return x.listKind === "steps" && s.listKind === "steps" && sameList(scenes, x, s);
+}
+
+/** Whether picture `x` is an earlier item of the same spoken list as `s`: every picture from `x` to `s` is a list item. Pure. */
+function sameList(scenes: StoryboardScene[], x: StoryboardScene, s: StoryboardScene): boolean {
+  const [a, b] = [scenes.indexOf(x), scenes.indexOf(s)];
+  if (a < 0 || a >= b) return false;
+  for (let k = a; k <= b; k++) if (!scenes[k].listCut) return false;
+  return true;
+}
+
+/**
+ * THE PICTURE A TOPIC CONTINUES, BY ITS CHAIN (round 14, job 412 scene 8). A picture marked to continue
+ * (`sameShot`) continues the last picture of its topic — not whatever sits right before it. A spoken
+ * list cut out of the middle of one beat (`applySpokenLists`) leaves the beat's later part after the
+ * list: "She walks the full length of you, | ankle, | knee, | hip, | ribs, | steady as a tightrope
+ * walker…" — scene 8 continues scene 3, and the "ribs" close-up right before it is an insert. So the
+ * walk back skips the list's items and its group picture (`listSet`), and an operator's image or a book
+ * cover set in between; it stops at a host take or a split screen, where a topic ends
+ * (`breakTopicsAtHostTakes`). A list item keeps the picture right before it: items are never inserts in
+ * their own list.
+ * The list's LAST ITEM is still what it continues when the picture's words are about that item, not
+ * the picture before the list (`sharedWords`: no fewer of its words). Job 352 scene 170 ("…a rough oak
+ * board's side edge with a strip of rough brown-grey bark…", "which is bark edge left along the side")
+ * carries on from the item "or a little wane," described as nearly the same close-up; paired with
+ * the cull bins before the list, the one copy a viewer could see would go unchecked — so would job 352
+ * scene 117 after the end-grain close-up, and job 392 scene 32 after the necklace held to the window.
+ * Scene 8 shares five words with scene 3 and two with the "ribs" close-up. With no picture before the
+ * list to continue, the last item is it, as before. Undefined when what it reaches is not a drawn
+ * full-frame picture. Pure.
+ */
+export function topicPictureBefore(scenes: StoryboardScene[], s: StoryboardScene): StoryboardScene | undefined {
+  const i = scenes.indexOf(s);
+  if (i <= 0) return undefined;
+  let j = i - 1;
+  let item: StoryboardScene | undefined;
+  if (!s.listCut)
+    while (j >= 0 && (scenes[j].listCut || scenes[j].listSet || scenes[j].assetImageUrl || scenes[j].coverHero)) {
+      if (!item && scenes[j].listCut && source(scenes[j])) item = scenes[j];
+      j--;
+    }
+  const x = j >= 0 ? scenes[j] : undefined;
+  const topic = x && source(x) ? x : undefined;
+  if (!item) return topic;
+  return topic && sharedWords(topic, s) > sharedWords(item, s) ? topic : item;
+}
+
+/** Words that say nothing of what a picture is about: framing, and the little words. */
+const FRAMING_WORDS = new Set(
+  (
+    "a an the of in on at to by for from into onto with and or its it his her their this that one " +
+    "up close closer view wide seen shot picture frame filling detail"
+  ).split(" ")
+);
+
+/** A description's subject words, any view taken off, each cut to its stem ("walking" = "walk"). */
+const subjectStems = (text: string): Set<string> =>
+  new Set(
+    topicWords(text)
+      .toLowerCase()
+      .replace(/['’]s\b/g, "")
+      .replace(/[^a-z0-9]+/g, " ")
+      .split(" ")
+      .filter(w => w && !FRAMING_WORDS.has(w))
+      .map(w => {
+        const stem = w.replace(/(?:ing|ed|s)$/, "");
+        return stem.length >= 3 ? stem : w;
+      })
+  );
+
+/** How many of `s`'s subject words picture `x`'s description shares too (`subjectStems`). Pure. */
+export function sharedWords(x: StoryboardScene, s: StoryboardScene): number {
+  const theirs = subjectStems(pictureWords(x));
+  let n = 0;
+  subjectStems(pictureWords(s)).forEach(w => theirs.has(w) && n++);
+  return n;
+}
+
+/**
+ * A CONTINUATION OF NO KEY THING IS DRAWN FROM WHAT IT CONTINUES (round 14, job 413 scenes 15-16). "the
+ * host on the phone at the workbench calling the city office" ran past its limit and its second part
+ * repeated the words with a view ("…, a close-up of one detail of it filling the frame"). Every
+ * continuation safeguard asked for a key thing, and the call named none: no reference to the picture it
+ * continued, no concrete camera, and nothing made it wait for that picture — the two were drawn at once.
+ * It came back as the same over-the-shoulder shot, and the phone was a corded desk phone in one and a
+ * smartphone in the other, in the same call. The picture it continues is the latest earlier picture
+ * whose words it repeats once any view is taken off (`repeatsTopic`), else — marked to continue — the
+ * last picture of its topic (`topicPictureBefore`). It lends how the people and things in it look, never
+ * its framing (`continuedMomentClause` in longformVideo.ts).
+ * Never for a list item (each is its own thing), a screen or a split panel. Never from a picture no other
+ * picture is drawn from: a screen, one further along, one whose check said its subject is missing, one
+ * seen cut open, one filed under a place (a place lends no picture, `lendsNoPicture`), or — behind the QR
+ * card — one with someone in it. Never from a picture of SOMEONE ELSE (`samePeople`): job 409 scene 19,
+ * "the host speaking thoughtfully at his desk in the study", is marked to continue past a list to scene
+ * 14, "a person in their sixties sitting alone in the quiet study" — lent that picture, the host would
+ * be drawn in the other person's clothes. Nor from one showing a key thing this picture names only as
+ * ANOTHER of its kind (`othersOfKind`): a wild cat is never drawn from the pet's picture. Pure.
+ */
+export function keylessContinued(scenes: StoryboardScene[], s: StoryboardScene): StoryboardScene | undefined {
+  const memo = keylessMemo?.scenes === scenes ? keylessMemo.of : undefined;
+  if (memo?.has(s)) return memo.get(s);
+  const out = findKeylessContinued(scenes, s);
+  memo?.set(s, out);
+  return out;
+}
+
+/**
+ * `keylessContinued`'s answers while one `attachMemory` pass reads its film. Its sources, camera,
+ * partner and own memory each ask again, and every answer is a walk back over the whole film: on a
+ * 496-picture film of no key things (job 159) one pass blocked the server for 3.5-4 s where it had
+ * taken 0.9 s (1.3 s with this). Read only inside that pass, whose film does not change while it
+ * runs; cleared after.
+ */
+let keylessMemo: { scenes: StoryboardScene[]; of: Map<StoryboardScene, StoryboardScene | undefined> } | undefined;
+
+function findKeylessContinued(scenes: StoryboardScene[], s: StoryboardScene): StoryboardScene | undefined {
+  const i = scenes.indexOf(s);
+  if (i <= 0 || s.keyThing || s.listCut || !source(s) || isScreen(s)) return undefined;
+  const backdrop = !!s.qrHero && !s.coverHero && !s.assetImageUrl && !s.hostPresent;
+  const another = (s.othersOfKind ?? []).map(o => o.name).filter(t => !s.otherKeyThings?.includes(t));
+  const lends = (x: StoryboardScene) =>
+    source(x) &&
+    !isScreen(x) &&
+    !laterStage(x, s) &&
+    !x.memoryUnfit &&
+    !insideView(x.showSubject) &&
+    !insideView(x.visualPrompt) &&
+    !lendsNoPicture(x.keyThing) &&
+    !(backdrop && withSomeone(x)) &&
+    samePeople(x, s) &&
+    !another.some(t => shows(x, t));
+  const words = pictureWords(s);
+  // The words first: nearly every picture fails there, before the patterns `lends` reads.
+  for (let j = i - 1; j >= 0; j--) {
+    const x = scenes[j];
+    if (source(x) && repeatsTopic(pictureWords(x), words) && lends(x)) return x;
+  }
+  const chain = s.sameShot ? topicPictureBefore(scenes, s) : undefined;
+  return chain && lends(chain) ? chain : undefined;
+}
+
+/**
+ * Who a picture shows by name: someone else (`otherPerson`, in its own words), the host at work
+ * (`brollHostLook` / `brollHostRef`), or undefined — nobody, or someone it does not say.
+ */
+const whoIsIn = (x: StoryboardScene): string | undefined =>
+  x.otherPerson?.trim()
+    ? `other:${x.otherPerson.trim().toLowerCase()}`
+    : x.brollHostLook || x.brollHostRef
+      ? "host"
+      : undefined;
+
+/**
+ * Whether two pictures can be one moment for the people in them: both name the same person, or at most
+ * one of them names anyone. The host and someone else, or two different people, never are (job 409
+ * scenes 14 and 19). Pure.
+ */
+export function samePeople(a: StoryboardScene, b: StoryboardScene): boolean {
+  const [x, y] = [whoIsIn(a), whoIsIn(b)];
+  return !x || !y || x === y;
 }
 
 /** The words a picture is drawn by: a split's panel description, else its own. */
@@ -201,9 +431,10 @@ export function lastPictureBefore(scenes: StoryboardScene[], s: StoryboardScene)
  *
  * Returns the latest of `s`'s memory pictures whose words `s` repeats once any view is taken off
  * (`repeatsTopic` — job 403 scene 14 repeats scene 10, 11 s and three pictures later), else, for a
- * picture marked to continue (`sameShot`) whose words were rewritten, the picture right before it.
- * Undefined for a list item drawn from its group picture and a screen, whose framing is set apart
- * already. Pure.
+ * picture marked to continue (`sameShot`) whose words were rewritten, the last picture of its topic
+ * (`topicPictureBefore` — past a list cut out of its beat, job 412 scene 8). A picture of no key thing
+ * has that one picture as its memory (`keylessContinued`). Undefined for a list item drawn from its
+ * group picture and a screen, whose framing is set apart already. Pure.
  */
 export function continuedPicture(
   scenes: StoryboardScene[],
@@ -217,8 +448,8 @@ export function continuedPicture(
     .filter(x => repeatsTopic(pictureWords(x), words))
     .sort((a, b) => scenes.indexOf(b) - scenes.indexOf(a))[0];
   if (byWords) return byWords;
-  const before = scenes[i - 1];
-  return s.sameShot && sources.includes(before) ? before : undefined;
+  const before = s.sameShot ? topicPictureBefore(scenes, s) : undefined;
+  return before && sources.includes(before) ? before : undefined;
 }
 
 /**
@@ -241,11 +472,13 @@ export function recomposeFrom(
  * The picture the near-copy check ALWAYS lays beside `s`, whatever the fingerprints say
  * (`nearCopyCandidates`' `always`): what it is drawn from as the picture it must not repeat
  * (`recomposeFrom`), else — a picture with no memory link — the latest earlier picture whose words it
- * repeats, else, marked to continue (`sameShot`), the picture right before it. That is the check a
+ * repeats, else, marked to continue (`sameShot`), the last picture of its topic. That is the check a
  * copy drawn from WORDS still meets: job 405 scene 8 and job 401 scenes 3 and 5 copied their memory
  * twice, were drawn from words with no reference, and shipped as the same composition unchecked.
  * Never a split panel: a split is never a memory source, and panels meet the near-copy check through
- * their fingerprints (`nearCopyCandidates`). Pure.
+ * their fingerprints (`nearCopyCandidates`). Marked to continue, it is the last picture of its topic
+ * (`topicPictureBefore`), never a list item cut out of the beat in between: job 412 scene 8 was paired
+ * with the "ribs" close-up and shipped as scene 3's shot again, unflagged. Pure.
  */
 export function nearCopyPartnerFor(
   scenes: StoryboardScene[],
@@ -261,8 +494,7 @@ export function nearCopyPartnerFor(
     const x = scenes[j];
     if (source(x) && !isScreen(x) && repeatsTopic(pictureWords(x), words)) return x;
   }
-  const before = scenes[i - 1];
-  return s.sameShot && source(before) ? before : undefined;
+  return s.sameShot ? topicPictureBefore(scenes, s) : undefined;
 }
 
 /**
@@ -289,18 +521,35 @@ export function repeatedPicture(
  * view names, else the next after the camera of the picture it repeats — and never that picture's
  * own. Job 405 scenes 22 and 24 both said "a close-up of one detail of it" (a host glimpse cut one
  * picture in two), were both drawn close up from the same reference, and came back as one picture
- * twice. Any other picture reads its own view (-1 for none). Pure.
+ * twice. Any other picture reads its own view (-1 for none).
+ * A picture of NO key thing that continues one with words of its own (`keylessContinued`) has no memory
+ * view to fall back on (`memoryViewFor`), and drawn from that picture with no camera it would copy its
+ * framing, so it too takes a concrete camera, never the one of the picture it continues: the view its
+ * own words name, else — a small or close-framed subject (`smallSubject`) — the close-up in turn, else
+ * the other side (`SIDE_CAMERA`), which keeps a whole subject whole where a close-up of one detail
+ * would leave most of what its words describe out. Pure.
  */
 export function continuationCameraIndex(scenes: StoryboardScene[], s: StoryboardScene, depth = 0): number {
   const own = viewIndexOf(pictureWords(s).replace(/[\s.]+$/, ""));
   const from = depth < 8 ? repeatedPicture(scenes, s) : undefined;
-  if (!from) return own - 1;
+  if (!from) {
+    const cont = depth < 8 && !s.keyThing ? continuedPicture(scenes, s) : undefined;
+    if (!cont) return own - 1;
+    const was = continuationCameraIndex(scenes, cont, depth + 1);
+    const small = smallSubject(s);
+    if (own > 0) return own - 1 !== was ? own - 1 : nearCopyCameraIndex(1, was, small);
+    if (small || was === SIDE_CAMERA) return nearCopyCameraIndex(1, was, small);
+    return SIDE_CAMERA;
+  }
   const prev = continuationCameraIndex(scenes, from, depth + 1);
   const n = REDRAW_CAMERAS.length;
   let k = own > 0 ? own - 1 : (prev + 1) % n;
   if (k === prev) k = (k + 1) % n;
   return k;
 }
+
+/** Where the camera from the other side ("seen from the other side, from low down") is in `REDRAW_CAMERAS`. */
+const SIDE_CAMERA = REDRAW_CAMERAS.findIndex(c => /\bother side\b/.test(c));
 
 /** What the still loop does with the same-thing check's answer on a memory picture (`sameThingMove`). */
 export type SameThingMove = "pass" | "redraw" | "words" | "flag";
@@ -393,10 +642,14 @@ export function listItemsAround(
  */
 export function ownKeyThing(s: StoryboardScene): string | undefined {
   if (!s.keyThing) return undefined;
-  // A STEP of making the thing is about that thing whatever its words call it ("oil it,"): it is
-  // drawn from the thing's memory, and only at the same or an earlier stage (`laterStage`). A step
-  // with no stage builds nothing ("and read the label.") and keeps the list-item rule below.
-  if (s.listCut && s.listKind === "steps" && s.buildStage) return s.keyThing;
+  // A STEP is about the thing it is done to, whatever its words call it ("oil it,", "store it
+  // sealed,"): steps are done to ONE thing, never separate things like the items of a list of things.
+  // Job 413 scenes 31-32, "drain it outside, store it sealed," — both filed under the gas can, neither
+  // naming it — came back as two different cans, the first beside a black-deck mower where every other
+  // picture had the faded red one. A step of making the thing is drawn only from pictures of it at the
+  // same or an earlier stage (`laterStage`); a step with no stage builds nothing ("and read the label.")
+  // and is drawn from the thing as it is.
+  if (s.listCut && s.listKind === "steps") return s.keyThing;
   if (s.listCut && !s.partOf && !wordsName(s.scriptText ?? s.narration ?? "", s.keyThing)) return undefined;
   return s.keyThing;
 }
@@ -731,7 +984,9 @@ export function keyThingLookFor(
   makes = true
 ): string | undefined {
   const own = ownKeyThing(s);
-  const thing = own ? things?.find(k => k.name === own) : undefined;
+  // A place's look goes in only where the picture is set in that same place (`placeLookClause`): told
+  // "HOW THE LAWN LOOKS", a lawn in another region would be drawn as the northern one (job 411 scene 16).
+  const thing = own && !lendsNoPicture(own) ? things?.find(k => k.name === own) : undefined;
   // A look that describes an INSIDE (`insideView`) is no look a camera can hold: job 403's main thing
   // was written "the toilet's internal porcelain passage behind the bowl, a smooth curved S-shaped
   // channel", and a picture drawn by it — the toilet lifted off the floor included — was told to show
@@ -782,7 +1037,8 @@ export function otherThingLooksFor(
 ): Map<string, string> {
   const looks = new Map<string, string>();
   for (const k of things ?? []) {
-    if (k.name === s.keyThing) continue;
+    // A place's look is held to the place the picture is set in (`placeLooks`), never lent for words.
+    if (k.name === s.keyThing || lendsNoPicture(k.name)) continue;
     const look = otherThingLookFor(s, k.name, things, makes);
     if (look) looks.set(k.name, look);
   }
@@ -811,7 +1067,9 @@ const namedKindIs = (scene: StoryboardScene, name: string) =>
  */
 export function otherThingLooksClause(scene: StoryboardScene): string {
   if (scene.memoryRefUrls?.length) return "";
-  const named = (scene.otherThingLooks ?? []).filter(t => !namedKindIs(scene, t.name));
+  // A thing that stands in the place the picture is set in says its look there already (`placeLooks`).
+  const placed = new Set((scene.placeLooks ?? []).map(p => p.name));
+  const named = (scene.otherThingLooks ?? []).filter(t => !namedKindIs(scene, t.name) && !placed.has(t.name));
   if (!named.length) return "";
   const list = named.map(t => `the ${t.name}: ${t.look}`).join("; ");
   return named.length > 1
@@ -841,6 +1099,26 @@ export function hiddenInside(s: StoryboardScene, things: KeyThing[] | undefined)
  */
 export function keyThingLookClause(scene: StoryboardScene): string {
   return `${ownThingLookClause(scene)}${otherThingLooksClause(scene)}`;
+}
+
+/**
+ * ANOTHER ONE OF ITS KIND, TOLD APART (`scene.othersOfKind`, job 412 scenes 23-26). A picture whose
+ * words name a key thing only as another one of its kind — "a wild cat" in a video about one house
+ * cat — gets none of that thing's pictures or look, and is told in so many words that it is not the
+ * one shown before: drawn from its own words, the prompt writer's rewrite may still carry the props
+ * list's coat and markings. Never for a thing the picture also shows plainly. Pure.
+ */
+export function anotherOfItsKindClause(scene: StoryboardScene): string {
+  const shown = new Set([scene.keyThing, ...(scene.otherKeyThings ?? [])]);
+  return (scene.othersOfKind ?? [])
+    .filter(o => !shown.has(o.name) && o.said.trim())
+    .map(
+      o =>
+        ` ANOTHER ONE OF ITS KIND: this picture shows ${o.said.trim()} — not the ${o.name} shown in this ` +
+        `video's other pictures, nor a copy of it. Draw only what this picture's own words describe, ` +
+        `with a look of its own.`
+    )
+    .join("");
 }
 
 /** The line for its OWN key thing's look (`keyThingLook`), as it always was. */
@@ -899,6 +1177,118 @@ export function listSetFor(scenes: StoryboardScene[], s: StoryboardScene): Story
   let i = scenes.indexOf(s) - 1;
   while (i >= 0 && scenes[i].listCut) i--;
   return i >= 0 && scenes[i].listSet ? scenes[i] : undefined;
+}
+
+/*
+ * THE GROUP AFTER A LIST IS DRAWN FROM ITS ITEMS (round 14, job 414 scene 8). "But on the back wall hung
+ * | an axe, | a froe, | and a drawknife, | and the steel in those three was the one thing that homestead
+ * could not grow." Each item had its own picture — the froe correct, a flat blade with an upright wooden
+ * handle at one end — and the picture under "those three" was filed under the key thing all three were
+ * filed under ("steel tools"). Its memory was that thing's first picture about it and the latest one,
+ * both the drawknife close-up: the axe and the froe were drawn from the words alone, and the froe came
+ * back a bare flat bar two seconds after the viewer saw it right. The list's items are the very things
+ * the group shows, so the group is drawn from each item's own picture (`listGroupFor`), told to draw
+ * each as that same one (`LIST_GROUP_VIEW`). Replayed over the 350 stored storyboards: two pictures —
+ * this one, and job 407 scene 7 under the same words (whose items were key things of their own, so it
+ * was drawn from them already).
+ */
+
+/** The camera position of a picture that gathers a list's items, drawn from each item's own picture. */
+export const LIST_GROUP_VIEW =
+  "the items together in one picture, where this picture's own words put them — never one of the item pictures again";
+
+/**
+ * Words of a line that gather the items just said: "those three", "all four", "all of them", "each of
+ * them", "the two of them". Never a bare "both" ("both hands") or "none of those", which says the
+ * opposite.
+ */
+const GATHERS =
+  /\b(?:those|these|all|both)\s+(?:two|three|four|five|six|seven|eight|nine|ten)\b|\b(?:all|each|both)\s+of\s+(?:them|those|these)\b|\bthem\s+all\b|\bthe\s+(?:two|three|four|five|six|seven|eight|nine|ten)\s+of\s+them\b/i;
+
+/** Words in front of a list item that say nothing of what it is: joining words, articles, counts, owners. */
+const ITEM_LEAD =
+  /^(?:(?:and|or|plus|then|a|an|the|some|any|one|two|three|four|five|six|my|your|his|her|their|our|its|this|that|these|those|each|every)\s+)+/i;
+
+/** One word, singular: "coasters" → "coaster", "boxes" → "box", "berries" → "berry". */
+const singular = (w: string) =>
+  /(?:ss|us|is)$/.test(w)
+    ? w
+    : /ies$/.test(w)
+      ? `${w.slice(0, -3)}y`
+      : /(?:ches|shes|xes|zes|sses)$/.test(w)
+        ? w.slice(0, -2)
+        : /s$/.test(w)
+          ? w.slice(0, -1)
+          : w;
+
+/**
+ * The THING a list item's own words name, singular: "and a drawknife," → "drawknife", "Coasters," →
+ * "coaster", "two keepsake boxes" → "keepsake box". Undefined when the words are no short name of a
+ * thing: more than three words that name it, a number, or a clause ("the star looks fine"). Pure.
+ */
+export function itemThingName(said: string): string | undefined {
+  const rest = itemWords(said).toLowerCase().replace(ITEM_LEAD, "").trim();
+  if (!rest || !/^[a-z][a-z' -]*$/.test(rest)) return undefined;
+  const words = rest.split(/\s+/);
+  const meaningful = nameWords(rest).filter(w => !NOT_A_NAME_WORD.has(w));
+  if (!meaningful.length || meaningful.length > 3 || words.length > 4) return undefined;
+  words[words.length - 1] = singular(words[words.length - 1]);
+  return words.join(" ");
+}
+
+/** Whether two words are one, singular or plural: "axe"/"axes", "box"/"boxes", "coaster"/"coasters". */
+const sameWord = (a: string, b: string) =>
+  a === b || a === `${b}s` || b === `${a}s` || a === `${b}es` || b === `${a}es`;
+
+/**
+ * What a tool or thing LEAVES, said right after its name: "scalloped axe marks", "saw lines", "drill
+ * holes" are no axe, saw or drill (job 414 scene 29: "a hewn poplar log wall with scalloped axe marks").
+ */
+const LEFT_BY = /^(?:marks?|cuts?|chips?|shavings?|dust|scratch(?:es)?|dents?|nicks?|prints?|tracks?|stains?|burns?|scars?|grooves?|strokes?|holes?|kerfs?|lines?|scrapes?)$/;
+
+/**
+ * Whether `text` names the thing `name` (`itemThingName`) as that thing: every word of its name that
+ * says which thing it is, singular or plural, with its last word somewhere not followed by what the
+ * thing leaves (`LEFT_BY`). Pure.
+ */
+export function namesItemThing(text: string | undefined, name: string): boolean {
+  const toks = (text ?? "").toLowerCase().replace(/['’]s\b/g, " ").replace(/[^a-z0-9]+/g, " ").split(" ").filter(Boolean);
+  const want = nameWords(name).filter(w => !NOT_A_NAME_WORD.has(w));
+  if (!want.length || !want.every(w => toks.some(t => sameWord(t, w)))) return false;
+  const head = want[want.length - 1];
+  return toks.some((t, k) => sameWord(t, head) && !LEFT_BY.test(toks[k + 1] ?? ""));
+}
+
+/**
+ * The items of the spoken list a picture GATHERS right after it, whose own pictures it is drawn from;
+ * undefined for any other picture. The picture's line gathers them ("those three", "all of them",
+ * `GATHERS`); the list ends right before it (only host takes between); two or more of its items are
+ * drawn pictures of a thing (`itemThingName`) — never a list of steps, which are done to one thing —
+ * and the picture is about them: filed under the very key thing every item was filed under (job 414
+ * scene 8, "steel tools"), or its own words name two or more of them (job 407 scene 7, "the steel blades
+ * of the axe, the froe and the drawknife"). At most `MAX_MEMORY_REFS`, the ones its words name first,
+ * in film order. Never a list item, a list's own group picture, a close-up of one part, or a screen.
+ * Pure.
+ */
+export function listGroupFor(scenes: StoryboardScene[], s: StoryboardScene): StoryboardScene[] | undefined {
+  if (!drawn(s) || s.listCut || s.listSet || s.partOf || isScreen(s)) return undefined;
+  if (!GATHERS.test(s.scriptText ?? s.narration ?? "")) return undefined;
+  const i = scenes.indexOf(s);
+  let j = i - 1;
+  while (j >= 0 && !scenes[j].listCut && !drawn(scenes[j])) j--;
+  if (j < 0 || !scenes[j].listCut) return undefined;
+  let a = j;
+  while (a > 0 && scenes[a - 1].listCut) a--;
+  const run = scenes.slice(a, j + 1);
+  if (run.some(x => x.listKind === "steps")) return undefined;
+  const items = run.filter(x => source(x) && !isScreen(x) && !!itemThingName(x.scriptText ?? x.narration ?? ""));
+  if (items.length < 2) return undefined;
+  const words = s.hostPresent ? s.splitVisual ?? "" : `${s.showSubject ?? ""} ${s.visualPrompt ?? ""}`;
+  const named = items.filter(x => namesItemThing(words, itemThingName(x.scriptText ?? x.narration ?? "")!));
+  const filed = !!s.keyThing && items.every(x => x.keyThing === s.keyThing);
+  if (named.length < 2 && !filed) return undefined;
+  const picked = [...named, ...items.filter(x => !named.includes(x))].slice(0, MAX_MEMORY_REFS);
+  return items.filter(x => picked.includes(x));
 }
 
 /**
@@ -1055,12 +1445,28 @@ const shows = (x: StoryboardScene, t: string) =>
 /**
  * The camera position of `s` when it is drawn from memory: the next of `MEMORY_VIEWS` after the
  * pictures of its key thing before it, so two in a row never share one. Undefined for the memory
- * picture itself, and for a picture of no key thing. Pure.
+ * picture itself, and for a picture of no key thing unless it continues one (`keylessContinued`). Pure.
  */
 export function memoryViewFor(scenes: StoryboardScene[], s: StoryboardScene): string | undefined {
   if (listSetFor(scenes, s)) return SET_ITEM_VIEW;
+  if (listGroupFor(scenes, s)) return LIST_GROUP_VIEW;
+  // A list item whose key thing was only inherited is drawn from the OTHER things in it alone, as a first
+  // picture beside them is (`memoryOthersOnly`): no camera of its own thing to move — and never the
+  // screen's view, which would call a reference of another thing "the item for sale".
+  if (s.listCut && s.keyThing && !ownKeyThing(s)) return undefined;
   if (isScreen(s) && s.keyThing && drawn(s)) return SCREEN_ITEM_VIEW;
-  if (!s.keyThing || !drawn(s)) return undefined;
+  // A picture of NO key thing has a camera only as a continuation, drawn from the picture it continues
+  // (`keylessContinued`): a concrete one (`REDRAW_CAMERAS`) — job 413 scene 16 had only its words' "a
+  // close-up of one detail of it", which meant nothing for a man seen from behind, and came back as
+  // scene 15's over-the-shoulder shot.
+  if (!s.keyThing) {
+    if (!source(s) || !continuedPicture(scenes, s)) return undefined;
+    const k = continuationCameraIndex(scenes, s);
+    if (k < 0) return undefined;
+    return s.blurPrint && k === 0 ? BLUR_PRINT_VIEW : REDRAW_CAMERAS[k];
+  }
+  // A place is never drawn from a picture of itself (`lendsNoPicture`), so it has no camera to move.
+  if (!drawn(s) || lendsNoPicture(s.keyThing)) return undefined;
   const i = scenes.indexOf(s);
   const before = scenes.slice(0, Math.max(0, i)).filter(x => source(x) && shows(x, s.keyThing!)).length;
   if (before === 0) return undefined;
@@ -1096,6 +1502,8 @@ export function memoryViewFor(scenes: StoryboardScene[], s: StoryboardScene): st
  */
 export function tagKeyThings(scenes: StoryboardScene[], things: KeyThing[] | undefined): number {
   let n = 0;
+  const members = groupMembersOf(scenes, things);
+  const at = new Map(scenes.map((x, k) => [x, k] as const));
   for (const s of scenes) {
     if (!drawn(s)) continue;
     // THE ITEM, NOT WHAT IT SITS ON (job 410 scene 20): the juice under "Juice works the same way"
@@ -1116,9 +1524,22 @@ export function tagKeyThings(scenes: StoryboardScene[], things: KeyThing[] | und
     if (!things?.length) {
       if (surfaces.length)
         s.otherKeyThings = [...surfaces, ...(s.otherKeyThings ?? []).filter(t => !surfaces.includes(t))];
+      s.othersOfKind = undefined;
       continue;
     }
     const text = s.hostPresent ? s.splitVisual : (s.showSubject ?? s.visualPrompt);
+    // ANOTHER OF ITS KIND IS NOT THE KEY THING (`anotherOfItsKind`, job 412 scenes 23-26): "a wild cat
+    // stalking low through scattered brush" was filed beside its landscape under the video's own cat
+    // and drawn from the pet's first picture — the pet in the desert. `keyThingsIn` no longer names it;
+    // a planner's or a check's filing under it is given up here too (with the stage, which belongs to
+    // the picture of that thing), and the prompt is told it is not the one shown before.
+    const another = othersOfKindIn(text, things);
+    s.othersOfKind = another.length ? another : undefined;
+    if (s.keyThing && another.some(a => a.name === s.keyThing)) {
+      s.keyThing = undefined;
+      s.buildStage = undefined;
+    }
+    if (s.partOf && another.some(a => a.name === s.partOf)) s.partOf = undefined;
     const named = keyThingsIn(text, things).map(t => t.name);
     // Filed anew only under a key thing the picture is ABOUT (or the item a screen shows): one beside
     // the subject would take the view that keeps its memory small (`BACKGROUND_VIEW`), and the surface
@@ -1135,9 +1556,537 @@ export function tagKeyThings(scenes: StoryboardScene[], things: KeyThing[] | und
     // Every other key thing the picture names is remembered too, and every surface it gave up.
     const others = named.filter(name => name !== s.keyThing);
     for (const t of surfaces) if (!others.includes(t)) others.push(t);
+    // …and every member of a group it shows (`groupMembersOf`): its own item picture, and every picture
+    // after it whose words name it as that thing — never another item of its own list, each of which is
+    // its own thing, and never where a key thing the picture names already holds the name ("kitchen
+    // knife" for a "knife"). A picture filed under nothing is filed under the member, as under any key
+    // thing it names (job 414 scene 13, "a student … pulling a drawknife", after the drawknife's item).
+    const shown = members.filter(m => {
+      if (m.item === s) return true;
+      const [k, item] = [at.get(s)!, at.get(m.item)!];
+      if (k <= item || (s.listCut && scenes.slice(item, k + 1).every(x => x.listCut))) return false;
+      return namesItemThing(text, m.name) && !named.some(name => namesItemThing(name, m.name));
+    });
+    for (const m of shown)
+      if (m.name !== s.keyThing && !others.includes(m.name)) {
+        if (!s.keyThing && m.item !== s) {
+          s.keyThing = m.name;
+          n++;
+        } else others.push(m.name);
+      }
     s.otherKeyThings = others.length ? others : undefined;
   }
   return n;
+}
+
+/*
+ * A GROUP'S MEMBERS ARE THINGS OF THEIR OWN (round 14, job 414 scenes 6, 17 and 20). The props list may
+ * write ONE key thing for things the script then lists one by one — "steel tools: an axe, a froe, and a
+ * drawknife hanging together" — and "an axe, | a froe, | and a drawknife," was cut one picture per item,
+ * each filed under that group. Later pictures named the froe ("the host's hands holding a froe upright
+ * by its wooden handle…", "…levering a froe's handle sideways…") but were filed under the oak bolt and
+ * the shingle: the froe was no key thing, so no picture of it was ever a reference, and it changed shape
+ * from one picture to the next — right at scene 17, a hatchet-like bar at scene 20, ten seconds later.
+ * So when two or more items of one list are filed under one key thing whose written look names each of
+ * them, each of those items is a MEMBER: a thing of its own, first shown by its item picture, and every
+ * picture from there on whose own words name it is drawn from its pictures like any other key thing
+ * (`tagKeyThings`, `otherKeyThings`). Never a part of a thing ("face, | edge, | length", job 352), a
+ * place, a screen, the group itself, a thing that is a key thing already, or the colours of ONE thing
+ * (jobs 354 and 378: "Ivory, | oat, | a warm coral," the beads of one necklace). Replayed over the 350
+ * stored storyboards: 7 groups in 5 films, 15 members — the steel tools, and the coasters, ornaments,
+ * engraved boards and keepsake boxes of a woodworker's piles of pieces.
+ */
+
+/** Words that name a collection of things: "smalls pile", "tool set", "sewing kit". */
+const COLLECTION = /^(?:pile|heap|set|collection|kit|stack|group|assortment|bundle|batch|selection|trio|array)$/;
+
+/** A member of a group key thing (`groupMembersOf`): its name, the item picture that first shows it, and its group. */
+export type GroupMember = { name: string; item: StoryboardScene; of: string };
+
+/**
+ * The members of the group key things of `scenes` (see above), in film order: from each run of a list
+ * of things, the items filed under one key thing that has a written look, two or more of them, whose
+ * own words name a thing (`itemThingName`) that look names (`namesItemThing`) — never the group itself
+ * (the item's words name it), a part of a thing (`PART_OF_IT`), a place or the weather
+ * (`lendsNoPicture`), a screen, or a thing that is a key thing of its own. Pure.
+ */
+export function groupMembersOf(scenes: StoryboardScene[], things: KeyThing[] | undefined): GroupMember[] {
+  const out: GroupMember[] = [];
+  if (!things?.length) return out;
+  // A group names MANY things — "steel tools", "small wood pieces", "smalls pile" — never one thing
+  // whose look lists its colours ("light bead necklace: … beads in ivory, oat, warm coral", jobs 354,
+  // 364, 380, 395: "Ivory, | oat, | a warm coral," are that one necklace's beads).
+  const isGroup = (name: string) => {
+    const head = nameWords(name).pop() ?? "";
+    return COLLECTION.test(head) || (singular(head) !== head && !/(?:ss|us|is)$/.test(head));
+  };
+  // An item whose own picture names the group's last word is the group itself in one variant, no
+  // member of it: job 378's "chunky light beads in ivory finish" under "chunky light beads". The
+  // "(for the …)" a list adds to a bare item names its group, not what the picture shows.
+  const showsGroup = (x: StoryboardScene, of: string) => {
+    const head = nameWords(of).pop() ?? "";
+    const words = (x.showSubject ?? x.visualPrompt ?? "").replace(/\(for the [^)]*\)/gi, " ");
+    return !!head && nameWords(words).some(w => sameWord(w, head));
+  };
+  const isKeyThing = (name: string) => {
+    const w = nameWords(name).filter(x => !NOT_A_NAME_WORD.has(x));
+    return things.some(k => {
+      const v = nameWords(k.name).filter(x => !NOT_A_NAME_WORD.has(x));
+      return v.length === w.length && v.every((x, i) => sameWord(x, w[i]));
+    });
+  };
+  let a = 0;
+  while (a < scenes.length) {
+    if (!scenes[a].listCut) {
+      a++;
+      continue;
+    }
+    let b = a;
+    while (b + 1 < scenes.length && scenes[b + 1].listCut) b++;
+    const run = scenes.slice(a, b + 1);
+    a = b + 1;
+    if (run.some(x => x.listKind === "steps")) continue;
+    const byThing = new Map<string, GroupMember[]>();
+    for (const x of run) {
+      const of = x.keyThing;
+      const look = of ? things.find(k => k.name === of)?.look : undefined;
+      if (!of || !look?.trim() || lendsNoPicture(of) || !isGroup(of) || !source(x) || isScreen(x)) continue;
+      if (showsGroup(x, of)) continue;
+      const said = x.scriptText ?? x.narration ?? "";
+      const name = itemThingName(said);
+      if (!name || wordsName(said, of) || lendsNoPicture(name) || isKeyThing(name)) continue;
+      if (PART_OF_IT.test(name.split(" ").pop()!) || !namesItemThing(look, name)) continue;
+      const ms = byThing.get(of) ?? [];
+      if (!ms.some(m => m.name === name)) ms.push({ name, item: x, of });
+      byThing.set(of, ms);
+    }
+    for (const ms of Array.from(byThing.values())) if (ms.length >= 2) out.push(...ms);
+  }
+  return out.sort((x, y) => scenes.indexOf(x.item) - scenes.indexOf(y.item));
+}
+
+/*
+ * A PLACE LENDS NO PICTURE (round 14, the verification films 411 and 412). The props list is told to
+ * list "the recurring places", and a place key thing was remembered like an object. Job 411's "lawn"
+ * (the northern backyard's) lent scene 2's whole yard — the same tree, fence and house, framing and
+ * all — to the robin on the lawn (scene 5), the kitchen window (scene 7), the robin in the snow (scene
+ * 12) and the empty lawn in November (scene 18): one yard view five times in two minutes, which the
+ * fingerprint check missed because the foreground changed. And the Gulf Coast panel, "a green lawn in a
+ * Gulf Coast yard", was matched to that lawn by its word and drawn from it: snow under the palms, the
+ * northern fence behind. `MEMORY_SETTING_CLAUSE` and `memoryNotShown` never applied, because the
+ * references DID show "a lawn". Job 412's "wild landscape" lent its first wilderness to the pictures
+ * after it. A thing has one shape to keep; a place has no shape a picture must repeat, only what it is
+ * made of — and a reference of a place hands the picture maker its composition. So a place, setting or
+ * surroundings never lends a reference picture (`memorySourcesFor`), nor does the weather. A place
+ * keeps a WRITTEN look instead, cut to what it is made of (`placeLook`), used only where the picture's
+ * own words set it in that same place (`placesSetIn`) — the props list's home setting too, which is no
+ * key thing. And a key thing that stands in such a place (the bed in the bedroom) keeps its look in
+ * every picture set there that no reference of it reaches: job 412's "ankle" list item, drawn from
+ * nothing as every list item is, came back in another bedroom with a black metal bed and cream bedding.
+ * Replayed over the 129 stored storyboards: 26 pictures in 10 films had been drawn from a place's
+ * picture for that place, and 923 of 3,916 drawn pictures are set in a place with a written look.
+ */
+
+/** Places, settings and surroundings, as the head word of a name ("buyer's driveway", "wild landscape"). */
+const PLACE_WORDS = new Set(
+  (
+    "yard backyard lawn garden field meadow pasture paddock prairie orchard vineyard farm farmyard " +
+    "farmland landscape wilderness countryside scenery woods woodland woodlot forest jungle desert beach " +
+    "shore coast coastline park street road roadside alley sidewalk driveway lot room bedroom bathroom " +
+    "kitchen basement attic cellar closet pantry hallway corridor entryway foyer porch patio balcony " +
+    "garage workshop studio office store shop aisle market stall booth interior setting " +
+    "surroundings backdrop stairwell home town city village neighborhood neighbourhood campsite " +
+    "campground river riverbank lake lakeshore pond creek valley hillside mountainside church classroom " +
+    "restaurant cafe café space area"
+  ).split(" ")
+);
+/**
+ * Place words that name no place of their own — whatever place the words are about ("Gulf Coast
+ * setting", "the surroundings"): never another place (`placesSetIn`).
+ */
+const ANY_PLACE = new Set("setting surroundings scenery backdrop area space interior home".split(" "));
+/** The weather and the sky: a setting too — what a picture's own words say, never a reference or a look. */
+const WEATHER_WORDS = new Set("snow frost fog mist rain sky sunset sunrise weather storm".split(" "));
+/** A body part makes "collarbone area" the host's skin, never a place. */
+const BODY_NAME =
+  /\b(?:neck|collarbones?|chest|shoulders?|face|lips?|mouth|hands?|wrists?|arms?|legs?|feet|foot|knees?|hips?|scalp|skin|hair|ears?|cheeks?|chin|forehead|ankles?|fingers?|nails?)\b/i;
+
+/** A word as said, lower case and bare: "Yard," → "yard", "buyer's" → "buyer". */
+const bareWord = (w: string) =>
+  w.toLowerCase().replace(/[’‘]/g, "'").replace(/^[^a-zé]+|[^a-zé'-]+$/g, "").replace(/'s?$/, "");
+
+/** The place word `w` is, in its base form ("bedrooms" → "bedroom", "cities" → "city"), or undefined. */
+function placeBase(w: string): string | undefined {
+  const x = bareWord(w);
+  if (PLACE_WORDS.has(x)) return x;
+  const one = x.endsWith("ies") ? `${x.slice(0, -3)}y` : x.replace(/e?s$/, "");
+  return PLACE_WORDS.has(one) ? one : PLACE_WORDS.has(x.replace(/s$/, "")) ? x.replace(/s$/, "") : undefined;
+}
+
+/** Where a name's head ends: "kitchen with stove", "bedroom at night", "coffee can of burnt scraps". */
+const NAME_TAIL = /\s+(?:of|with|on|in|at|for|from|under|beside|near|by|during|held|inside)\s+/i;
+
+/**
+ * The head word of a key thing's name — the last word before "of / with / on / in …", a parenthesis or
+ * a comma: "coffee can of burnt scraps" → can, "bedroom at night" → bedroom, "kitchen with stove" →
+ * kitchen, "parking lot (recalled)" → lot. Pure.
+ */
+function nameHead(name: string): string {
+  const t = name.replace(/\([^)]*\)/g, " ").split(",")[0].split(NAME_TAIL)[0];
+  return bareWord(t.trim().split(/\s+/).pop() ?? "");
+}
+
+/**
+ * Whether a key thing's name is a PLACE, setting or surroundings: its head word names one ("lawn",
+ * "wild landscape", "buyer's driveway", "pharmacy aisle", "bedroom at night") — never a thing named
+ * after where it is ("kitchen window", "garage door", "market table", "porch light"), and never a
+ * part of the body ("collarbone area"). Over the 626 key-thing names of the 129 stored films it picks
+ * out 50 — the lawns, yards, driveways, aisles, rooms, lots and landscapes — and nothing else. Pure.
+ */
+export function isPlaceName(name: string | undefined): boolean {
+  if (!name?.trim() || BODY_NAME.test(name)) return false;
+  return !!placeBase(nameHead(name));
+}
+
+/** Whether a key thing's name is the weather or the sky ("snow"). Pure. */
+export function isWeatherName(name: string | undefined): boolean {
+  if (!name?.trim()) return false;
+  const head = nameHead(name);
+  return WEATHER_WORDS.has(head) || WEATHER_WORDS.has(head.replace(/s$/, ""));
+}
+
+/** Whether key thing `name` never lends a reference picture: a place, a setting or the weather. Pure. */
+export function lendsNoPicture(name: string | undefined): boolean {
+  return isPlaceName(name) || isWeatherName(name);
+}
+
+/**
+ * A props-list label as a name: no "MAIN" / "HOME", no dash, no article, no markdown, lower case, and
+ * nothing after its head ("… at night"). The dash after "HOME" may be an en dash, and the name the
+ * prompt says carries no hour: job 252's "HOME – single-family house interior at night" was named
+ * "– single-family house interior at night" and would have put the night in every picture set there.
+ */
+const labelName = (label: string) =>
+  label
+    .replace(/^(?:MAIN|HOME)\b/i, "")
+    .replace(/^[\s:\-–—]+/, "")
+    .replace(/^(?:the|a|an)\s+/i, "")
+    .replace(/[*_`]/g, "")
+    .split(NAME_TAIL)[0]
+    .trim()
+    .toLowerCase();
+
+/**
+ * The props list's HOME setting (its first line, `deriveContinuitySheet`) as a place, or undefined: no
+ * key thing (`parseKeyThings` starts after it), yet the place most pictures are set in — job 412's
+ * "bedroom: a quiet bedroom at pre-dawn hours, …, an unmade bed as the central feature". Only when its
+ * name is a place ("garage workshop", "backyard", "dressing room"); a home written as a thing ("kitchen
+ * table", "hallway ceiling") is none. A line labelled only "HOME" is named by its description's lead
+ * (job 299: "HOME: one-car garage workshop: uncluttered concrete-floor space…"; job 327: "HOME: a modest
+ * kitchen with an adjoining living room, warm lamp light, …"). Pure.
+ */
+export function homePlaceOf(sheet: string | undefined): KeyThing | undefined {
+  const line = withoutPersonLines(sheet)
+    .split("\n")
+    .map(l => l.replace(/^[-*•\d.)\s]+/, "").trim())
+    .find(l => l.includes(":"));
+  if (!line) return undefined;
+  const at = line.indexOf(":");
+  let name = labelName(line.slice(0, at));
+  let look = line.slice(at + 1).trim();
+  if (!name) {
+    const lead = /^(.+?)\s*(?::|,|;|\s[—–]\s)/.exec(look)?.[1] ?? look;
+    name = labelName(lead.split(NAME_TAIL)[0]);
+    look = look.replace(/\s*:\s*/, ", ");
+  }
+  return name && look && isPlaceName(name) ? { name, look } : undefined;
+}
+
+/** A word after a place word saying the place word IS the place, not one describing a thing after it. */
+const AFTER_PLACE = new Set(
+  (
+    "a an the and or but nor with without in on at by of to from for under over near beside behind above " +
+    "below beneath into onto inside outside across along through around among between before after while " +
+    "as where that which who whose its his her their this these those is are was were be been being has " +
+    "have had sits stands lies rests hangs seen shown visible beyond toward towards against there here " +
+    "full lit"
+  ).split(" ")
+);
+type Token = { raw: string; w: string };
+const tokensOf = (text: string): Token[] =>
+  text
+    .replace(/\b(?:a lot|lots) of\b/gi, " ")
+    .split(/\s+/)
+    .filter(Boolean)
+    .map(raw => ({ raw, w: bareWord(raw) }));
+
+/**
+ * Whether the place word at `i` is said AS a place: last in its phrase ("in the backyard."), before a
+ * word that is no noun ("the lawn under palm trees", "the lawn visible beyond it"), or before another
+ * place ("the backyard lawn" is in the backyard) — never a word naming a thing ("the kitchen window",
+ * "a lawn chair", "a field guide"). Pure.
+ */
+function saidAsPlace(toks: Token[], i: number): boolean {
+  if (/[,.;:!?)"']$/.test(toks[i].raw)) return true;
+  const next = toks[i + 1];
+  if (!next || !next.w) return true;
+  if (placeBase(next.w)) return true;
+  return AFTER_PLACE.has(next.w) || /(?:ly|ed|ing|ible|able)$/.test(next.w);
+}
+
+/** Months and weekdays: a time, never another place ("in January"). */
+const TIME_NAME =
+  /^(?:January|February|March|April|May|June|July|August|September|October|November|December|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)$/;
+/** A region named after "in / across / along …": "in a Gulf Coast yard", "down in Florida". */
+const NAMED_REGION =
+  /\b(?:in|across|throughout|along|on)\s+(?:(?:the|a|an|some|most|many)\s+)*([A-Z][a-z]+)/g;
+
+/** A name's words, without a parenthesis ("parking lot (recalled)" → parking, lot). */
+const placeNameWords = (name: string) => nameWords(name.replace(/\([^)]*\)/g, " "));
+const baseOf = (w: string) => placeBase(w) ?? w.replace(/(?:es|s)$/, "");
+
+/**
+ * Whether `text` names every word of `name` (singular or plural): "holly bushes" names "holly bush",
+ * "storm windows" names "storm window". Pure.
+ */
+function namesAll(text: string, name: string): boolean {
+  const have = new Set(nameWords(text).map(baseOf));
+  const want = placeNameWords(name).filter(w => !NOT_A_NAME_WORD.has(w));
+  return want.length > 0 && want.every(w => have.has(baseOf(w)));
+}
+
+/**
+ * Whether two places are one inside the other: either's look names the other's head word ("lawn: …
+ * covering the backyard", "backyard: a suburban yard with a mowed lawn"). Pure.
+ */
+function linkedPlaces(a: KeyThing, b: KeyThing): boolean {
+  const [ha, hb] = [placeBase(nameHead(a.name)), placeBase(nameHead(b.name))];
+  const said = (look: string, head: string | undefined) =>
+    !!head && tokensOf(look).some(t => placeBase(t.w) === head);
+  return said(a.look, hb) || said(b.look, ha);
+}
+
+/** Words that never tell two descriptions are of one picture: joiners and sizes. */
+const NOT_A_SHARED_WORD = new Set([
+  ...Array.from(NOT_A_NAME_WORD),
+  "from", "into", "onto", "its", "her", "his", "their", "this", "that", "over", "under", "near",
+  "close", "view", "seen", "shot", "frame", "filling",
+]);
+
+/**
+ * The words picture `s` is set by: a split's panel, else what it must show and the prompt writer's
+ * words — those only when they rewrite what it must show (a word of it in common). A prompt left from
+ * another picture says nothing of where this one is: job 411 scene 17, "close-up of an open bird field
+ * guide page showing a painted American robin", still carried scene 18's prompt "the empty backyard
+ * lawn in late November light", and would have been set on the lawn. Pure.
+ */
+function setWords(s: StoryboardScene): string {
+  if (s.hostPresent) return s.splitVisual ?? "";
+  const show = s.showSubject ?? "";
+  const prompt = s.visualPrompt ?? "";
+  if (!show.trim()) return prompt;
+  const own = new Set(nameWords(show).filter(w => !NOT_A_SHARED_WORD.has(w)).map(baseOf));
+  const rewrite = nameWords(prompt).some(w => !NOT_A_SHARED_WORD.has(w) && own.has(baseOf(w)));
+  return rewrite ? `${show} ${prompt}` : show;
+}
+
+/**
+ * The places picture `s` is SET IN, of `places` (the place key things and the home): those its own
+ * words (`setWords`) name AS a place (`saidAsPlace`; every word of a key thing's name, the head word
+ * of the home's), unless those words set it SOMEWHERE ELSE: another place said as a place that is
+ * neither this one, the shorter word for it ("the room" of a bedroom, "the yard" of a backyard), nor
+ * one inside or around it (`linkedPlaces`), or a region named after "in / across / along". Job 411
+ * scene 16's panel, "a green lawn in a Gulf Coast yard", is set somewhere else than the backyard's
+ * lawn; scene 12's "a snow-covered lawn in the backyard" is not, and neither is job 412 scene 21's "in
+ * the dim pre-dawn bedroom, …, the quiet room barely lit". Never a screen: what a screen shows is not
+ * where it is. Pure.
+ */
+export function placesSetIn(s: StoryboardScene, places: KeyThing[], home?: KeyThing): KeyThing[] {
+  if (!drawn(s) || isScreen(s)) return [];
+  const text = setWords(s);
+  if (!text.trim()) return [];
+  const toks = tokensOf(text);
+  // The home once: a props list that also lists its home setting as a key thing would say it twice.
+  const sameName = (p: KeyThing) => !!home && p.name.trim().toLowerCase() === home.name.trim().toLowerCase();
+  const all = [...places, ...(home && !places.some(sameName) ? [home] : [])];
+  const regions = Array.from(text.matchAll(NAMED_REGION), m => m[1]).filter(n => !TIME_NAME.test(n));
+  const named = (p: KeyThing) => {
+    const head = placeBase(nameHead(p.name));
+    if (!head || !toks.some((t, i) => placeBase(t.w) === head && saidAsPlace(toks, i))) return false;
+    return p === home || namesAll(text, p.name);
+  };
+  return all.filter(p => {
+    if (!named(p)) return false;
+    const head = placeBase(nameHead(p.name)) ?? "";
+    const related = new Set([
+      ...placeNameWords(`${p.name} ${p.look}`).map(baseOf),
+      ...all.filter(q => q !== p && linkedPlaces(p, q)).flatMap(q => placeNameWords(q.name).map(baseOf)),
+    ]);
+    const same = (b: string) => related.has(b) || head.endsWith(b);
+    const elsewhere =
+      toks.some((t, i) => {
+        const b = placeBase(t.w);
+        return !!b && !ANY_PLACE.has(b) && !same(b) && saidAsPlace(toks, i);
+      }) || regions.some(n => !related.has(n.toLowerCase()));
+    return !elsewhere;
+  });
+}
+
+/**
+ * Season, weather, the hour and the climate — and light as a NOUN, said last or before where it falls
+ * ("winter light", "low golden light on distant hills", job 400's "soft fluorescent light overhead"),
+ * and the chill of a cold season (job 184's "autumn/winter chill"): never a place's own look. "light"
+ * before another word describes it ("light wear", "light grey walls", "a porch light fixture") and
+ * stays.
+ */
+const PLACE_TIME =
+  /\b(?:lighting|sunlight|daylight|lamplight|moonlight|candlelight|glow(?:ing)?|shadows?|dawns?|dusks?|sunrises?|sunsets?|mornings?|evenings?|afternoons?|nights?|nighttime|midday|noon|twilight|hours?|seasons?|winters?|summers?|autumns?|wintry|weather|climate|sky|skies|snow|frost|rain|fog|mist|drafts?|chill(?:y|ed)?)\b|\blight\b(?=\s*$|\s+(?:from|through|in|on|of|across|over|at|into|onto|overhead|above|throughout|everywhere|falling|coming|streaming|pouring|filtering|spilling|shining|that|which)\b)/i;
+/**
+ * What lights the place ("lit by a warm desk lamp in the evenings", job 302; "lit by a single overhead
+ * bulb", job 272): the light, which is each picture's own — a lamp glow in every picture set there is
+ * the staged look the picture check refuses. Cut from where it starts.
+ */
+const LIT_BY = /\s*\b(?:lit|lighted|illuminated)\s+(?:only\s+)?(?:by|with|from)\b.*$/i;
+/** A part that only says how the place is lit or warmed: job 207's "lit warm at evening". */
+const LIT_ONLY = /^\s*(?:lit|lighted|illuminated|warmed)\b/i;
+/**
+ * A clause about the video rather than the place ("a stretch that the story keeps returning to", job
+ * 263), or about one moment in it — something put there ready for what happens next ("furniture
+ * staged near the curb for pickup", job 283; "empty except for the furniture piece", job 288): what
+ * happens there is each picture's own words'. Never a house's storeys ("single-story house interior
+ * with hallway, bedroom, …", job 259, lost its whole first part) nor a waiting room.
+ */
+const NOT_THE_PLACE =
+  /\b(?:(?<!\b(?:one|two|three|four|single|multi|split)[-\s])stor(?:y|ies)|video|script|scenes?|narrat\w*|ready|staged|waiting(?!\s+(?:rooms?|areas?|lounges?)\b)|waits|awaiting|except for|for (?:pickup|sale|delivery|collection))\b/i;
+/** Light, weather and season said as describing words: "dawn-lit", "frost-dusted", "snow-topped", "winter". */
+const PLACE_TIME_WORDS =
+  /\b(?:(?:late|early|mid)-(?:autumn|fall|winter|summer|spring|morning|evening|afternoon|night|day|dawn|dusk)|[a-z]+-(?:lit|dusted)|(?:snow|frost|sun|moon|lamp|rain|ice)-[a-z]+|(?:cold|warm|mild|temperate)-(?:climate|weather)|(?:softly|dimly|brightly|evenly|warmly)\s+lit|sunlit|moonlit|lamplit|dim|snowy|frosty|frosted|icy|rainy|foggy|misty|sunny|overcast|wintry|winter|summer|autumn|autumnal|springtime|nighttime|daytime|pre-dawn|predawn)\b/gi;
+/**
+ * The words a light or weather cut leaves dangling: "a window letting (in daylight)", "dusted (with
+ * frost)", job 198's "adjoining rooms warmed (by lamplight)".
+ */
+const DANGLING_CUT =
+  /(?:(?:^|\s+)(?:letting|coming|streaming|falling|pouring|filtering|shining|glowing|spilling|bathed|flooded|washed|dusted|covered|topped|bordered|edged|lined|lit|warmed))+$/i;
+/** Where the camera is, and what the place is used for or returned to: never its look. */
+const PLACE_CAMERA =
+  /\s*\b(?:seen|viewed|shown|photographed|visible|used\s+(?:for|to|as|during|by|in)|returned\s+to)\b.*$/i;
+
+/**
+ * A place's written look cut to WHAT IT IS MADE OF, for any picture set there (`placeLooks`): its
+ * ground, walls, furniture and plants. Gone: the season, the weather, the light and the hour — what each
+ * picture's own words say, as `MEMORY_SETTING_CLAUSE` holds them for references (job 411's backyard
+ * says "late fall to winter light", and a line about spring is set in that backyard too); where the
+ * camera stands ("viewed from the kitchen window" would pin every picture's framing); and any writing.
+ * "a quiet bedroom at pre-dawn hours, soft dim blue-grey light, an unmade bed as the central feature"
+ * → "a quiet bedroom, an unmade bed as the central feature". What lights it (`LIT_BY`) and what is
+ * put there for one moment of the story (`NOT_THE_PLACE`) go too. Pure.
+ */
+export function placeLook(look: string): string {
+  const kept = look
+    .replace(/[.\s]+$/, "")
+    .split(/\s*[,;]\s*|\s+[—–]\s+/)
+    .map(c => {
+      if (NOT_THE_PLACE.test(c) || LIT_ONLY.test(c)) return "";
+      let x = c.replace(PLACE_CAMERA, "").replace(LIT_BY, "").trim();
+      // A trailing "at pre-dawn hours", "with low golden light", "under a layer of fresh snow" — read
+      // from the end, so "a yard with a mowed lawn in the evening" keeps its lawn.
+      const preps = Array.from(x.matchAll(/\s+(?:at|in|during|on|under|across|through|with|by)\s+/gi), m => m.index!);
+      const whole = x;
+      for (let k = preps.length - 1; k >= 0 && PLACE_TIME.test(x.slice(preps[k])); k--) x = x.slice(0, preps[k]);
+      // …and what the cut leaves dangling: "a single window letting (in daylight)", "dusted (with frost)".
+      if (x !== whole) x = x.replace(DANGLING_CUT, "");
+      x = x
+        .replace(PLACE_TIME_WORDS, "")
+        .replace(/\s{2,}/g, " ")
+        .trim()
+        .replace(/^(?:and|or|with)\s+|\s+(?:and|or|with)$/gi, "")
+        .replace(/\ba (?=(?!one\b|one-|uni|use)[aeiou])/gi, "an ")
+        // What joined two words cut away: job 184's "autumn/winter chill" left a bare "/".
+        .replace(/^[\s/&+]+|[\s/&+]+$/g, "")
+        .trim();
+      // "where furniture waits before pickup": what happens there is each picture's own words'.
+      return PLACE_TIME.test(x) || WRITING.test(x) || /^where\b/i.test(x) ? "" : x;
+    })
+    .filter(c => /[a-z]{3,}/i.test(c));
+  return kept.join(", ");
+}
+
+/** At most this many things standing in a place are named with it. */
+export const MAX_PLACE_THINGS = 3;
+
+/**
+ * Whether key thing `t` stands in place `p`: its own look puts it there ("a low wooden-framed bed …,
+ * positioned centrally in the bedroom"), or the place's look names it ("an unmade bed as the central
+ * feature"). Pure.
+ */
+function standsIn(t: KeyThing, p: KeyThing): boolean {
+  const head = placeBase(nameHead(p.name));
+  if (!head) return false;
+  const inIt = new RegExp(`\\b(?:in|inside|within)\\s+(?:the|a|an|its|their|his|her)?\\s*(?:[\\w'-]+\\s+){0,2}${head}s?\\b`, "i");
+  return inIt.test(t.look) || namesAll(p.look, t.name);
+}
+
+/**
+ * The written looks picture `s` is held to for where it is set (`placeLooks`): each place it is set in
+ * (`placesSetIn`), cut to what it is made of (`placeLook`), then up to `MAX_PLACE_THINGS` key things
+ * that stand in one of those places (`standsIn`) and that its own words name — never its own key thing
+ * (its look is its own, `keyThingLookFor`), a part it is a close-up of, a place or the weather, a
+ * named kind (its exact look wins) or an inside no camera sees. Which of those things a reference
+ * picture already shows is for `memoryFor` to say. Pure.
+ */
+export function placeLooksFor(
+  s: StoryboardScene,
+  things: KeyThing[] | undefined,
+  home?: KeyThing,
+  makes = true
+): PlaceLook[] {
+  const places = (things ?? []).filter(k => isPlaceName(k.name));
+  const setIn = placesSetIn(s, places, home);
+  if (!setIn.length) return [];
+  // A thing standing there is named by what the picture must show (a split's panel), never only by the
+  // prompt writer's rewrite: job 409 scene 2's rewrite calls the sympathy card "a plain cream greeting
+  // card", the name of the video's OTHER card, whose look must never come along.
+  const text = pictureWords(s);
+  const out: PlaceLook[] = setIn.flatMap(p => {
+    const look = placeLook(p.look);
+    return look ? [{ name: p.name, look }] : [];
+  });
+  let n = 0;
+  const own = ownKeyThing(s);
+  for (const t of things ?? []) {
+    if (n >= MAX_PLACE_THINGS) break;
+    if (t.name === own || t.name === s.partOf || lendsNoPicture(t.name) || namedKindIs(s, t.name)) continue;
+    // Another one of its kind ("a stray cat on the bed") stands there with no look of the thing's own.
+    if (!namesAll(text, t.name) || anotherOfItsKind(text, t)) continue;
+    const where = setIn.find(p => standsIn(t, p));
+    // Held to the place's rule too: no hour or light of its own ("a tall bedroom window …, framing the
+    // quiet night street outside", job 405) — the clause gives those to the picture's own words.
+    const look = where ? placeLook(otherThingLookFor(s, t.name, things, makes) ?? "") : "";
+    if (!where || !look) continue;
+    out.push({ name: t.name, look, in: where.name });
+    n++;
+  }
+  return out;
+}
+
+/**
+ * The image-prompt line for where a picture is set (`placeLooks`): each place's look, then the looks of
+ * the things standing in it. Everything that changes from picture to picture — how much of the place is
+ * in view and from where, the season, the weather, the light and the hour — is the picture's own words'.
+ * It says so, and that no more of the place is shown than they show: a place's look lists what it holds
+ * (job 411's backyard: the lawn, the holly border, the porch light, the storm windows), and every
+ * picture drawn with all of it in view would be the one wide yard again — the very copy a reference of
+ * the place made. Empty with no place. Pure.
+ */
+export function placeLookClause(scene: StoryboardScene): string {
+  const looks = scene.placeLooks ?? [];
+  if (!looks.length) return "";
+  const list = looks.map(p => (p.in ? `the ${p.name} in the ${p.in}: ${p.look}` : `the ${p.name}: ${p.look}`)).join("; ");
+  return (
+    ` WHERE THIS PICTURE IS SET, the same place in every picture of this video set there — ${list}. ` +
+    "This says only how that place looks: how much of it is in view and from where, and its season, " +
+    "weather, light and time of day, are as this picture's own words say — never more of it than they show."
+  );
 }
 
 const sourcesOf = new WeakMap<StoryboardScene, StoryboardScene[]>();
@@ -1150,6 +2099,8 @@ const lookOf = new WeakMap<StoryboardScene, string | undefined>();
 const otherLooksOf = new WeakMap<StoryboardScene, Map<string, string>>();
 /** The named kind's look a split's panel takes from the pictures of its thing (`panelNamedLook`). */
 const panelLookOf = new WeakMap<StoryboardScene, string | undefined>();
+/** The looks of where the scene is set, and of the things standing there (`placeLooksFor`). */
+const placeLooksOf = new WeakMap<StoryboardScene, PlaceLook[]>();
 /**
  * Of `sourcesOf`, the picture the scene must not repeat (`recomposeFrom`): the one it continues, or
  * the one shown right before it about something else.
@@ -1178,28 +2129,73 @@ function gate(s: StoryboardScene) {
 
 /**
  * Before a pass renders `rendering` out of the film `board`: remember each scene's memory, the look
- * it is drawn by when it has none, which pictures later ones copy, and which scenes' pictures are
- * about to be made.
+ * it is drawn by when it has none, the looks of where it is set (`home`: the props list's home
+ * setting, `homePlaceOf`), which pictures later ones copy, and which scenes' pictures are about to be
+ * made.
  */
 export function attachMemory(
   board: StoryboardScene[],
   rendering: StoryboardScene[] = board,
-  keyThings?: KeyThing[]
+  keyThings?: KeyThing[],
+  home?: KeyThing
 ): void {
   tagKeyThings(board, keyThings);
   // Whether the video makes something: the shot list stages only pictures of a thing being made.
   const makes = board.some(x => !!x.buildStage);
+  keylessMemo = { scenes: board, of: new Map() };
+  try {
+    attachEach(board, keyThings, home, makes);
+  } finally {
+    keylessMemo = undefined;
+  }
+  // A picture is COPIED when a later picture is drawn from it for the thing it is itself about — not
+  // a list's group picture its items are cut from, and not a picture lent only for a thing beside it.
+  for (const s of board) {
+    if (listSetFor(board, s)) continue;
+    const things = [s.keyThing, ...(s.otherKeyThings ?? [])];
+    for (const src of sourcesOf.get(s) ?? []) {
+      const own = ownKeyThing(src);
+      if (own && !lendsNoPicture(own) && things.includes(own)) copied.add(src);
+    }
+  }
+  for (const s of rendering) {
+    if (!source(s) || s.pictureUrl) continue;
+    pending.add(s);
+    gates.delete(s); // a fresh gate for this pass
+  }
+}
+
+/** `attachMemory`'s reading of each scene of `board`. */
+function attachEach(board: StoryboardScene[], keyThings: KeyThing[] | undefined, home: KeyThing | undefined, makes: boolean): void {
   for (const s of board) {
     const items = listItemsAround(board, s);
     if (items) s.listItems = items;
     else delete s.listItems;
     const sources = memorySourcesFor(board, s);
     const set = listSetFor(board, s);
+    const group = listGroupFor(board, s);
+    if (group) s.groupItems = group.map(x => itemWords(x.scriptText ?? x.narration ?? ""));
+    else delete s.groupItems;
     sourcesOf.set(s, sources);
-    ownSourcesOf.set(s, sources.filter(x => x === set || (!!s.keyThing && shows(x, s.keyThing))));
+    // A reference is never a picture of a PLACE the picture is about (`lendsNoPicture`), whatever it
+    // was filed under: told "this exact pharmacy aisle" it would hand its aisle on (job 409 scene 3).
+    // A list item's INHERITED key thing is not its own (`ownKeyThing`): a reference that shows it was
+    // picked for another thing in it, never for the item. A group picture's items are what it shows.
+    // A picture of no key thing has only the picture it continues (`keylessContinued`): its own subject.
+    const own = ownKeyThing(s);
+    ownSourcesOf.set(
+      s,
+      sources.filter(
+        x =>
+          x === set ||
+          !!group?.includes(x) ||
+          (own ? !lendsNoPicture(own) && shows(x, own) : !s.keyThing && x === keylessContinued(board, s))
+      )
+    );
     viewOf.set(s, memoryViewFor(board, s));
     lookOf.set(s, keyThingLookFor(s, keyThings, makes));
     otherLooksOf.set(s, otherThingLooksFor(s, keyThings, makes));
+    placeLooksOf.set(s, placeLooksFor(s, keyThings, home, makes));
     // Never cleared here: the still loop sets it too, on a picture the check saw cut open.
     if (hiddenInside(s, keyThings)) s.seenFromOutside = true;
     panelLookOf.set(s, panelNamedLook(board, s));
@@ -1209,21 +2205,6 @@ export function attachMemory(
     else continuesOf.delete(s);
     partnerOf.set(s, nearCopyPartnerFor(board, s, sources));
     copied.delete(s);
-  }
-  // A picture is COPIED when a later picture is drawn from it for the thing it is itself about — not
-  // a list's group picture its items are cut from, and not a picture lent only for a thing beside it.
-  for (const s of board) {
-    if (listSetFor(board, s)) continue;
-    const things = [s.keyThing, ...(s.otherKeyThings ?? [])];
-    for (const src of sourcesOf.get(s) ?? []) {
-      const own = ownKeyThing(src);
-      if (own && things.includes(own)) copied.add(src);
-    }
-  }
-  for (const s of rendering) {
-    if (!source(s) || s.pictureUrl) continue;
-    pending.add(s);
-    gates.delete(s); // a fresh gate for this pass
   }
 }
 
@@ -1284,6 +2265,14 @@ export function pictureSettled(s: StoryboardScene): void {
   gate(s).open();
 }
 
+/** Wait — at most `timeoutMs` — for `src`'s picture when it is still being made in this pass. */
+async function madeOrTimedOut(src: StoryboardScene, timeoutMs: number): Promise<void> {
+  if (src.pictureUrl || !pending.has(src)) return;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  await Promise.race([gate(src).promise, new Promise<void>(r => (timer = setTimeout(r, timeoutMs)))]);
+  if (timer) clearTimeout(timer);
+}
+
 /**
  * The pictures `s` is drawn from, waiting (at most `timeoutMs`) for one still being made in this
  * pass. A memory that never came is skipped — the picture is then drawn from words, as before — and
@@ -1295,6 +2284,8 @@ export function pictureSettled(s: StoryboardScene): void {
  * it about something else, or — `continues` — the one it continues as the same topic. `notShown` is
  * the other key things of `s` that none of them shows (`memoryNotShown`). `otherLooks` is the written
  * looks of the other key things its own words name, kept for a redraw from words (`lentLooks`).
+ * `placeLooks` is the looks of where it is set (`placeLooksFor`), with or without references — less any
+ * thing standing there that one of them shows, which the reference carries.
  */
 export async function memoryFor(
   s: StoryboardScene,
@@ -1309,6 +2300,7 @@ export async function memoryFor(
   notShown?: string[];
   refs?: MemoryRef[];
   otherLooks?: ThingLook[];
+  placeLooks?: PlaceLook[];
 }> {
   const urls: string[] = [];
   const refs: MemoryRef[] = [];
@@ -1317,20 +2309,22 @@ export async function memoryFor(
   const prev = rightBeforeOf.get(s);
   let own = false;
   let before: number | undefined;
+  // THE PICTURE IT MUST NOT REPEAT IS MADE FIRST (round 14, job 413 scenes 15-16): the near-copy check
+  // lays it beside this one (`nearCopyPartner`) but only once it is drawn and remembered, and two
+  // pictures of one phone call, neither drawn from the other, were drawn at the same moment. A partner
+  // that is no memory picture of this one is waited for the same way — always an earlier scene
+  // (`nearCopyPartnerFor`), so nothing waits on itself. Only while that check runs (`PICTURE_VARIETY`).
+  const partner = partnerOf.get(s);
+  if (partner && process.env.PICTURE_VARIETY !== "0") await madeOrTimedOut(partner, timeoutMs);
   for (const src of sourcesOf.get(s) ?? []) {
-    if (!src.pictureUrl && pending.has(src)) {
-      let timer: ReturnType<typeof setTimeout> | undefined;
-      await Promise.race([
-        gate(src).promise,
-        new Promise<void>(r => (timer = setTimeout(r, timeoutMs))),
-      ]);
-      if (timer) clearTimeout(timer);
-    }
+    await madeOrTimedOut(src, timeoutMs);
     if (!src.pictureUrl || src.memoryUnfit) continue;
     used.push(src);
     // Which of this picture's other key things the reference shows: a redraw that drops one reference
-    // (`withoutMemoryRef`) knows which of them no reference shows any more.
-    const shown = (s.otherKeyThings ?? []).filter(t => shows(src, t));
+    // (`withoutMemoryRef`) knows which of them no reference shows any more. Never a place: job 411
+    // scene 12's robin references stand on the lawn, and "draw the SAME robin and lawn" would copy the
+    // yard they stand in — a place is drawn as this picture's own words describe it (`notShownClause`).
+    const shown = (s.otherKeyThings ?? []).filter(t => !lendsNoPicture(t) && shows(src, t));
     const at = urls.indexOf(src.pictureUrl);
     if (at >= 0) {
       const more = shown.filter(t => !refs[at].shows?.includes(t));
@@ -1349,8 +2343,13 @@ export async function memoryFor(
   const look = lookOf.get(s);
   // A key thing beside it that no picture among these shows (job 404 scene 14: the robin's two lawn
   // pictures, and "gulf coast yard" in its own words) is not one the references can lend.
-  const notShown = urls.length ? (s.otherKeyThings ?? []).filter(t => !used.some(x => shows(x, t))) : [];
+  const notShown = urls.length
+    ? (s.otherKeyThings ?? []).filter(t => lendsNoPicture(t) || !used.some(x => shows(x, t)))
+    : [];
   const otherLooks = urls.length ? lentLooks(s) : [];
+  // A thing standing where it is set that a reference shows is carried by that reference: a written
+  // look beside it only sets up a conflict (`keyThingLookFor`).
+  const placeLooks = (placeLooksOf.get(s) ?? []).filter(p => !p.in || !used.some(x => shows(x, p.name)));
   return {
     urls,
     own,
@@ -1361,6 +2360,7 @@ export async function memoryFor(
     ...(notShown.length ? { notShown } : {}),
     ...(refs.length ? { refs } : {}),
     ...(otherLooks.length ? { otherLooks } : {}),
+    ...(placeLooks.length ? { placeLooks } : {}),
   };
 }
 

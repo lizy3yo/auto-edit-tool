@@ -61,19 +61,24 @@ import {
   showsScreen,
 } from "./shotList";
 import {
+  anotherOfItsKindClause,
   attachMemory,
   beforeFinished,
   requiredThingsFor,
   BACKGROUND_VIEW,
   BLUR_PRINT_VIEW,
+  homePlaceOf,
   keyThingLookClause,
+  LIST_GROUP_VIEW,
   lookToHold,
   memoryAttached,
   memoryFor,
   memoryView,
   nearCopyPartner,
+  ownKeyThing,
   panelLook,
   pictureSettled,
+  placeLookClause,
   sameThingMove,
   SCREEN_ITEM_VIEW,
   SET_ITEM_VIEW,
@@ -602,6 +607,7 @@ import type {
   TtsWaitState,
   RecurringPerson,
   MemoryRef,
+  PlaceLook,
   ThingLook,
 } from "../shared/types";
 import {
@@ -7280,12 +7286,18 @@ export function buildStillPrompt(
   // ITS KEY THING'S LOOK, when no earlier picture of it is there to follow (`keyThingLookClause`);
   // a named kind's exact look wins. Not on a content-policy fallback, which no longer shows it.
   const look = !visualOverride ? scrubLegibleWriting(keyThingLookClause(scene)) : "";
+  // WHERE IT IS SET, in words (`placeLookClause`): a place lends no reference picture, so a recurring
+  // place keeps one look this way — job 412's "ankle" list item came back in another bedroom.
+  const place = !visualOverride ? scrubLegibleWriting(placeLookClause(scene)) : "";
+  // ANOTHER ONE OF ITS KIND (`anotherOfItsKindClause`): job 412's "wild cat" came back as the video's own
+  // house cat, coat, bib and all — it is told it is not the one shown before.
+  const another = !visualOverride ? scrubLegibleWriting(anotherOfItsKindClause(scene)) : "";
   // A PART HIDDEN INSIDE IS SEEN FROM OUTSIDE (`drawnFromOutside`): job 403 drew its trapway sawn open
   // on every picture that named it ("close view of the toilet's internal porcelain S-shaped trapway
   // channel") or was about it ("close-up of the smooth white curved S-shaped porcelain channel").
   const outside = !visualOverride && drawnFromOutside(scene) ? ` ${SEEN_FROM_OUTSIDE_CLAUSE}` : "";
   return withAllowedText(
-    `${lead}${visual}${scrubLegibleWriting(namedLookClause(scene))}${look}${outside}${item}${angleSuffix}${personSuffix}${memory}${app} ${amateurIphoneLook(subject, motion)} ${framing} ${noFigures} ${NO_BOOK_SUFFIX}`,
+    `${lead}${visual}${scrubLegibleWriting(namedLookClause(scene))}${look}${place}${another}${outside}${item}${angleSuffix}${personSuffix}${memory}${app} ${amateurIphoneLook(subject, motion)} ${framing} ${noFigures} ${NO_BOOK_SUFFIX}`,
     scene.pictureText,
     scene.blurPrint
   );
@@ -7302,7 +7314,12 @@ export function buildStillPrompt(
  * words, which carry no time — "the farmer complains, … the old complain, and the young …", said
  * inside a passage about a writer of ancient times, came back as a farmer in overalls, an old man on
  * a park bench and a young man in a hoodie. When the list finder read the sentence as set in another
- * time or place, the prompt says so, for every item alike. Pure.
+ * time or place, the prompt says so, for every item alike.
+ *
+ * A STEP IS NO SEPARATE THING (round 14, job 413 scenes 31-32): "drain it outside, | store it sealed,"
+ * are two things done to one can. Told to draw each so it "could never be taken for the other items",
+ * a step is pushed away from the very can the step before showed. A step is told the thing it is done
+ * to is the same in every step. Pure.
  */
 export function listItemClause(scene: StoryboardScene): string {
   const items = scene.listItems;
@@ -7314,6 +7331,12 @@ export function listItemClause(scene: StoryboardScene): string {
     : "";
   if (!items?.others.length) return where;
   const others = items.others.map(o => `"${o}"`).join(", ");
+  if (scene.listKind === "steps")
+    return (
+      ` This picture is one step of a sequence said one after another — it shows "${items.own}", and ` +
+      `the other steps (${others}) each get their own picture. Whatever the steps are done to is the ` +
+      `very same one in every step.${where}`
+    );
   return (
     ` This picture is one item of a list said one after another — it shows "${items.own}", drawn so ` +
     `it is clearly that, by the shape and features that make it what it is, and could never be ` +
@@ -7745,7 +7768,8 @@ export type MemoryFields = Pick<
  * continues (`memoryRightBefore`, `memoryContinues`); the look kept for a redraw from words
  * (`memoryWordsLook`); the other key things none of the references shows (`memoryNotShown`); and the
  * written looks of the other key things its own words name, kept for a redraw from words
- * (`otherThingLooks`). Pure.
+ * (`otherThingLooks`). Also the looks of where it is set (`placeLooks`), with or without references:
+ * no place lends a reference picture, so no redraw that changes the references changes them. Pure.
  */
 export function memoryFields(
   memory: {
@@ -7758,9 +7782,10 @@ export function memoryFields(
     notShown?: string[];
     refs?: MemoryRef[];
     otherLooks?: ThingLook[];
+    placeLooks?: PlaceLook[];
   },
   view: string | undefined
-): MemoryFields {
+): MemoryFields & Pick<StoryboardScene, "placeLooks"> {
   const has = memory.urls.length > 0;
   const before =
     has && memory.before != null && memory.before >= 0 && memory.before < memory.urls.length
@@ -7778,6 +7803,7 @@ export function memoryFields(
     memoryContinues: before != null && memory.continues ? true : undefined,
     memoryWordsLook: has && memory.own ? memory.wordsLook : undefined,
     otherThingLooks: has && memory.otherLooks?.length ? memory.otherLooks : undefined,
+    placeLooks: memory.placeLooks?.length ? memory.placeLooks : undefined,
   };
 }
 
@@ -8101,7 +8127,9 @@ export function rightBeforeClause(scene: StoryboardScene): string {
   const n = scene.memoryRefUrls?.length ?? 0;
   const p = scene.memoryRightBefore;
   if (!n || p == null || p < 0 || p >= n || !scene.keyThing) return "";
-  if (scene.memoryView === SCREEN_ITEM_VIEW || scene.memoryView === SET_ITEM_VIEW) return "";
+  // A group picture's references are its items one by one, each lending only itself (`LIST_GROUP_VIEW`).
+  if (scene.memoryView === SCREEN_ITEM_VIEW || scene.memoryView === SET_ITEM_VIEW || scene.memoryView === LIST_GROUP_VIEW)
+    return "";
   const names = scene.memoryOthersOnly
     ? othersOnlyNames(scene)
     : [scene.partOf ?? scene.keyThing, ...shownOthers(scene)];
@@ -8159,6 +8187,38 @@ function notShownClause(scene: StoryboardScene): string {
   return ` The ${namesInSentence(apart)} ${apart.length > 1 ? "are" : "is"} drawn as this picture's own words describe ${apart.length > 1 ? "them" : "it"}.`;
 }
 
+/**
+ * A CONTINUATION OF NO KEY THING (round 14, job 413 scenes 15-16): drawn from the picture it continues
+ * (`keylessContinued`), which lends how the people and things in it look and nothing else — the call's
+ * second picture had no reference and drew a smartphone where the first had a corded desk phone, and
+ * with the old picture as a template it would have been the same over-the-shoulder shot again. The
+ * concrete camera (`memoryViewFor`, `REDRAW_CAMERAS`) is what sets it apart. People are named only when
+ * it shows someone: a picture of no one — or one drawn with nobody in it after the host check refused
+ * it — takes the things alone, and no person or hand from the reference. Empty when the reference is
+ * not the picture it continues (a list item's group picture has its own clause). Pure.
+ */
+export function continuedMomentClause(scene: StoryboardScene): string {
+  const n = scene.memoryRefUrls?.length ?? 0;
+  const p = scene.memoryRightBefore;
+  if (!n || p == null || p < 0 || p >= n || !scene.memoryContinues) return "";
+  const which = n === 1 ? "The first reference image" : `Reference image ${p + 1}`;
+  const who = scene.humanPresent
+    ? "the people and things in it look from it — the same clothes and the very same objects, a thing in someone's hand the same thing"
+    : "the things in it look from it — the very same objects, and no person or hand from it";
+  const view = scene.memoryView
+    ? ` Camera position for THIS picture: ${scene.memoryView} — clearly different from the reference's.`
+    : "";
+  const host =
+    scene.humanPresent && scene.brollHostRef ? " The last reference image is the host, only for how they look." : "";
+  return (
+    ` ${which} is the earlier picture this one CONTINUES — the same moment, already shown in this video: ` +
+    `take ONLY how ${who} — never the picture itself. This is a clearly new photo of that moment from the ` +
+    `camera position given for THIS picture — never that picture's angle with the subject only a little ` +
+    `closer or further away, never the same pose, the same hand positions or the same things at the same ` +
+    `angles in the same places.${view}${host}`
+  );
+}
+
 function memoryReferenceClause(scene: StoryboardScene): string {
   const n = scene.memoryRefUrls?.length ?? 0;
   // A phone or laptop screen showing a key thing (`SCREEN_ITEM_VIEW`): the thing is only the photo
@@ -8176,7 +8236,22 @@ function memoryReferenceClause(scene: StoryboardScene): string {
       "this one item, close up and filling the frame — the very same one as in the reference: " +
       "identical shape, colours, materials and wear."
     );
-  if (!n || !scene.keyThing) return "";
+  // A picture that GATHERS the items of the list just said (`LIST_GROUP_VIEW`): each item from its own
+  // picture, together — job 414 scene 8, "the steel in those three", drew the froe from the word alone,
+  // a bare flat bar two seconds after the viewer saw it right.
+  if (n && scene.memoryView === LIST_GROUP_VIEW) {
+    const items = (scene.groupItems ?? []).map(t => `"${t}"`);
+    return (
+      ` ${n === 1 ? "The reference image is" : `The ${n} reference images are`} the picture${n === 1 ? "" : "s"} ` +
+      `of the items of the list just said${items.length ? ` (${namesInSentence(items)})` : ""}, one item in ` +
+      `each. This picture shows them together: draw every item a reference shows as the very same one — ` +
+      `identical shape, size, colours, materials and wear — where this picture's own words put them, from ` +
+      `a new camera position; never copy any reference's framing.` +
+      (scene.humanPresent && scene.brollHostRef ? " The last reference image is the host, only for how they look." : "")
+    );
+  }
+  if (n && !scene.keyThing) return continuedMomentClause(scene);
+  if (!n) return "";
   // Every key thing in the picture is drawn from its own earlier picture (the heater AND the mattress)
   // — those the references show; the rest are drawn from the words (`notShownClause`).
   const all = [scene.keyThing, ...shownOthers(scene)];
@@ -8199,10 +8274,18 @@ function memoryReferenceClause(scene: StoryboardScene): string {
     const same = beforeFinished(scene)
       ? "the same colours, materials and wear, at the same or an earlier point in the making"
       : "identical shape, size, colours, materials and wear";
+    // A list item whose key thing was only INHERITED (`ownKeyThing`): job 412 scenes 5-7, "knee," "hip,"
+    // "ribs," filed under the cat's paws, are drawn from the cat's picture for the cat whose paw it is.
+    // The inherited thing is no part of the item, so the references are named only for what they lend —
+    // never told to leave out a thing the item may show.
+    const rest =
+      scene.listCut && !ownKeyThing(scene)
+        ? `${n === 1 ? "It is" : "They are"} there only for the ${named}: everything else in this picture is drawn from its own words.`
+        : `${n === 1 ? "It does" : "They do"} NOT show the ${scene.keyThing}: draw it from this picture's own words.`;
     return (
       ` ${which} this exact ${named}, seen earlier in this video: draw the SAME ${named} — ${same} — ` +
       `from a different camera position, never copying the reference's framing. ` +
-      `${n === 1 ? "It does" : "They do"} NOT show the ${scene.keyThing}: draw it from this picture's own words.` +
+      rest +
       apart +
       host
     );
@@ -8227,10 +8310,22 @@ function memoryReferenceClause(scene: StoryboardScene): string {
     );
   // A part that carries printing nobody says (`BLUR_PRINT_VIEW`): the part is the subject, from an
   // arm's length, so the print stays a soft patch.
+  // THE OTHER THINGS IN A CLOSE-UP ARE THE SAME ONES (round 14, job 414 scene 26): "a close-up of a wide
+  // flat broadaxe blade slicing a pale layer of wood from the log's side" was drawn from scene 25, the
+  // broadaxe at work on the log — and told only that it showed "the whole green poplar log", never that
+  // the axe in it was the axe: the blade came back square with a row of holes, on another handle, in the
+  // next picture. The other key things the references show are named as the very same ones.
+  const partOthers = shownOthers(scene);
+  const sameOthers = partOthers.length
+    ? ` The ${namesInSentence(partOthers)} in ${n === 1 ? "it" : "them"} ${partOthers.length > 1 ? "are" : "is"} ` +
+      `this exact ${namesInSentence(partOthers)}: draw the very same ${partOthers.length > 1 ? "ones" : "one"} — ` +
+      `identical shape, size, colours, materials and wear.`
+    : "";
   if (scene.partOf && scene.memoryView === BLUR_PRINT_VIEW)
     return (
       ` ${which} the whole ${scene.partOf}. This picture shows just the part of it the words are ` +
       `about, ${BLUR_PRINT_VIEW}. Keep the same colours, materials and wear as the reference.` +
+      sameOthers +
       host
     );
   if (scene.partOf)
@@ -8238,6 +8333,7 @@ function memoryReferenceClause(scene: StoryboardScene): string {
       ` ${which} the whole ${scene.partOf}. This picture is a CLOSE-UP of just the part of it the ` +
       `words are about, filling the frame — never the whole ${scene.partOf} again. Keep the same ` +
       `fabrics, colours, materials and wear as the reference.` +
+      sameOthers +
       host
     );
   // Where it is: where its memory had it unless its own words put it somewhere else — job 399 scene
@@ -11584,6 +11680,10 @@ async function drawValidatedStill(
         // (`looksAtClosestRelative`) — the picture whose composition it may have copied (job 410
         // scene 20 was scene 3's seat row with the woman gone).
         scene.memoryView !== BACKGROUND_VIEW &&
+        // A picture that gathers a list's items (`LIST_GROUP_VIEW`) is drawn from one picture per item:
+        // no one of them is the whole to compare it with — three tools are not "a different" drawknife.
+        // The near-copy check still lays the pictures it is drawn from beside it.
+        scene.memoryView !== LIST_GROUP_VIEW &&
         // References of the other things only (`memoryOthersOnly`): there is nothing of its own
         // thing to compare it with — a first mattress is not "a different mattress" than a heater.
         !scene.memoryOthersOnly
@@ -14342,14 +14442,19 @@ async function compositeSceneSplit(
  * named kind's exact look the pictures of that thing carry (`panelNamedLook`): the named-things step
  * reads only full-frame pictures, and job 400's scroll panel at scene 27 was a blank parchment on two
  * rollers between pictures of one tied papyrus roll. Everything is looked up on the HOST scene — the
- * panel's own scene object is a copy. Exported for testing.
+ * panel's own scene object is a copy. A panel of no key thing still wears the look of where it is set
+ * (`placeLooks`), like any picture set there — and never one its scene carried from before. Exported
+ * for testing.
  */
 export async function withSplitMemory(
   host: StoryboardScene,
   right: StoryboardScene,
   timeoutMs?: number
 ): Promise<StoryboardScene> {
-  if (!host.keyThing) return right;
+  if (!host.keyThing) {
+    const { placeLooks } = await memoryFor(host, timeoutMs);
+    return placeLooks?.length || right.placeLooks ? { ...right, placeLooks } : right;
+  }
   // The panel's soft print decides its remembered close-up (`BLUR_PRINT_VIEW`), so it is marked
   // before the view is (`blurUnsaidPrint` reads the panel's own words on a split).
   blurUnsaidPrint(host);
@@ -16056,7 +16161,7 @@ async function resumeRenderingScenes(
 
   // Re-poll the remaining renders across both provider lanes concurrently (was a sequential
   // for-loop), so a backlog of slow host (HeyGen) resumes no longer blocks b-roll resumes.
-  attachMemory(scenes, toResume, params.keyThings);
+  attachMemory(scenes, toResume, params.keyThings, homePlaceOf(params.continuitySheet));
   await dispatchScenesByProvider(
     toResume,
     lipsync,
@@ -18708,7 +18813,7 @@ async function runUnifiedPipeline(
     // Two provider lanes run concurrently: host (HeyGen) at heygenConcurrency, b-roll (69Labs)
     // at sixtynineVideoConcurrency. Feeds both providers to capacity instead of one shared pool
     // where host scenes blocking on HeyGen starve idle 69Labs capacity.
-    attachMemory(scenes, scenes, params.keyThings);
+    attachMemory(scenes, scenes, params.keyThings, homePlaceOf(params.continuitySheet));
     await dispatchScenesByProvider(
       scenes,
       lipsync,
@@ -20574,7 +20679,7 @@ async function renderSceneClipInPlace(
   revoice?: () => Promise<void>
 ): Promise<void> {
   // A regenerated picture of a key thing is still drawn from its earlier pictures.
-  attachMemory(scenes, [scene], params.keyThings);
+  attachMemory(scenes, [scene], params.keyThings, homePlaceOf(params.continuitySheet));
   // What this beat shows now. On an operator regenerate it is TAKE 1: put back if the new
   // render does not come through (so a failed or refused regenerate leaves the film as it was
   // instead of turning a good host shot to b-roll), and kept beside the new take if it does
@@ -20751,7 +20856,7 @@ async function regenerateSplitRight(
   // off what the last pass over THIS board found. Every path here starts from a storyboard read back
   // from the database, new objects no pass has seen, so without this the operator's panel was drawn
   // from its own words alone; a full-frame regenerate has always done the same (`renderSceneClipInPlace`).
-  attachMemory(scenes, [scene], params.keyThings);
+  attachMemory(scenes, [scene], params.keyThings, homePlaceOf(params.continuitySheet));
 
   if (!scene.hostClipUrls?.length) {
     const existing = scene.clipUrls?.length
@@ -23771,7 +23876,7 @@ async function retryFailedScenesLocked(
     // sequential for-loop that submitted only one scene's chunks at a time and blocked ~25min
     // on its polls before touching the next scene), mirroring resumeRenderingScenes. Host
     // scenes now fan out up to ENV.heygenConcurrency instead of one-at-a-time.
-    attachMemory(scenes, renderable, params.keyThings);
+    attachMemory(scenes, renderable, params.keyThings, homePlaceOf(params.continuitySheet));
     await dispatchScenesByProvider(
       renderable,
       lipsync,

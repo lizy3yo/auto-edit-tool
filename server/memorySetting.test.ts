@@ -186,18 +186,21 @@ describe("a key thing no reference shows is never called 'this exact' one of the
     expect(clause.endsWith(MEMORY_SETTING_CLAUSE)).toBe(true);
   });
 
-  it("404-15 at render: drawn from scene 14, which IS a picture of the yard — both are named, nothing said apart", async () => {
+  it("404-15 at render: drawn from scene 14 for the robin — a yard is a place, never 'this exact' one of the references (round 14)", async () => {
+    // Scene 14 IS a picture of the yard, and was once named for it too. A place lends no reference
+    // picture: job 411's robin references stood on the northern lawn, and "the SAME robin and lawn"
+    // copied the whole yard. The yard is the picture's own words' (and its written look's).
     const board = job404();
     board[3].pictureUrl = "https://r2/404/still-src-14.png";
     attachMemory(board, [board[4]]);
     pictureSettled(board[3]);
     const m = await memoryFor(board[4], 0);
     expect(m.urls).toEqual(["https://r2/404/still-src-5.png", "https://r2/404/still-src-14.png"]);
-    expect(m.notShown).toBeUndefined();
+    expect(m.notShown).toEqual(["gulf coast yard"]);
+    expect(m.refs?.some(r => r.shows?.includes("gulf coast yard"))).toBe(false);
     const s = { ...board[4], ...memoryFields(m, MEMORY_VIEWS[0]) } as StoryboardScene;
-    expect(s.memoryNotShown).toBeUndefined();
-    expect(memoryClause(s)).toMatch(/show this exact robin and gulf coast yard. Draw the SAME robin and gulf coast yard/);
-    expect(memoryClause(s)).not.toContain("drawn as this picture's own words describe");
+    expect(memoryClause(s)).toMatch(/show this exact robin\. Draw the SAME robin — /);
+    expect(memoryClause(s)).toContain(" The gulf coast yard is drawn as this picture's own words describe it.");
   });
 
   it("a picture drawn before the field names every key thing, as it always did", () => {

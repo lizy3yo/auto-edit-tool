@@ -15,6 +15,8 @@ import {
   memorySourcesFor,
   memoryViewFor,
   ownKeyThing,
+  pictureLook,
+  placeLook,
   requiredThingsFor,
   SCREEN_ITEM_VIEW,
   shotFraming,
@@ -632,12 +634,17 @@ describe("Hank's job 326: a list of STEPS (the operator, 2026-10-02)", () => {
     ];
     const r = applySpokenLists(scenes, lists(scenes), { main: "incense holder" });
     const steps = r.scenes.filter(s => s.listCut);
-    for (const s of steps) {
+    steps.forEach((s, k) => {
       expect(s.buildStage).toBe("making");
       expect(ownKeyThing(s)).toBe("incense holder"); // "oil it," too
-      expect(memorySourcesFor(r.scenes, s)).toEqual([]); // the finished holder is further along
+      // The finished holder is further along, never a source. Round 14: steps are done to one block, so
+      // each is drawn from the steps before it in its list (job 413 scenes 31-32) — the first from none.
+      const from = memorySourcesFor(r.scenes, s);
+      expect(from.some(x => x.buildStage === "done")).toBe(false);
+      expect(from.length > 0).toBe(k > 0);
+      expect(from.every(x => steps.indexOf(x) >= 0 && steps.indexOf(x) < k)).toBe(true);
       expect(requiredThingsFor(s)[0]).toMatch(/^incense holder — when it is what is being made: as it is at this stage of being made/);
-    }
+    });
   });
 
   it("steps that build nothing stay as they were (Frederick's job 359)", () => {
@@ -656,8 +663,10 @@ describe("Hank's job 326: a list of STEPS (the operator, 2026-10-02)", () => {
     expect(steps.map(s => s.scriptText)).toEqual(["get a stepladder,", "take one alarm down,", "and read the label."]);
     expect(steps.map(s => s.buildStage)).toEqual([undefined, undefined, undefined]);
     expect(steps.map(s => s.keyThing)).toEqual(["stepladder", "smoke alarm", "smoke alarm"]);
-    // The list-item rule as before: "read the label" names no alarm, so it is not drawn from one.
-    expect(steps.map(ownKeyThing)).toEqual(["stepladder", "smoke alarm", undefined]);
+    // Round 14: steps are done to one thing — "read the label" is the label of the alarm just taken down,
+    // so it is the alarm's picture, drawn from that step's alarm (job 413 scenes 31-32's gas can).
+    expect(steps.map(ownKeyThing)).toEqual(["stepladder", "smoke alarm", "smoke alarm"]);
+    expect(memorySourcesFor(r.scenes, steps[2]).map(x => x.scriptText)).toEqual(["take one alarm down,"]);
     expect(requiredThingsFor(steps[1])).toEqual(["smoke alarm"]);
     expect(memoryClause({ ...steps[1], memoryRefUrls: ["https://x/alarm.png"] })).toMatch(/identical shape, size, colours/);
   });
@@ -4991,8 +5000,11 @@ describe("a memory picture takes only the thing from its references, never their
     attachMemory(b, [b[4]]);
     pictureSettled(b[3]);
     const s15 = { ...b[4], ...memoryFields(await memoryFor(b[4], 0), MEMORY_VIEWS[0]) } as StoryboardScene;
-    expect(memoryClause(s15)).toMatch(/show this exact robin and gulf coast yard./);
-    expect(memoryClause(s15)).not.toContain("drawn as this picture's own words describe");
+    // Round 14: a PLACE is never "this exact" one of the references, even where one stands in it — job
+    // 411's robin references stood on the northern lawn, and "the SAME robin and lawn" copied the yard.
+    // 15 is drawn from 14 for the robin; the yard is its own words'.
+    expect(memoryClause(s15)).toMatch(/show this exact robin\. Draw the SAME robin — /);
+    expect(memoryClause(s15)).toContain("The gulf coast yard is drawn as this picture's own words describe it.");
   });
 });
 
@@ -6289,7 +6301,10 @@ describe("every key thing its words name keeps its look when a picture is drawn 
     ];
     attachMemory(r, [r[1]], robin);
     const s14 = { ...r[1], ...memoryFields(await memoryFor(r[1], 0), memoryView(r[1])) } as StoryboardScene;
-    expect(s14.otherThingLooks?.map(t => t.name)).toEqual(["gulf coast yard"]);
+    // Round 14: the yard is a PLACE — its look is where the picture is set (`placeLooks`), cut to what
+    // the yard is made of; it is no longer lent as another thing's look.
+    expect(s14.otherThingLooks).toBeUndefined();
+    expect(s14.placeLooks).toEqual([{ name: "gulf coast yard", look: "a flat grassy yard" }]);
     expect(promptAfterMemoryChange(s14, buildStillPrompt(s14), memoryToWords(s14))).not.toContain("frost");
     // The toilet's panel names no bin; the toilet's first picture has one beside it. Nothing about the
     // bin is added — what is in a picture is up to its own words.
@@ -6827,8 +6842,13 @@ describe("Werner's job 408 scene 23: a props look by its parts reaches the first
     expect(keyThingLookFor(auger, things)).toBe(
       "a closet auger, a J-bent steel tube, a black rubber sleeve, a crank handle joined to the top of the tube"
     );
+    // A "where" naming a place still goes in the place cut.
+    expect(pictureLook(things[1].look)).toBe("paved slope in front of the garage, dusted with light frost");
+    // Round 14: a driveway is a PLACE — its look is no own-thing look but where a picture is set
+    // (`placeLook`), the frost and what happens there left to each picture's own words.
     const drive = pic(5, "It waits by the road.", "a paved driveway", { keyThing: "driveway" });
-    expect(keyThingLookFor(drive, things)).toBe("paved slope in front of the garage, dusted with light frost");
+    expect(keyThingLookFor(drive, things)).toBeUndefined();
+    expect(placeLook(things[1].look)).toBe("paved slope in front of the garage");
   });
 });
 
@@ -7637,5 +7657,446 @@ describe("a dimming caption is a glance, and two never come back to back (round 
     const out = await planGraphics({ words: said, cuts, film, ask: asking([[fine, deeper]]).ask, ensureIcon: async () => true });
     expect(out.rounds[0].problems).toEqual([]);
     expect(out.cues.map(c => c.id)).toEqual(["toilet-is-fine", "stick-deeper"]);
+  });
+});
+
+describe("a place lends no picture; a place set again keeps one written look (round 14, jobs 411 and 412)", () => {
+  // 411: "lawn" (the northern backyard's) was a key thing, so every picture naming a lawn was drawn
+  // from the first empty-yard picture — one yard framing five times in two minutes — and the Gulf Coast
+  // panel was drawn from that snowy lawn. 412: the "ankle" list item, drawn from nothing, came back in
+  // another bedroom. Rows as stored; the full cases are in placeMemory.test.ts.
+  const LAWN = "a wide stretch of short green-to-brown grass covering the backyard";
+  const robinThings: KeyThing[] = [
+    { name: "robin", look: "an American robin, a reddish-orange breast, a dark gray-brown back, a white lower belly, a white eye ring", main: true },
+    { name: "kitchen window", look: "a rectangular window with white wooden frame, clear glass panes, looking out over the lawn" },
+    { name: "lawn", look: LAWN },
+  ];
+  const yard = (): StoryboardScene[] =>
+    [
+      { index: 2, showSubject: "an empty frosty backyard lawn at dawn under a pale sky", keyThing: "lawn", pictureUrl: "https://r2/411/still-src-2.png" },
+      {
+        index: 5,
+        showSubject: "an American robin standing on a patchy green-to-brown lawn in early spring with the last snow melting",
+        keyThing: "robin",
+        otherKeyThings: ["lawn"],
+        pictureUrl: "https://r2/411/still-src-5.png",
+      },
+      { index: 7, showSubject: "the kitchen window with the backyard lawn visible beyond it", keyThing: "kitchen window", otherKeyThings: ["lawn"] },
+      { index: 12, showSubject: "a robin standing on a snow-covered lawn in the backyard", keyThing: "robin", otherKeyThings: ["lawn"] },
+      {
+        index: 16,
+        showSubject: "a flock of American robins on a sunny green lawn under palm trees",
+        hostPresent: true,
+        splitVisual: "Several American robins scattered across a green lawn in a Gulf Coast yard under palmetto trees on a sunny winter day",
+        keyThing: "robin",
+        otherKeyThings: ["lawn"],
+      },
+      { index: 18, showSubject: "the empty backyard lawn in late November light", keyThing: "lawn" },
+    ].map(s => ({ narration: "n", scriptText: "n", visualPrompt: s.showSubject, ...s }) as StoryboardScene);
+  const HOME_411 = "backyard: a suburban yard with a mowed lawn, holly bushes with red berries along the border, a porch light fixture, storm windows on the house, late fall to winter light";
+
+  it("411: no picture is drawn from the first yard picture — the robin is still drawn from its own", async () => {
+    const { attachMemory, homePlaceOf, memorySourcesFor } = await import("./pictureMemory");
+    const b = yard();
+    attachMemory(b, b, robinThings, homePlaceOf(HOME_411));
+    const from = (i: number) => memorySourcesFor(b, b.find(s => s.index === i)!).map(s => s.index);
+    expect(from(7)).toEqual([]);
+    expect(from(18)).toEqual([]);
+    expect(from(12)).toEqual([5]);
+  });
+
+  it("411 scene 16: the Gulf Coast panel is the robin's pictures and its own words — no northern lawn, no 'SAME lawn'", async () => {
+    const { attachMemory, homePlaceOf } = await import("./pictureMemory");
+    const { buildSplitRightScene, buildStillPrompt, memoryClause, withSplitMemory } = await import("./longformVideo");
+    const b = yard();
+    const host = b.find(s => s.index === 16)!;
+    attachMemory(b, [host], robinThings, homePlaceOf(HOME_411));
+    const panel = await withSplitMemory(host, buildSplitRightScene(host), 0);
+    expect(panel.memoryRefUrls).toEqual(["https://r2/411/still-src-5.png"]);
+    expect(memoryClause(panel)).not.toMatch(/robin and lawn/);
+    expect(memoryClause(panel)).toContain("The lawn is drawn as this picture's own words describe it.");
+    expect(buildStillPrompt(panel, false, undefined, undefined, true)).not.toContain(LAWN);
+  });
+
+  it("411 scene 12: set in the backyard, it carries the lawn's and the backyard's look, without the home line's season", async () => {
+    const { attachMemory, homePlaceOf, memoryFor, memoryView } = await import("./pictureMemory");
+    const { buildStillPrompt, memoryFields } = await import("./longformVideo");
+    const b = yard();
+    const s12 = b.find(s => s.index === 12)!;
+    attachMemory(b, [s12], robinThings, homePlaceOf(HOME_411));
+    const s = { ...s12, ...memoryFields(await memoryFor(s12, 0), memoryView(s12)) } as StoryboardScene;
+    const prompt = buildStillPrompt(s);
+    expect(prompt).toContain(`the lawn: ${LAWN}; the backyard: a suburban yard with a mowed lawn, holly bushes`);
+    expect(prompt).not.toContain("winter light");
+  });
+
+  it("412 scene 4: the 'ankle' list item is in the video's bedroom, on its bed; scene 3, drawn from a picture of the bed, keeps that reference", async () => {
+    const { attachMemory, homePlaceOf, memoryFor, memoryView } = await import("./pictureMemory");
+    const { buildStillPrompt, memoryFields } = await import("./longformVideo");
+    const things: KeyThing[] = [
+      { name: "cat", look: "a domestic shorthair cat, soft grey-and-white coat, medium build, a long tail held low, pale green eyes", main: true },
+      { name: "bed", look: "a low wooden-framed bed with white rumpled sheets and a dark grey blanket pushed to one side, positioned centrally in the bedroom" },
+    ];
+    const HOME_412 = "bedroom: a quiet bedroom at pre-dawn hours, soft dim blue-grey light, an unmade bed as the central feature, calm and tidy surroundings";
+    const b = [
+      {
+        index: 2,
+        showSubject: "cat paws stepping silently onto the foot of the bed",
+        visualPrompt: "A grey-and-white cat's small white-tipped paws land silently on the foot of a low wooden bed with white rumpled sheets in a quiet bedroom at pre-dawn, soft dim blue-grey light.",
+        keyThing: "cat paws",
+        otherKeyThings: ["bed"],
+        pictureUrl: "https://r2/412/still-src-2.png",
+      },
+      {
+        index: 3,
+        showSubject: "cat walking across sleeping owner's legs in bed",
+        visualPrompt: "A grey-and-white domestic shorthair cat walks slowly across the length of a bed with white rumpled sheets and dark grey blanket, moving over the legs and lower body in a quiet bedroom at pre-dawn.",
+        keyThing: "cat",
+        otherKeyThings: ["bed"],
+      },
+      {
+        index: 4,
+        scriptText: "ankle,",
+        listCut: true,
+        showSubject: "cat stepping along owner's body from ankle toward ribs in bed",
+        visualPrompt: "Close-up of a grey-and-white cat's small white-tipped paws stepping deliberately along fabric-covered legs and lower torso toward the ribs, moving across a bed in a quiet bedroom at pre-dawn.",
+        keyThing: "cat",
+        otherKeyThings: ["bed"],
+      },
+    ].map(s => ({ narration: "n", scriptText: "n", ...s }) as StoryboardScene);
+    attachMemory(b, b.slice(1), things, homePlaceOf(HOME_412));
+    const ankle = { ...b[2], ...memoryFields(await memoryFor(b[2], 0), memoryView(b[2])) } as StoryboardScene;
+    expect(ankle.memoryRefUrls).toBeUndefined();
+    expect(buildStillPrompt(ankle)).toContain(
+      "the bedroom: a quiet bedroom, an unmade bed as the central feature, calm and tidy surroundings; the bed in the bedroom: a low wooden-framed bed with white rumpled sheets and a dark grey blanket."
+    );
+    const s3 = { ...b[1], ...memoryFields(await memoryFor(b[1], 0), memoryView(b[1])) } as StoryboardScene;
+    expect(s3.memoryRefUrls).toEqual(["https://r2/412/still-src-2.png"]);
+    expect(s3.placeLooks?.map(p => p.name)).toEqual(["bedroom"]);
+  });
+});
+describe("another of the same kind is not the key thing (round 14, job 412 scenes 23, 25 and 26)", () => {
+  // "Her wild relatives do their serious hunting in the low light at the edges of the day" was drawn as
+  // "a wild cat stalking …" and came back as the video's own house cat — the same coat, bib, socks and
+  // eyes — because the word "cat" filed the picture under the MAIN key thing and the pet's first picture
+  // was handed over as "this exact cat". The full cases are in anotherOfItsKind.test.ts.
+  const WILD = "a wild cat stalking low through scattered brush across the dawn-lit wild landscape toward a small mouse";
+  const things: KeyThing[] = [
+    { name: "cat", look: "a domestic shorthair cat, soft grey-and-white coat, medium build, a long tail held low, pale green eyes", main: true },
+    { name: "wild landscape", look: "an open dawn-lit wilderness with low golden light, scattered brush and distant hills, calm and empty of people" },
+  ];
+  const board = (): StoryboardScene[] =>
+    [
+      {
+        index: 2,
+        showSubject: "cat walking across sleeping owner's legs in bed",
+        keyThing: "cat",
+        pictureUrl: "https://r2/412/still-src-2.png",
+      },
+      { index: 21, showSubject: "the grey-and-white cat resting calmly at the foot of the bed in the dim bedroom at night", keyThing: "cat" },
+      { index: 22, showSubject: WILD, keyThing: "wild landscape", otherKeyThings: ["cat"] },
+    ].map(s => ({ narration: "n", scriptText: "n", visualPrompt: s.showSubject, ...s }) as StoryboardScene);
+
+  it("412: the wild cat is drawn from no picture of the pet, with none of her look, and told it is another one", async () => {
+    const { attachMemory, memoryFor, memorySourcesFor, memoryView } = await import("./pictureMemory");
+    const { buildStillPrompt, memoryFields } = await import("./longformVideo");
+    const b = board();
+    attachMemory(b, b, things);
+    expect(memorySourcesFor(b, b[2])).toEqual([]);
+    const wild = { ...b[2], ...memoryFields(await memoryFor(b[2], 0), memoryView(b[2])) } as StoryboardScene;
+    const prompt = buildStillPrompt(wild);
+    expect(prompt).toContain("this picture shows a wild cat — not the cat shown in this video's other pictures, nor a copy of it.");
+    expect(prompt).not.toContain("soft grey-and-white coat");
+  });
+
+  it("412: the pet on the bed is still the cat — drawn from her first picture, with no such line", async () => {
+    const { attachMemory, memorySourcesFor } = await import("./pictureMemory");
+    const { buildStillPrompt } = await import("./longformVideo");
+    const b = board();
+    attachMemory(b, b, things);
+    expect(memorySourcesFor(b, b[1]).map(s => s.index)).toEqual([2]);
+    expect(buildStillPrompt(b[1])).not.toContain("ANOTHER ONE OF ITS KIND");
+  });
+
+  it("411: in a video about a WILD kind, 'another robin' is still the robin — the species' look and picture kept", async () => {
+    // Job 411's key thing is the species ("an American robin, a reddish-orange breast…") and its script
+    // says "nobody sees another robin until spring": the words that tell a pet apart from a wild cat
+    // must not strip the regional kind's look off a robin.
+    const { attachMemory, memorySourcesFor } = await import("./pictureMemory");
+    const { buildStillPrompt } = await import("./longformVideo");
+    const robin: KeyThing[] = [
+      { name: "robin", look: "an American robin, a reddish-orange breast, a dark gray-brown back, a white lower belly, a white eye ring", main: true },
+    ];
+    const b = [
+      { index: 5, showSubject: "a robin standing on the grass with its head tilted", keyThing: "robin", pictureUrl: "https://r2/411/still-src-5.png" },
+      { index: 9, showSubject: "another robin pulling a worm from the wet grass" },
+    ].map(s => ({ narration: "n", scriptText: "n", visualPrompt: s.showSubject, ...s }) as StoryboardScene);
+    attachMemory(b, b, robin);
+    expect(b[1].keyThing).toBe("robin");
+    expect(b[1].othersOfKind).toBeUndefined();
+    expect(memorySourcesFor(b, b[1]).map(s => s.index)).toEqual([5]);
+    expect(buildStillPrompt(b[1])).not.toContain("ANOTHER ONE OF ITS KIND");
+  });
+});
+
+describe("round 14: a continuation knows what it continues (jobs 413 and 412)", () => {
+  // Job 413 scenes 15-16: two views of one phone call, 11.4 s, came back as the same over-the-shoulder
+  // shot, the phone a corded desk phone in one and a smartphone in the other. The call names no key
+  // thing, so the second view had no reference to the first, no concrete camera, and was drawn at the
+  // same moment. Job 412 scene 8 was scene 3's shot again: the list cut out of its beat ("ankle, knee,
+  // hip, ribs") left the "ribs" close-up right before it, and its camera and its near-copy partner were
+  // read off that close-up. The full cases are in continuationChain.test.ts.
+  const look =
+    "A lean man in his late fifties with fair, weathered skin, graying hair under a woven straw cowboy hat, wearing a light blue denim button-up shirt";
+  const row = (index: number, show: string, over: Partial<StoryboardScene> = {}) =>
+    ({ index, narration: "n", scriptText: "n", showSubject: show, visualPrompt: show, ...over }) as StoryboardScene;
+  const CALL = "the host on the phone at the workbench calling the city office";
+
+  it("413: the call's second view waits for the first, is drawn from it for the phone and the clothes, from a concrete camera", async () => {
+    const { attachMemory, memoryFor, memoryView, nearCopyPartner, pictureSettled } = await import("./pictureMemory");
+    const { memoryClause, memoryFields } = await import("./longformVideo");
+    const { REDRAW_CAMERAS } = await import("./pictureVariety");
+    const { OTHER_VIEWS } = await import("./shotList");
+    const host = { humanPresent: true, brollHostLook: look, brollHostRef: "https://r2/host-photos/phone-v4-413.jpg" };
+    const b = [row(15, CALL, host), row(16, `${CALL}${OTHER_VIEWS[0]}`, host)];
+    attachMemory(b, b);
+    expect(nearCopyPartner(b[1])).toBe(b[0]);
+    let done = false;
+    const waiting = memoryFor(b[1], 5_000).then(m => ((done = true), m));
+    await new Promise(r => setTimeout(r, 20));
+    expect(done).toBe(false);
+    b[0].pictureUrl = "https://r2/413/still-src-15.png";
+    pictureSettled(b[0]);
+    const s = { ...b[1], ...memoryFields(await waiting, memoryView(b[1])) } as StoryboardScene;
+    expect(s.memoryRefUrls).toEqual(["https://r2/413/still-src-15.png"]);
+    expect(s.memoryView).toBe(REDRAW_CAMERAS[0]);
+    const clause = memoryClause(s);
+    expect(clause).toContain("this one CONTINUES — the same moment");
+    expect(clause).toContain("a thing in someone's hand the same thing");
+  });
+
+  it("412: scene 8 continues scene 3 past the list, and is compared with it — never the 'ribs' close-up", async () => {
+    const { continuedPicture, memorySourcesFor, nearCopyPartnerFor } = await import("./pictureMemory");
+    const b = [
+      row(3, "cat walking across sleeping owner's legs in bed", { keyThing: "cat" }),
+      row(4, "cat stepping along owner's body from ankle toward ribs in bed", { keyThing: "cat", listCut: true }),
+      row(5, "close-up of the cat's white-tipped paw pressing onto the sleeping owner's knee", { keyThing: "cat paws", listCut: true }),
+      row(7, "close-up of the cat's white-tipped paw pressing on the sleeping owner's ribs", { keyThing: "cat paws", listCut: true }),
+      row(8, "cat continuing steady walk across owner's body in bed", { keyThing: "cat", sameShot: true }),
+    ];
+    expect(continuedPicture(b, b[4])?.index).toBe(3);
+    expect(nearCopyPartnerFor(b, b[4])?.index).toBe(3);
+    expect(memorySourcesFor(b, b[4]).map(s => s.index)).toEqual([3]);
+  });
+
+  it("409: the host marked to continue past a list is never drawn from someone else's picture", async () => {
+    const { keylessContinued, memorySourcesFor } = await import("./pictureMemory");
+    const b = [
+      row(14, "a person in their sixties sitting alone in the quiet study", { humanPresent: true, otherPerson: "a person in their sixties" }),
+      row(18, "an older man planting a young tree in a backyard on a sunny morning, seen from behind", {
+        listCut: true,
+        humanPresent: true,
+        otherPerson: "an older man",
+      }),
+      row(19, "the host speaking thoughtfully at his desk in the study", { sameShot: true, humanPresent: true, brollHostLook: look }),
+    ];
+    expect(keylessContinued(b, b[2])).toBeUndefined();
+    expect(memorySourcesFor(b, b[2])).toEqual([]);
+  });
+
+  it("352: a continuation about the list's last item carries on from it — the bark edge after 'or a little wane,'", async () => {
+    // The other side of the 412 case: "which is bark edge left along the side" is described as nearly the
+    // same close-up as the wane item before it is. Paired with the cull bins before the list, a copy
+    // would go unchecked; its words share more with the item than with the bins.
+    const { continuedPicture, nearCopyPartnerFor } = await import("./pictureMemory");
+    const board = "rough-sawn board";
+    const b = [
+      row(165, "culls and shorts bins at the end of the lumber yard racks", { keyThing: "culls and shorts bins" }),
+      row(169, "close-up of one long edge of a rough oak board where a strip of rough brown-grey bark replaces the square corner", {
+        keyThing: board,
+        partOf: board,
+        listCut: true,
+      }),
+      row(170, "close-up of a rough oak board's side edge with a strip of rough brown-grey bark and rounded log surface left along it in place of a square corner", {
+        keyThing: board,
+        partOf: board,
+        sameShot: true,
+      }),
+    ];
+    expect(continuedPicture(b, b[2])?.index).toBe(169);
+    expect(nearCopyPartnerFor(b, b[2])?.index).toBe(169);
+  });
+});
+
+describe("round 14: every thing a picture shows keeps its memory (the verification films 413 and 414)", () => {
+  const row = (index: number, show: string, over: Partial<StoryboardScene> = {}) =>
+    ({ index, narration: "n", scriptText: "n", showSubject: show, visualPrompt: show, ...over }) as StoryboardScene;
+  const src = (i: number) => `https://r2/still-src-${i}.png`;
+
+  it("413: 'drain it outside, | store it sealed,' — the drain step keeps the red mower, the store step the drain step's can", async () => {
+    const { memorySourcesFor } = await import("./pictureMemory");
+    const b = [
+      row(28, "clean push mower sitting finished in the driveway", { keyThing: "mower", buildStage: "done", pictureUrl: src(28) }),
+      row(31, "the host's hands draining gasoline from the mower into the red gas can outdoors on the driveway", {
+        scriptText: "drain it outside,",
+        keyThing: "gas can",
+        otherKeyThings: ["mower"],
+        listCut: true,
+        listKind: "steps",
+        pictureUrl: src(31),
+      }),
+      row(32, "the red gas can with its black cap screwed tight on a shelf in an outdoor shed", {
+        scriptText: "store it sealed,",
+        keyThing: "gas can",
+        listCut: true,
+        listKind: "steps",
+      }),
+    ];
+    // It was drawn from nothing: a black-deck mower and, step to step, two different cans.
+    expect(memorySourcesFor(b, b[1]).map(s => s.index)).toEqual([28]);
+    expect(memorySourcesFor(b, b[2]).map(s => s.index)).toEqual([31]);
+  });
+
+  it("414: the picture under 'those three' is drawn from the axe's, the froe's and the drawknife's own pictures", async () => {
+    const { attachMemory, memorySourcesFor, memoryViewFor, LIST_GROUP_VIEW } = await import("./pictureMemory");
+    const steel: KeyThing[] = [
+      { name: "steel tools", look: "an axe, a froe, and a drawknife hanging together on the cabin's back interior wall", main: true },
+      { name: "white oak bolt", look: "a short pale log section with straight grain" },
+    ];
+    const b = [
+      row(5, "an axe (for the steel tools)", { scriptText: "an axe,", keyThing: "steel tools", listCut: true, pictureUrl: src(5) }),
+      row(6, "a close-up of a froe hanging on the cabin's back log wall: its straight flat steel blade with a wooden handle set upright", {
+        scriptText: "a froe,",
+        keyThing: "steel tools",
+        partOf: "steel tools",
+        listCut: true,
+        pictureUrl: src(6),
+      }),
+      row(7, "a close-up of a drawknife hanging on the cabin's back log wall", {
+        scriptText: "and a drawknife,",
+        keyThing: "steel tools",
+        partOf: "steel tools",
+        listCut: true,
+        pictureUrl: src(7),
+      }),
+      row(8, "a closer view of the steel tools hanging on the cabin wall", {
+        scriptText: "and the steel in those three was the one thing that homestead could not grow.",
+        keyThing: "steel tools",
+      }),
+      row(17, "the host's hands holding a froe upright by its wooden handle, its flat blade driven into the end of a short pale white oak bolt", {
+        keyThing: "white oak bolt",
+      }),
+    ];
+    attachMemory(b, [], steel);
+    // The froe came back a flat bar under "those three" — its memory was the drawknife close-up alone.
+    expect(memorySourcesFor(b, b[3]).map(s => s.index)).toEqual([5, 6, 7]);
+    expect(memoryViewFor(b, b[3])).toBe(LIST_GROUP_VIEW);
+    // The froe ten seconds later, filed under the oak bolt, is drawn from the froe the viewer saw.
+    expect(b[4].otherKeyThings).toEqual(["froe"]);
+    expect(memorySourcesFor(b, b[4]).map(s => s.index)).toEqual([6]);
+  });
+
+  it("Dale's 'Coasters, | ornaments,' stay separate things: never drawn from the pile they inherited, nor from each other", async () => {
+    const { memorySourcesFor } = await import("./pictureMemory");
+    const b = [
+      row(9, "The host's hands sorting small wood coasters and ornaments into neat stacks on the workbench.", {
+        keyThing: "small wood pieces",
+        otherKeyThings: ["workbench"],
+        pictureUrl: src(9),
+      }),
+      row(12, "a close stack of round maple and walnut coasters on the workbench", {
+        scriptText: "Coasters,",
+        keyThing: "small wood pieces",
+        otherKeyThings: ["workbench"],
+        listCut: true,
+        pictureUrl: src(12),
+      }),
+      row(13, "small carved wooden ornaments grouped on the workbench", {
+        scriptText: "ornaments,",
+        keyThing: "small wood pieces",
+        otherKeyThings: ["workbench"],
+        listCut: true,
+      }),
+    ];
+    expect(memorySourcesFor(b, b[2])).toEqual([]);
+  });
+});
+
+describe("round 14 review: a list item on a device, and a step after a failed picture (jobs 295, 412, 414)", () => {
+  const row = (index: number, show: string, over: Partial<StoryboardScene> = {}) =>
+    ({ index, narration: "n", scriptText: "n", showSubject: show, visualPrompt: show, ...over }) as StoryboardScene;
+  const src = (i: number) => `https://r2/still-src-${i}.png`;
+
+  it("295: 'Etsy,' on the tablet is never handed the cutting board as an object to copy — the tablet was built out of it", async () => {
+    const { memorySourcesFor } = await import("./pictureMemory");
+    const b = [
+      row(2, "The walnut and maple cutting board leaning against the garage wall.", { keyThing: "cutting board", pictureUrl: src(2) }),
+      row(4, "The wood-grain tablet propped on the workbench, its glowing screen showing an Etsy-style white page: a grid of square product photos with the walnut and maple striped cutting board in the first tile", {
+        scriptText: "Etsy,",
+        keyThing: "digital device",
+        otherKeyThings: ["cutting board", "workbench"],
+        listCut: true,
+      }),
+    ];
+    expect(memorySourcesFor(b, b[1])).toEqual([]);
+  });
+
+  it("412: 'run it back,' on the phone's screen is handed no nightstand, cat or bed as 'the item for sale'", async () => {
+    const { memorySourcesFor } = await import("./pictureMemory");
+    const b = [
+      row(3, "cat walking across sleeping owner's legs in bed", { keyThing: "cat", otherKeyThings: ["bed"], pictureUrl: src(3) }),
+      row(12, "quiet bedroom at pre-dawn with unmade bed and nightstand", { keyThing: "nightstand", otherKeyThings: ["bed"], pictureUrl: src(12) }),
+      row(15, "the host's thumb dragging back along a cat-on-bed video playing on the phone screen beside the nightstand", {
+        scriptText: "run it back,",
+        keyThing: "phone",
+        otherKeyThings: ["nightstand", "cat", "bed"],
+        listCut: true,
+        listKind: "steps",
+      }),
+    ];
+    expect(memorySourcesFor(b, b[2])).toEqual([]);
+  });
+
+  it("414: 'and rived the boards…' keeps the froe the viewer saw at 'a froe,' when the froe's next picture failed its check", async () => {
+    const { attachMemory, memorySourcesFor } = await import("./pictureMemory");
+    const steel: KeyThing[] = [
+      { name: "steel tools", look: "an axe, a froe, and a drawknife hanging together on the cabin's back interior wall", main: true },
+      { name: "white oak bolt", look: "a short pale log section with straight grain" },
+      { name: "split shingle", look: "a thin pale wood board, one end shaved thinner" },
+    ];
+    const b = [
+      row(5, "an axe (for the steel tools)", { scriptText: "an axe,", keyThing: "steel tools", listCut: true, pictureUrl: src(5) }),
+      row(6, "a close-up of a froe hanging on the cabin's back log wall: its straight flat steel blade with a wooden handle set upright", {
+        scriptText: "a froe,",
+        keyThing: "steel tools",
+        partOf: "steel tools",
+        listCut: true,
+        pictureUrl: src(6),
+      }),
+      row(7, "a close-up of a drawknife hanging on the cabin's back log wall", {
+        scriptText: "and a drawknife,",
+        keyThing: "steel tools",
+        partOf: "steel tools",
+        listCut: true,
+        pictureUrl: src(7),
+      }),
+      row(17, "the host's hands holding a froe upright by its wooden handle, its flat blade driven into the end of a short pale white oak bolt", {
+        keyThing: "white oak bolt",
+        buildStage: "making",
+        memoryUnfit: true,
+        pictureUrl: src(17),
+      }),
+      row(19, "a white oak bolt being split into pie-shaped wedges", { scriptText: "split each bolt into pie wedges,", keyThing: "white oak bolt", listCut: true, listKind: "steps", buildStage: "making", pictureUrl: src(19) }),
+      row(20, "the host's hands levering a froe's handle sideways as its blade splits a thin board off a pale oak wedge", {
+        scriptText: "and rived the boards along those same lines,",
+        keyThing: "split shingle",
+        listCut: true,
+        listKind: "steps",
+        buildStage: "making",
+      }),
+    ];
+    attachMemory(b, [], steel);
+    // It was drawn from no picture of the froe and came back an all-metal L.
+    expect(memorySourcesFor(b, b[5]).map(s => s.index)).toEqual([6]);
   });
 });

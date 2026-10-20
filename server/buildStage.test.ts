@@ -229,7 +229,9 @@ describe("a step of a spoken list is the main thing, being made (Hank's job 269 
     for (const s of steps) {
       expect(s.buildStage).toBeUndefined();
       expect(s.keyThing).toBeUndefined(); // tagged later from its own words, as before
-      expect(ownKeyThing({ ...s, keyThing: "pearl necklace" })).toBeUndefined(); // "the piece" names no necklace
+      // Round 14: a step is about the thing it is done to — "the piece" held up to the window IS the
+      // necklace, once tagged, so it is drawn as that same necklace (job 413 scenes 31-32's can).
+      expect(ownKeyThing({ ...s, keyThing: "pearl necklace" })).toBe("pearl necklace");
     }
   });
 

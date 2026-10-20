@@ -157,18 +157,24 @@ const job404 = () => [
 const rendered = async (s: StoryboardScene) => ({ ...s, ...memoryFields(await memoryFor(s, 0), memoryView(s)) });
 
 describe("409-3: a picture drawn from words keeps the look of every key thing its words name", () => {
-  it("at render the card's written look is kept beside the aisle's, and the reference carries it meanwhile", async () => {
+  // Round 14: the pharmacy aisle is a PLACE. It lends no reference picture — scene 3 is drawn from the
+  // card's first picture alone — and keeps its look as where the picture is set (`placeLooks`).
+  it("at render the card is drawn from its first picture and its look kept for words; the aisle is held in words", async () => {
     const board = job409();
     attachMemory(board, [board[1]], K409);
     const s3 = await rendered(board[1]);
     expect(s3.memoryRefUrls).toEqual(["https://r2/409/still-src-2.png"]);
-    expect(s3.memoryWordsLook).toBe(AISLE_LOOK);
+    expect(s3.memoryOthersOnly).toBe(true);
+    expect(s3.memoryWordsLook).toBeUndefined();
+    expect(s3.keyThingLook).toBeUndefined();
     expect(s3.otherThingLooks).toEqual([{ name: "sympathy card", look: CARD_LOOK }]);
-    // Drawn from memory, the reference shows the card: no written look beside it — the prompt reads
-    // exactly as before.
+    expect(s3.placeLooks).toEqual([{ name: "pharmacy aisle", look: AISLE_LOOK }]);
+    // The reference shows the card: no written look of it beside it.
     expect(keyThingLookClause(s3)).toBe("");
-    expect(memoryClause(s3)).toMatch(/this exact pharmacy aisle and sympathy card/);
+    expect(memoryClause(s3)).toMatch(/this exact sympathy card/);
+    expect(memoryClause(s3)).toMatch(/NOT show the pharmacy aisle/);
     expect(buildStillPrompt(s3)).not.toContain(CARD_LOOK);
+    expect(count(buildStillPrompt(s3), AISLE_LOOK)).toBe(1);
   });
 
   it("after copying its memory twice it is drawn by the aisle's look AND the card's, each said once", async () => {
@@ -178,19 +184,22 @@ describe("409-3: a picture drawn from words keeps the look of every key thing it
     const fields = memoryToWords(s3);
     expect(fields.otherThingLooks).toEqual([{ name: "sympathy card", look: CARD_LOOK }]);
     const words = { ...s3, ...fields };
-    const look = keyThingLookClause(words);
-    expect(look).toContain(`HOW THE PHARMACY AISLE LOOKS in every picture of this video: ${AISLE_LOOK}`);
-    expect(look).toContain(
-      `HOW THE OTHER THING IN IT LOOKS in every picture of this video — the sympathy card: ${CARD_LOOK}. Draw that same one, where this picture's own words put it.`
+    expect(keyThingLookClause(words)).toBe(
+      ` HOW THE OTHER THING IN IT LOOKS in every picture of this video — the sympathy card: ${CARD_LOOK}. Draw that same one, where this picture's own words put it.`
     );
-    // The prompt the still loop sends next: the memory clause swapped for both looks.
+    // The prompt the still loop sends next: the memory clause swapped for the card's look; the aisle's
+    // stays where it was written, once.
     const prompt = promptAfterMemoryChange(s3, buildStillPrompt(s3), fields);
     expect(count(prompt, CARD_LOOK)).toBe(1);
     expect(count(prompt, AISLE_LOOK)).toBe(1);
+    expect(prompt).toContain(
+      `WHERE THIS PICTURE IS SET, the same place in every picture of this video set there — the pharmacy aisle: ${AISLE_LOOK}.`
+    );
     expect(prompt).not.toContain(MEMORY_SETTING_CLAUSE);
     expect(prompt).not.toContain("reference image");
     // Built again from words (a reworded memory clause), it carries the same looks.
     expect(buildStillPrompt(words)).toContain(`the sympathy card: ${CARD_LOOK}`);
+    expect(count(buildStillPrompt(words), AISLE_LOOK)).toBe(1);
   });
 
   it("the card's first picture, with nothing to follow, is drawn by its own look only — as before", async () => {
@@ -220,7 +229,9 @@ describe("409-3: a picture drawn from words keeps the look of every key thing it
     board[1].pictureUrl = "https://r2/409/still-src-3.png";
     attachMemory(board, [board[2]], K409);
     const s5 = await rendered(board[2]);
-    expect(s5.memoryRefUrls).toEqual(["https://r2/409/still-src-3.png", "https://r2/409/still-src-2.png"]);
+    // Round 14: scene 3 — where the lily card shipped — was scene 5's reference only as the AISLE's
+    // memory, and an aisle is a place: scene 5 is drawn from the card's first picture alone.
+    expect(s5.memoryRefUrls).toEqual(["https://r2/409/still-src-2.png"]);
     expect(s5.otherThingLooks).toEqual([{ name: "sympathy card", look: CARD_LOOK }]);
     expect(buildStillPrompt({ ...s5, ...memoryToWords(s5) })).not.toContain("pale blue");
   });
@@ -234,13 +245,17 @@ describe("a thing that only stood in a reference picture is never written in", (
     expect(board[2].otherKeyThings).toEqual(["gulf coast yard"]);
     const s14 = await rendered(board[2]);
     expect(s14.memoryRefUrls).toEqual(["https://r2/404/still-src-5.png", "https://r2/404/still-src-12.png"]);
-    // Only the yard its words name keeps a written look — never the lawn its references stand on.
-    expect(s14.otherThingLooks?.map(t => t.name)).toEqual(["gulf coast yard"]);
+    // Only the yard its words name keeps a written look — never the lawn its references stand on. A
+    // yard is a place (round 14): its look is where the picture is set, cut to what the yard is made of.
+    expect(s14.otherThingLooks).toBeUndefined();
+    expect(s14.placeLooks).toEqual([
+      { name: "gulf coast yard", look: "a flat grassy yard, palm trees and green shrubs in the background" },
+    ]);
     expect(buildStillPrompt(s14)).not.toContain("frost");
     const words = promptAfterMemoryChange(s14, buildStillPrompt(s14), memoryToWords(s14));
     expect(words).not.toContain(LAWN_LOOK);
     expect(words).not.toContain("frost");
-    expect(words).toContain("the gulf coast yard: a flat grassy winter yard in a mild southern climate");
+    expect(words).toContain("the gulf coast yard: a flat grassy yard, palm trees and green shrubs in the background");
   });
 
   it("408-12: the toilet's panel names no bin — its references show one, and no bin's look is written in, from memory or from words", async () => {

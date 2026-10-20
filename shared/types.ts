@@ -356,6 +356,17 @@ export interface ThingLook {
   look: string;
 }
 
+/**
+ * The written look of a PLACE a picture is set in (`StoryboardScene.placeLooks`): a place key thing or
+ * the props list's home setting, cut to what the place is made of — or, with `in`, a key thing that
+ * stands in that place (the bed in the bedroom), which keeps one look in every picture set there.
+ */
+export interface PlaceLook {
+  name: string;
+  look: string;
+  in?: string;
+}
+
 export interface StoryboardScene {
   index: number;
   /** Short display label for this beat (derived = first words of `scriptText`) */
@@ -486,6 +497,12 @@ export interface StoryboardScene {
    */
   listItems?: { own: string; others: string[] };
   /**
+   * The items, as said, of the spoken list a picture GATHERS right after it ("the steel in those
+   * three", `listGroupFor` in pictureMemory) — the ones whose own pictures it is drawn from, so each is
+   * drawn as the very one shown a moment before (job 414 scene 8: the froe came back a flat bar).
+   */
+  groupItems?: string[];
+  /**
    * The time and place a list item's sentence is set in when it is not the video's own here and now
    * ("a medieval market town, about 1300") — the list finder's `setting`, put on every item of the
    * list and on its bridge picture (`applySpokenLists`) and said in its prompt (`listItemClause`). An
@@ -562,6 +579,14 @@ export interface StoryboardScene {
    */
   otherKeyThings?: string[];
   /**
+   * Key things this picture's own words name only as ANOTHER one of their kind (`othersOfKindIn`),
+   * with the words that say so — "a wild cat" for the video's own cat (job 412 scenes 23-26), "the
+   * neighbour's dog". Never `keyThing` or `otherKeyThings`, so never drawn from that thing's pictures
+   * or look; the prompt says it is not the one shown before (`anotherOfItsKindClause`). Set by
+   * `tagKeyThings` on every pass.
+   */
+  othersOfKind?: { name: string; said: string }[];
+  /**
    * How far along the thing the video MAKES is in this picture, set only on a picture of that thing
    * or what it is made from (the shot list, the line check, a step of a spoken list). The picture is
    * drawn only from pictures of the same or an EARLIER stage (`memorySourcesFor`): a build video
@@ -569,7 +594,11 @@ export interface StoryboardScene {
    * block" from the hook's finished, oiled holder. Unset: no stage, memory exactly as before.
    */
   buildStage?: BuildStage;
-  /** "steps": one step of a spoken list of steps (`applySpokenLists`) — the same piece, further along. */
+  /**
+   * "steps": one step of a spoken list of steps (`applySpokenLists`) — the same piece, further along.
+   * Steps are done to one thing, never separate things: a step is about its key thing and is drawn
+   * from the steps before it in its list (`ownKeyThing`, `memorySourcesFor`).
+   */
   listKind?: "steps";
   /**
    * Whether something in this picture MOVES BY ITSELF, as judged on its own description
@@ -651,6 +680,15 @@ export interface StoryboardScene {
    * look, and came back holding a lily card in place of the cream card with a grey ribbon.
    */
   otherThingLooks?: ThingLook[];
+  /**
+   * The written looks of the PLACES this picture is set in, and of the key things its words name that
+   * stand in them with no reference picture showing them (set at render, `memoryFor`): a place never
+   * lends a reference picture — job 411's lawn handed scene 2's yard to four later pictures and its snow
+   * to the Gulf Coast panel — so a place is held to one look in words, and only where the picture's own
+   * words set it in that same place (`placeLookClause`). Job 412's "ankle" list item, drawn from
+   * nothing, came back in another bedroom with other bedding.
+   */
+  placeLooks?: PlaceLook[];
   /**
    * The picture's last check said what it must show is not in it (`missing`), so no later picture is
    * drawn from it (`memorySourcesFor`): stored films had 22 first pictures copied after failing

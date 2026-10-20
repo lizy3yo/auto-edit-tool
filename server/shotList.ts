@@ -1920,7 +1920,7 @@ export async function planShotList(
           // An old "camera" answer is read as "object" and held to the rule like any other.
           motion: x.motion === "object" || x.motion === "camera" ? "object" : "none",
           thing:
-            typeof x.thing === "string" ? matchKeyThing(x.thing, keyThings)?.name : undefined,
+            typeof x.thing === "string" ? plannedKeyThing(x.thing, x.show, keyThings)?.name : undefined,
           stage: buildStageOf(x.stage),
           text: typeof x.text === "string" ? x.text : undefined,
           print: x.print === "blurred" ? "blurred" : undefined,
@@ -2657,17 +2657,263 @@ export function keyThingIn(text: string | undefined, things: KeyThing[] | undefi
  * inside a longer match ("alarm" inside "smoke alarm") is dropped. Pure.
  */
 export function keyThingsIn(text: string | undefined, things: KeyThing[] | undefined): KeyThing[] {
-  const have = new Set(keyName(text ?? "").split(" "));
-  const hits = (things ?? [])
-    .filter(t => {
-      const ws = keyName(t.name).split(" ").filter(w => w.length > 2);
-      return ws.length > 0 && ws.every(w => have.has(w) || have.has(`${w}s`));
-    })
+  const hits = wordsOfKeyThingsIn(text, things)
+    // ANOTHER OF ITS KIND IS NOT THE KEY THING (`anotherOfItsKind`): job 412's wild cat.
+    .filter(t => !anotherOfItsKind(text, t))
     .sort((a, b) => b.name.length - a.name.length);
   const words = (t: KeyThing) => keyName(t.name).split(" ");
   return hits.filter(
     (t, k) => !hits.slice(0, k).some(longer => words(t).every(w => words(longer).includes(w)))
   );
+}
+
+/** The key things every meaningful word of whose name is in `text`, singular or plural. Pure. */
+function wordsOfKeyThingsIn(text: string | undefined, things: KeyThing[] | undefined): KeyThing[] {
+  const have = new Set(keyName(text ?? "").split(" "));
+  return (things ?? []).filter(t => {
+    const ws = keyName(t.name).split(" ").filter(w => w.length > 2);
+    return ws.length > 0 && ws.every(w => have.has(w) || have.has(`${w}s`));
+  });
+}
+
+/*
+ * ANOTHER OF THE SAME KIND IS NOT THE KEY THING (round 14, the verification film 412, scenes 23, 25
+ * and 26). "Her wild relatives do their serious hunting in the low light at the edges of the day" was
+ * drawn as "a wild cat stalking low through scattered brush across the dawn-lit wild landscape toward
+ * a small mouse" — and came back as the video's own house cat in the desert: the same grey-and-white
+ * coat, white bib, white socks and green eyes as the pet on the bed, its face unmistakable in the 2 s
+ * close-up. `keyThingsIn` counted the MAIN key thing "cat" as named because the word "cat" is in
+ * "a wild cat", so `tagKeyThings` filed "cat" beside the picture's own "wild landscape", and the pet's
+ * first picture was handed to the picture maker as "this exact cat". A word in front of the name that
+ * makes it a DIFFERENT ONE of the same kind — the animal and thing twin of round 10's "someone else is
+ * drawn as someone else" — means the picture is not of the key thing: it is never filed under it,
+ * never given its pictures or its look, and the prompt says it is not the one shown before
+ * (`othersOfKindIn` → `scene.othersOfKind`).
+ *
+ * Which words: someone else's ownership (the neighbour's, someone else's, a stranger's) makes a
+ * different one of anything. The rest only of a KEPT animal (`keptAnimal`: a pet or the host's own
+ * stock), the one key thing that is an INDIVIDUAL with its own coat and face: wild, stray, feral and a
+ * kind in general (every, most, all, many, plenty of — "all three hens" is a counted group, the video's
+ * own) of any kept animal, and another, other, different, a second of one named as ONE ("the cat", not
+ * "hens": the other hens of a flock are the flock). A WILD kind is left alone: job 411's key thing
+ * "robin" is the species, its look the American robin's (round 11's exact regional kind), and its
+ * script says "nobody sees another robin until spring" and "the most robins all year" — every robin
+ * the video shows is one of that kind, and told "not the robin shown before, a look of its own" it
+ * would lose the look that keeps it from being drawn as the European bird. Replayed over the 129
+ * stored storyboards with key things, the same words in front of a THING's name meant the thing
+ * itself, or a copy that must look the same: "a new smoke alarm box" is the box the video is about
+ * (jobs 263, 381, 384), "several different
+ * charred incense holders lined up" and "several different fabric bowls" are the host's own (jobs 261,
+ * 271, 281, 298), "most bowls gone" the host's bowls sold (302), "stray brown feed pellets" are loose
+ * pellets (371), "another cookie packet" and "a second pretzel bag" the same product again (399, 402).
+ * "New" is left out, for animals too: "a new puppy" is as likely the video's own as "a new smoke alarm
+ * box" is. Only the words right before the name count (up to two describing words between), never
+ * across a comma, a preposition or an article ("a wild landscape with a cat" names the cat), and only
+ * when EVERY place the words say the name is such a one: "the cat watching a stray cat through the
+ * window" still shows the cat. With the rule, of the 3,927 pictures in those films only job 412's three
+ * wild-cat pictures change, and one prompt rewrite in job 357 ("second dog's tan body visible at the
+ * edge") is no longer filed under the video's dog's body.
+ */
+
+/** Whose ownership makes it someone else's (a possessive): "the neighbour's dog", "someone else's cat". */
+const OTHER_OWNER = new Set(
+  "neighbour neighbor neighbours neighbors else someone somebody stranger strangers".split(" ")
+);
+/** Words that make a KEPT animal one that is not kept here: wild, stray, feral. */
+const NOT_KEPT = new Set(["wild", "stray", "feral"]);
+/** Words that make a KEPT animal the kind in general — unless a count follows ("all three hens"). */
+const KIND_OF = new Set(["every", "most", "all", "many"]);
+/** Words that make a KEPT animal named as ONE (`kindOf`) another one: "another cat", "a second dog". */
+const ANOTHER_ONE = new Set(["another", "other", "others", "different", "second", "third"]);
+/** A count after "all": the video's own, counted ("all three hens", "all 4 puppies"). */
+const COUNT = /^(?:\d+|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|both)$/;
+/** "plenty of house cats", "lots of dogs": the kind in general. */
+const MASS_OF = new Set(["plenty", "lots", "lot"]);
+/** Where the words in front of a name stop: an article, a preposition, a joining word, a verb of being. */
+const PHRASE_STOP = new Set(
+  (
+    "a an the this that these those my your his her our their its one some any each no and or but nor " +
+    "with without of in on at by for from to into onto under over near beside behind above below beneath " +
+    "across along through around among between before after while as like than is are was were be been " +
+    "being has have had which who whose where when then"
+  ).split(" ")
+);
+/**
+ * KEPT animals — a pet or the host's own stock — as a key thing's name says them ("cat", "hens",
+ * "dog's nose"). Never a wild kind (robin, fox, deer), whose key thing is the species, nor one kept and
+ * wild alike (duck, goose, rabbit, turkey, mouse, fish, bee): for those nothing changes.
+ */
+const KEPT_ANIMALS = new Set(
+  (
+    "dog puppy pup cat kitten kitty hen chicken chick rooster horse pony foal cow calf calves bull goat " +
+    "sheep lamb pig piglet cattle donkey mule llama alpaca hamster gerbil parrot budgie parakeet " +
+    "cockatiel canary goldfish ferret pet"
+  ).split(" ")
+);
+/** Kept animals whose name is a group whatever its form: a herd, a flock. */
+const GROUP_ANIMALS = new Set(["sheep", "cattle", "calves"]);
+/** An animal's own parts: "cat paws", "dog's nose" are the animal's. */
+const ANIMAL_PARTS = new Set(
+  (
+    "paw paws nose snout muzzle tail face fur coat eye eyes ear ears whiskers leg legs foot feet claw " +
+    "claws beak bill wing wings feather feathers body head mane hoof hooves belly teeth"
+  ).split(" ")
+);
+
+/**
+ * A word as said: its letters (`core`), without a possessive (`bare`: "cat's" → cat, "neighbours'" →
+ * neighbours), whether it was one, and whether a comma, stop or dash follows it.
+ */
+type PhraseWord = { core: string; bare: string; possessive: boolean; endsClause: boolean };
+
+/** The words of `text`, lower case (`PhraseWord`). */
+function phraseWords(text: string): PhraseWord[] {
+  return text
+    .toLowerCase()
+    .replace(/[’‘]/g, "'")
+    .split(/\s+/)
+    .filter(Boolean)
+    .map(raw => {
+      const core = raw.replace(/^[^a-z0-9]+/, "").replace(/[^a-z0-9']+$/, "");
+      return {
+        core,
+        bare: core.replace(/'s$/, "").replace(/'+$/, ""),
+        possessive: /'s$|s'$/.test(core),
+        endsClause: /[,.;:!?)\]—–]['"”]?$/.test(raw),
+      };
+    });
+}
+
+/** `w` as one of `known` with one plural form off ("cats" → cat, "foxes" → fox, "puppies" → puppy). */
+function oneOf(w: string, known: Set<string>): string {
+  if (known.has(w)) return w;
+  if (w.endsWith("ies") && known.has(`${w.slice(0, -3)}y`)) return `${w.slice(0, -3)}y`;
+  if (w.endsWith("es") && known.has(w.slice(0, -2))) return w.slice(0, -2);
+  return w.endsWith("s") && known.has(w.slice(0, -1)) ? w.slice(0, -1) : w;
+}
+
+/** A key thing's name as words, up to "of / with / in …" or a comma, with no parenthesis. */
+function nameWordsOf(name: string): PhraseWord[] {
+  const ws = phraseWords(name.replace(/\([^)]*\)/g, " ").split(",")[0]);
+  const tail = ws.findIndex((w, k) => k > 0 && PHRASE_STOP.has(w.bare));
+  return (tail > 0 ? ws.slice(0, tail) : ws).filter(w => w.bare && !PHRASE_STOP.has(w.bare));
+}
+
+/**
+ * The kept animal key thing `name` is, or is a part of, as its name says it: its last word ("cat",
+ * "hens"), or the animal right before a part ("cat paws", "dog's nose" → dog) — never a thing named
+ * after one ("chicken feeder", "chicken coop", "dog bed") and never a wild kind ("robin"). Pure.
+ */
+function keptAnimalOf(name: string): string | undefined {
+  const ws = nameWordsOf(name);
+  const head = ws[ws.length - 1];
+  if (!head) return undefined;
+  if (KEPT_ANIMALS.has(oneOf(head.bare, KEPT_ANIMALS))) return head.bare;
+  const before = ws[ws.length - 2];
+  return ANIMAL_PARTS.has(head.bare) && before && KEPT_ANIMALS.has(oneOf(before.bare, KEPT_ANIMALS))
+    ? before.bare
+    : undefined;
+}
+
+/** Whether key thing `name` is a KEPT animal or a kept animal's part (`keptAnimalOf`). Pure. */
+export function keptAnimal(name: string): boolean {
+  return !!keptAnimalOf(name);
+}
+
+/** How a key thing's name can be told apart: a kept animal at all, and one named as ONE. */
+type KindOf = { kept: boolean; one: boolean };
+
+/** `KindOf` for key thing `name`: "cat" one, "hens" and "sheep" a group, "robin" not kept. Pure. */
+function kindOf(name: string): KindOf {
+  const animal = keptAnimalOf(name);
+  return {
+    kept: !!animal,
+    one: !!animal && oneOf(animal, KEPT_ANIMALS) === animal && !GROUP_ANIMALS.has(animal),
+  };
+}
+
+/**
+ * Where the words in front of the name at `at` make it another one of its kind: the index of the word
+ * that does, or undefined. Read back over the name's own words (`own`) and up to two describing words,
+ * never past a comma, an article or a preposition. Pure.
+ */
+function otherOneAt(ws: PhraseWord[], at: number, own: Set<string>, kind: KindOf): number | undefined {
+  let describing = 0;
+  for (let j = at - 1; j >= 0; j--) {
+    const w = ws[j];
+    if (w.endsClause || !w.bare) return undefined;
+    if (own.has(w.bare)) continue;
+    if (w.possessive && OTHER_OWNER.has(w.bare)) return j;
+    // "the most stubborn cat" is the video's own, at its most: "most" is the kind only with no article.
+    if (w.bare === "most" && j > 0 && /^(?:the|a|an|my|your|his|her|our|their|its)$/.test(ws[j - 1].bare)) return undefined;
+    if (kind.kept && KIND_OF.has(w.bare)) return COUNT.test(ws[j + 1]?.bare ?? "") ? undefined : j;
+    if (kind.kept && NOT_KEPT.has(w.bare)) return j;
+    if (kind.one && ANOTHER_ONE.has(w.bare)) return j;
+    if (kind.kept && w.bare === "of" && j > 0 && MASS_OF.has(ws[j - 1].bare) && !ws[j - 1].endsClause) return j - 1;
+    if (PHRASE_STOP.has(w.bare)) return undefined;
+    if (++describing > 2) return undefined;
+  }
+  return undefined;
+}
+
+/**
+ * The words `text` names key thing `t` with when it names ANOTHER one of its kind and never the one
+ * itself — "a wild cat" for the video's cat, "the neighbour's dog" — else undefined: `text` does not
+ * say the name, or says it plainly at least once ("my cat", "the cat", "her paws"). See the note
+ * above. Pure.
+ */
+export function anotherOfItsKind(text: string | undefined, t: KeyThing): string | undefined {
+  if (!text?.trim()) return undefined;
+  const name = nameWordsOf(t.name);
+  const head = name[name.length - 1]?.bare;
+  if (!head) return undefined;
+  const own = new Set(name.map(w => w.bare));
+  const kind = kindOf(t.name);
+  const ws = phraseWords(text);
+  const isHead = (w: string) => w === head || w === `${head}s` || w === `${head}es`;
+  let said: string | undefined;
+  let seen = false;
+  for (let k = 0; k < ws.length; k++) {
+    if (!isHead(ws[k].bare)) continue;
+    seen = true;
+    const q = otherOneAt(ws, k, own, kind);
+    if (q === undefined) return undefined;
+    // From the article or the "someone" that leads it: "a wild cat", "someone else's cat".
+    const led = q > 0 && !ws[q - 1].endsClause && /^(?:a|an|the|someone|somebody)$/.test(ws[q - 1].bare);
+    said ??= ws
+      .slice(led ? q - 1 : q, k + 1)
+      .map(w => w.core)
+      .join(" ");
+  }
+  return seen ? said : undefined;
+}
+
+/**
+ * Every key thing `text` names only as ANOTHER one of its kind (`anotherOfItsKind`), with the words
+ * it says it with — what the picture prompt tells apart from the one shown before. Pure.
+ */
+export function othersOfKindIn(
+  text: string | undefined,
+  things: KeyThing[] | undefined
+): { name: string; said: string }[] {
+  return wordsOfKeyThingsIn(text, things).flatMap(t => {
+    const said = anotherOfItsKind(text, t);
+    return said ? [{ name: t.name, said }] : [];
+  });
+}
+
+/**
+ * The key thing a planner or the line check named for a picture (`matchKeyThing`) — unless the
+ * picture's own words `show` name it only as another one of its kind (`anotherOfItsKind`): a planner
+ * that files "a stray cat on the fence" under the video's cat would hand it the cat's pictures. Pure.
+ */
+export function plannedKeyThing(
+  name: string | undefined,
+  show: string | undefined,
+  things: KeyThing[] | undefined
+): KeyThing | null {
+  const t = name ? matchKeyThing(name, things ?? []) : null;
+  return t && !anotherOfItsKind(show, t) ? t : null;
 }
 
 // ─── Does each picture show what its line is about? ─────────────────────────────────────
@@ -3155,7 +3401,7 @@ export function applyPictureFixes(
     if (s && f.forbids) s.forbids = f.forbids;
     if (!s || !f.show) continue;
     const named = keyThingsIn(f.show, things);
-    const primary = (f.thing ? matchKeyThing(f.thing, things ?? []) : null) ?? named[0] ?? null;
+    const primary = plannedKeyThing(f.thing, f.show, things) ?? named[0] ?? null;
     s.showSubject = f.show;
     s.visualPrompt = f.show;
     s.visualPromptSeed = undefined;
@@ -3451,7 +3697,7 @@ export function applyPictureSplits(
       }
       const cut = starts[k - 1].cut;
       const named = keyThingsIn(cut.show, things);
-      const primary = (cut.thing ? matchKeyThing(cut.thing, things ?? []) : null) ?? named[0] ?? null;
+      const primary = plannedKeyThing(cut.thing, cut.show, things) ?? named[0] ?? null;
       const others = named.map(t => t.name).filter(n => n !== primary?.name);
       out.push({
         ...s,
@@ -3902,7 +4148,7 @@ export function applyPanelFixes(scenes: StoryboardScene[], fixes: PictureFix[], 
     if (showsPerson(f.show) && !bodyPart) continue;
     const said = withoutNegatedPhrases(f.show);
     const named = keyThingsIn(said, things);
-    const primary = (f.thing ? matchKeyThing(f.thing, things ?? []) : null) ?? named[0] ?? null;
+    const primary = plannedKeyThing(f.thing, said, things) ?? named[0] ?? null;
     const was = { thing: s.keyThing, stage: s.buildStage };
     tieToTypedWords(s, said, things);
     s.keyThing = primary?.name;
