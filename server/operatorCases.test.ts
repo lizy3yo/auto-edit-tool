@@ -7960,3 +7960,59 @@ describe("round 14: where a picture starts against the sentences (jobs 413 and 4
     expect(groups(shipped)).toHaveLength(1);
   });
 });
+
+describe("a host take never stops between 'anything' and the clause that says what it is (job 414 #1)", () => {
+  // Sawdust Sam's verification film opened on a 2.6 s take that stopped "Go through an old mountain
+  // cabin looking for anything" and gave "a store sold, and you will come up nearly empty-handed." to
+  // a picture: the article after "anything" counted as a natural break.
+  const at = (index: number, from: number, to: number, scriptText: string, over: Partial<StoryboardScene> = {}) =>
+    ({
+      index,
+      scriptText,
+      narration: scriptText,
+      visualPrompt: "x",
+      showSubject: "x",
+      narrationStartSec: from,
+      narrationEndSec: to,
+      audioDuration: to - from,
+      audioUrl: `https://example.com/${index}.mp3`,
+      wordCut: true,
+      minHoldSec: over.hostPresent ? 2 : 1.2,
+      stillImage: over.hostPresent ? undefined : true,
+      ...over,
+    }) as StoryboardScene;
+  const params = { faceImageUrl: "https://example.com/host.jpg", hostName: "Sawdust Sam" } as any;
+  const opening = (hostText: string, picText: string) => [
+    at(1, 0, 2.612, hostText, { hostPresent: true, hostOpener: true, hostProtected: true }),
+    at(2, 2.612, 7.15406, picText),
+    at(3, 7.15406, 11.7938, "A log restorer in Grayson County, Virginia, let me try it."),
+    at(4, 11.7938, 21.742, "The roof was split oak, the walls were hewn poplar, and the door hung on wooden pins with a string for a lock. But on the back wall hung", {
+      hostPresent: true,
+      hostProtected: true,
+    }),
+  ];
+
+  it("the cold open finishes its sentence; the log restorer's picture after it is untouched", async () => {
+    const { enforcePlanRules } = await import("./planGate");
+    const r = enforcePlanRules(
+      opening("Go through an old mountain cabin looking for anything", "a store sold, and you will come up nearly empty-handed."),
+      params,
+      { budgetSec: 61.76 }
+    );
+    expect(r.scenes[0].scriptText).toBe(
+      "Go through an old mountain cabin looking for anything a store sold, and you will come up nearly empty-handed."
+    );
+    expect(r.scenes[0].hostPresent).toBe(true);
+    expect(r.scenes[1].scriptText).toBe("A log restorer in Grayson County, Virginia, let me try it.");
+    expect(r.scenes[1].narrationStartSec).toBe(r.scenes[0].narrationEndSec);
+    expect(r.scenes[1].narrationEndSec).toBe(11.7938);
+  });
+
+  it("unchanged: a take after 'everything' that hands over at 'and' keeps its hand-off", async () => {
+    const { enforcePlanRules } = await import("./planGate");
+    const scenes = opening("Go through an old mountain cabin and you will find everything", "and nothing a store ever sold.");
+    const r = enforcePlanRules(scenes, params, { budgetSec: 61.76 });
+    expect(r.scenes.map(s => s.scriptText)).toEqual(scenes.map(s => s.scriptText));
+    expect(r.scenes[0].narrationEndSec).toBe(2.612);
+  });
+});

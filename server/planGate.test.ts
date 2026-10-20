@@ -1729,3 +1729,111 @@ describe("a host take never stops right after a preposition (job 408)", () => {
     expect(r.scenes.map(s => s.scriptText)).toEqual([sentence(1), sentence(2), r.scenes[2].scriptText, sentence(3), sentence(4)]);
   });
 });
+
+describe("a host take never stops between a word that says nothing on its own and the clause describing it (job 414)", () => {
+  // Job 414's cold open stopped "Go through an old mountain cabin looking for anything | a store sold,
+  // and you will come up nearly empty-handed." — "a" after "anything" counted as a picture's new noun
+  // phrase, but "a store sold" is what "anything" means, and the host's last word on camera said
+  // nothing.
+  it("no break before the clause that says what 'anything', 'someone', 'the one' or 'the kind' is", () => {
+    const notBreaks: [string, string][] = [
+      ["Go through an old mountain cabin looking for anything", "a store sold, and you will come up nearly empty-handed."], // job 414
+      ["Look for anything", "that a store sold."],
+      ["This channel is for anyone", "who has a garage and a free Saturday."],
+      ["I want to show you something", "my grandfather made every winter."],
+      ["Out of everything", "I sold at the market that year, the boards paid best."],
+      ["It was the kind", "your grandmother kept in a kitchen drawer."],
+      ["The board that sold first was the one", "I almost threw away."],
+      ["Rive it the only way", "the old-timers did, along the grain."],
+      ["You will find nothing", "two hands could not mend."],
+      ["You can see everything", "Grandpa built in that barn."],
+    ];
+    for (const [before, after] of notBreaks) expect(breakBetween(before, after), before).toBe(false);
+  });
+
+  it("…but a joining word, a clause word or a preposition after one still opens a picture, and other nouns keep their breaks", () => {
+    const breaks: [string, string][] = [
+      ["I lost everything", "and started over the next spring."],
+      ["The old-timers would mend anything", "before they would buy new."],
+      ["Look for anything", "on the bottom shelf of the cabinet."], // a preposition with its object, as before
+      ["Somewhere on the way", "the truck lost a wheel."], // "on the way" waits for nothing
+      ["that's about $4 for every hour", "I sat at that machine,"], // job 159: an ordinary noun
+      ["and the first one drew a crowd", "I didn't know lived in my town."], // job 153
+      ["The roof was split oak, the walls were hewn poplar, and the door hung on wooden pins with", "a string for a lock."],
+    ];
+    for (const [before, after] of breaks) expect(breakBetween(before, after), before).toBe(true);
+  });
+
+  // Job 414's opening, with its real ranges: the host finishes the sentence (inside the hook's
+  // ceiling and the host minutes); the next picture is untouched.
+  const opening = (hostText: string, picText: string) => {
+    const scenes = film([
+      ["H", 2.612, hostText],
+      ["P", 4.542, picText],
+      ["P", 4.64, "A log restorer in Grayson County, Virginia, let me try it."],
+      ["H", 9.948, "The roof was split oak, the walls were hewn poplar, and the door hung on wooden pins with a string for a lock."],
+    ]);
+    for (const s of scenes) Object.assign(s, { wordCut: true, minHoldSec: s.hostPresent ? 2 : 1.2 });
+    Object.assign(scenes[0], { hostOpener: true, hostProtected: true });
+    return scenes;
+  };
+  const sam = { ...params, hostName: "Sawdust Sam" } as LongformInputParams;
+
+  it("job 414's cold open says the whole sentence instead of stopping on 'anything'", () => {
+    const scenes = opening(
+      "Go through an old mountain cabin looking for anything",
+      "a store sold, and you will come up nearly empty-handed."
+    );
+    expect(
+      checkPlan(scenes, sam).findings.some(f => f.rule === 7 && f.scene === 1 && /at no natural break/.test(f.detail))
+    ).toBe(true);
+    const r = enforcePlanRules(scenes, sam, { budgetSec: 61.76 });
+    expect(r.scenes[0].hostPresent).toBe(true);
+    expect(r.scenes[0].scriptText).toBe(
+      "Go through an old mountain cabin looking for anything a store sold, and you will come up nearly empty-handed."
+    );
+    expect(r.scenes[0].narrationEndSec).toBeCloseTo(7.154, 3);
+    expect(r.scenes[1].scriptText).toBe("A log restorer in Grayson County, Virginia, let me try it.");
+    expect(r.scenes[1].narrationStartSec).toBeCloseTo(7.154, 3);
+  });
+
+  it("unchanged: a cold open that hands over at a joining word after 'everything'", () => {
+    const scenes = opening("Go through an old mountain cabin and you will find everything", "and nothing a store ever sold.");
+    expect(checkPlan(scenes, sam).findings.filter(f => f.rule === 7 && /mid-sentence/.test(f.detail))).toEqual([]);
+    const r = enforcePlanRules(scenes, sam, { budgetSec: 61.76 });
+    expect(r.scenes.map(s => s.scriptText)).toEqual(scenes.map(s => s.scriptText));
+  });
+
+  // The same rule on a line two practice channels opened with (jobs 117-156 and 390): the
+  // storyboard's word-count cut left "…cheap box-store lumber, the one" on the host and "that paid me
+  // best…" on the picture, accepted as a long sentence's L-cut at the break before "that". Too long
+  // to finish inside the hook, the take now hands over at its own comma, and the picture opens on
+  // "the one that paid me best".
+  it("an opening that stopped on 'the one' before 'that paid me best' hands over at its comma (jobs 117-156, 390)", () => {
+    expect(
+      breakBetween(
+        "Out of 10 Japanese woodworking projects you can build from cheap box-store lumber, the one",
+        "that paid me best for my time came out of a coffee can of burnt scraps I almost threw in the trash."
+      )
+    ).toBe(false);
+    const scenes = film([
+      ["H", 7.44, "Out of 10 Japanese woodworking projects you can build from cheap box-store lumber, the one"],
+      ["P", 7.84, "that paid me best for my time came out of a coffee can of burnt scraps I almost threw in the trash."],
+      ["P", 5.22, "But the one I was proudest of, a lattice panel, paid the least."],
+      ["H", 6, sentence(1)],
+    ]);
+    Object.assign(scenes[0], { hostOpener: true, hostProtected: true, minHoldSec: 2 });
+    const r = enforcePlanRules(scenes, params, { budgetSec: 47.78 });
+    expect(r.scenes[0].scriptText).toBe("Out of 10 Japanese woodworking projects you can build from cheap box-store lumber,");
+    expect(r.scenes[1].scriptText).toMatch(/^the one that paid me best for my time/);
+    expect(r.scenes[1].narrationStartSec).toBe(r.scenes[0].narrationEndSec);
+    expect(r.scenes[2].scriptText).toBe(scenes[2].scriptText);
+  });
+
+  it("'the same way' waits for its clause; 'on the way', 'that way' and a phrase a comma closed do not", () => {
+    expect(breakBetween("Indoor cats inherited that schedule the same way", "she inherited her whiskers.")).toBe(false); // job 405
+    expect(breakBetween("Somewhere on the way", "the truck lost a wheel.")).toBe(true);
+    expect(breakBetween("Split it that way", "the grain stays whole.")).toBe(true);
+    expect(breakBetween("Stack the boards, one", "a week, until the spring market.")).toBe(true);
+  });
+});
