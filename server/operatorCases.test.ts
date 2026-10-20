@@ -9681,3 +9681,49 @@ describe("round 15: a split panel keeps the book its line is about, and is never
     expect(scenes[1].splitVisual).toBe(COAST); // the CTA lane's on-topic b-roll, as before
   });
 });
+
+describe("a season or an hour the picture's OWN words name is held like its line's (round 15, job 416 scene 20)", () => {
+  // 416-20: "It's a male letting the neighborhood know this patch is his and he's looking for a mate."
+  // names no season; the shot list carried "at dawn in spring" into what the picture must show, but the
+  // "THIS PICTURE IS IN SPRING" sentence was said only for a LINE's season, so the robin's one reference
+  // (a thawing, snow-patched March lawn) lent its snow and its flat daylight — between a leafy spring
+  // branch (scene 19, the same reference under a line naming spring) and the winter-quiet robin. The
+  // full cases are in lineSeason.test.ts.
+  const SONG = "Start with the singing. That bright song at first light, the one birders have long remembered as cheer up, cheerily, belongs to spring and summer.";
+  const MALE = "It’s a male letting the neighborhood know this patch is his and he’s looking for a mate.";
+  const QUIET =
+    "Once nesting season is over, that job is done, and through the winter a robin hardly sings at all. Mostly you’ll hear a low, soft clucking, a bit like somebody tutting under their breath, and that’s easy to miss with the storm windows shut.";
+  const robin = (index: number, line: string, show: string) =>
+    ({ index, narration: line, scriptText: line, showSubject: show, visualPrompt: show, keyThing: "robin" }) as StoryboardScene;
+
+  it("416-20 is told spring and dawn beside its snowy reference; 19 reads as before; 21's winter is never said", async () => {
+    const { holdLineSeasons } = await import("./lineSeason");
+    const { buildStillPrompt, MEMORY_SETTING_CLAUSE, memoryClause } = await import("./longformVideo");
+    const { MEMORY_VIEWS } = await import("./pictureMemory");
+    const b = [
+      robin(19, SONG, "a male American robin singing on a leafy tree branch at first light in spring, chest puffed"),
+      robin(20, MALE, "a male American robin singing from the top of a wooden fence post at dawn in spring, chest puffed out"),
+      robin(21, QUIET, "an American robin with beak slightly open on a snow-patched backyard lawn, a house with closed white storm windows behind it"),
+    ];
+    // Every picture's words already hold its season: nothing is added to them.
+    expect(holdLineSeasons(b)).toBe(0);
+    const refs = { memoryView: MEMORY_VIEWS[3], memoryRefUrls: ["https://r2/416/still-src-5.png"] };
+    const male = memoryClause({ ...b[1], ...refs });
+    expect(male).toContain(
+      "THIS PICTURE IS IN SPRING (no snow, frost or ice on anything), AT DAWN (the first low light of the day), AS ITS OWN WORDS SAY"
+    );
+    expect(male.endsWith(MEMORY_SETTING_CLAUSE)).toBe(true);
+    expect(memoryClause({ ...b[0], ...refs })).toContain("THIS PICTURE IS IN SPRING (no snow, frost or ice on anything), AT FIRST LIGHT");
+    expect(buildStillPrompt({ ...b[2], ...refs })).not.toContain("THIS PICTURE IS");
+  });
+
+  it("a season the line only waits or plans for is not taken from the picture's words (jobs 411-3, 158-97)", async () => {
+    const { seasonHourClause } = await import("./lineSeason");
+    const { MEMORY_VIEWS } = await import("./pictureMemory");
+    const refs = { memoryView: MEMORY_VIEWS[1], memoryRefUrls: ["https://r2/411/still-src-2.png"] };
+    const until = robin(3, "and nobody sees another robin until spring.", "an empty backyard lawn in spring");
+    expect(seasonHourClause({ ...until, ...refs })).toBe("");
+    const porch = robin(97, "or a neighbor two doors down expecting in the spring.", "the neighbor's front porch in spring");
+    expect(seasonHourClause({ ...porch, ...refs })).toBe("");
+  });
+});

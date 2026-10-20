@@ -8516,9 +8516,10 @@ export const MEMORY_SETTING_CLAUSE =
  * another spot — and, when the host is in the shot, that the last reference is the host. When one
  * of them is the picture shown right before it, about something else, it is told that picture lends
  * only the thing's look (`rightBeforeClause`). Every one is told the references lend only the look,
- * never their setting (`MEMORY_SETTING_CLAUSE`) — and, when its line sets it in a warm season or at an
- * hour, which one, in so many words (`seasonHourClause`, job 411 scene 20: the song that "belongs to
- * spring and summer" drawn from two snowy robin pictures came back in the snow).
+ * never their setting (`MEMORY_SETTING_CLAUSE`) — and, when its line or its own words set it in a warm
+ * season or at an hour, which one, in so many words (`seasonHourClause`, job 411 scene 20: the song that
+ * "belongs to spring and summer" drawn from two snowy robin pictures came back in the snow; job 416
+ * scene 20: "at dawn in spring" in its own words only, and it came back in its reference's snow).
  */
 export function memoryClause(scene: StoryboardScene): string {
   const clause = memoryReferenceClause(scene);
