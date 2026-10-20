@@ -56,6 +56,9 @@ const K409: KeyThing[] = [
 // Job 408's props list as stored.
 const TOILET_LOOK =
   "a white porcelain toilet, oval bowl, curved trapway inside its base visible as a smooth porcelain contour at the bowl's rear, closed lid often up";
+// The look a picture is drawn by: whether the lid is up is each picture's own (round 16, `lookWithoutState`).
+const TOILET_DRAWN =
+  "a white porcelain toilet, oval bowl, curved trapway inside its base visible as a smooth porcelain contour at the bowl's rear";
 const BIN_LOOK = "a small white plastic bin with a hinged lid, round shape";
 const SWAB_LOOK = "short white plastic or paper sticks with cotton tufts on both ends";
 const K408: KeyThing[] = [
@@ -270,7 +273,7 @@ describe("a thing that only stood in a reference picture is never written in", (
     expect(prompt).not.toContain(BIN_LOOK);
     expect(memoryClause(panel).endsWith(MEMORY_SETTING_CLAUSE)).toBe(true);
     const words = promptAfterMemoryChange(panel, prompt, memoryToWords(panel), { square: true });
-    expect(words).toContain(`HOW THE TOILET LOOKS in every picture of this video: ${TOILET_LOOK}`);
+    expect(words).toContain(`HOW THE TOILET LOOKS in every picture of this video: ${TOILET_DRAWN}.`);
     expect(words).not.toContain(BIN_LOOK);
     expect(words).not.toContain("OTHER THING");
   });
@@ -284,10 +287,10 @@ describe("a thing that only stood in a reference picture is never written in", (
     // Its first swab picture: the references are the toilet's, so it is drawn by the swab's look.
     expect(panel.memoryOthersOnly).toBe(true);
     expect(panel.keyThingLook).toBe(SWAB_LOOK);
-    expect(panel.otherThingLooks).toEqual([{ name: "toilet", look: TOILET_LOOK }]);
+    expect(panel.otherThingLooks).toEqual([{ name: "toilet", look: TOILET_DRAWN }]);
     const words = { ...panel, ...memoryToWords(panel) };
     expect(otherThingLooksClause(words)).toBe(
-      ` HOW THE OTHER THING IN IT LOOKS in every picture of this video — the toilet: ${TOILET_LOOK}. Draw that same one, where this picture's own words put it.`
+      ` HOW THE OTHER THING IN IT LOOKS in every picture of this video — the toilet: ${TOILET_DRAWN}. Draw that same one, where this picture's own words put it.`
     );
     expect(keyThingLookClause(words)).toContain(`HOW THE COTTON SWABS LOOKS in every picture of this video: ${SWAB_LOOK}`);
     expect(keyThingLookClause(words)).not.toContain(BIN_LOOK);

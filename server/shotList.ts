@@ -2204,6 +2204,14 @@ export const CONTINUITY_SYSTEM =
   "\"dawn-lit\", \"golden light\", \"at night\", \"in winter\", \"under fresh snow\"): those change from " +
   "picture to picture and each picture's own words say them — only a line that IS the weather (snow, " +
   "fog) describes it. " +
+  // Round 16, job 421: "empty row: …, tray tables stowed, no passengers seated" was sent to a picture
+  // of a woman sitting in that row, and "plastic cup: … filled partway with ice cubes" to the soda
+  // being poured into it (`lookWithoutState` cuts what the call still writes).
+  "Nor a STATE it is in for a moment — empty or full, what it holds, who sits in it, open or shut, " +
+  "lit or unlit, clean or dirty, wet or dry, put away or set out — and never what is NOT there (no " +
+  "\"half full of water\", \"lid open\", \"switched off\", \"nobody sitting in it\"): a look says how the " +
+  "thing is BUILT, and each picture's own words say its state. Only a thing whose name says what it " +
+  "holds (a jar of buttons), a kit, and a place's own fittings (a wall of hooks) keep that in the look. " +
   "The first line is the HOME setting (the workshop, kitchen, sewing room) " +
   "the video returns to. The SECOND line is the MAIN thing — the one physical thing the whole video " +
   "is about (what is made, used, sold or shown most) — written `MAIN name: look`. " +
