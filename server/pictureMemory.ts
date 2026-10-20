@@ -1245,12 +1245,19 @@ export function lendsNoPicture(name: string | undefined): boolean {
   return isPlaceName(name) || isWeatherName(name);
 }
 
-/** A props-list label as a name: no "MAIN" / "HOME", no article, no markdown, lower case. */
+/**
+ * A props-list label as a name: no "MAIN" / "HOME", no dash, no article, no markdown, lower case, and
+ * nothing after its head ("… at night"). The dash after "HOME" may be an en dash, and the name the
+ * prompt says carries no hour: job 252's "HOME – single-family house interior at night" was named
+ * "– single-family house interior at night" and would have put the night in every picture set there.
+ */
 const labelName = (label: string) =>
   label
-    .replace(/^(?:MAIN|HOME)\b[\s:-]*/i, "")
+    .replace(/^(?:MAIN|HOME)\b/i, "")
+    .replace(/^[\s:\-–—]+/, "")
     .replace(/^(?:the|a|an)\s+/i, "")
     .replace(/[*_`]/g, "")
+    .split(NAME_TAIL)[0]
     .trim()
     .toLowerCase();
 
@@ -1384,7 +1391,9 @@ export function placesSetIn(s: StoryboardScene, places: KeyThing[], home?: KeyTh
   const text = setWords(s);
   if (!text.trim()) return [];
   const toks = tokensOf(text);
-  const all = [...places, ...(home ? [home] : [])];
+  // The home once: a props list that also lists its home setting as a key thing would say it twice.
+  const sameName = (p: KeyThing) => !!home && p.name.trim().toLowerCase() === home.name.trim().toLowerCase();
+  const all = [...places, ...(home && !places.some(sameName) ? [home] : [])];
   const regions = Array.from(text.matchAll(NAMED_REGION), m => m[1]).filter(n => !TIME_NAME.test(n));
   const named = (p: KeyThing) => {
     const head = placeBase(nameHead(p.name));
@@ -1410,31 +1419,39 @@ export function placesSetIn(s: StoryboardScene, places: KeyThing[], home?: KeyTh
 
 /**
  * Season, weather, the hour and the climate — and light as a NOUN, said last or before where it falls
- * ("winter light", "low golden light on distant hills"): never a place's own look. "light" before
- * another word describes it ("light wear", "light grey walls", "a porch light fixture") and stays.
+ * ("winter light", "low golden light on distant hills", job 400's "soft fluorescent light overhead"),
+ * and the chill of a cold season (job 184's "autumn/winter chill"): never a place's own look. "light"
+ * before another word describes it ("light wear", "light grey walls", "a porch light fixture") and
+ * stays.
  */
 const PLACE_TIME =
-  /\b(?:lighting|sunlight|daylight|lamplight|moonlight|candlelight|glow(?:ing)?|shadows?|dawns?|dusks?|sunrises?|sunsets?|mornings?|evenings?|afternoons?|nights?|nighttime|midday|noon|twilight|hours?|seasons?|winters?|summers?|autumns?|wintry|weather|climate|sky|skies|snow|frost|rain|fog|mist|drafts?)\b|\blight\b(?=\s*$|\s+(?:from|through|in|on|of|across|over|at|into|onto|falling|coming|streaming|pouring|filtering|spilling|shining|that|which)\b)/i;
+  /\b(?:lighting|sunlight|daylight|lamplight|moonlight|candlelight|glow(?:ing)?|shadows?|dawns?|dusks?|sunrises?|sunsets?|mornings?|evenings?|afternoons?|nights?|nighttime|midday|noon|twilight|hours?|seasons?|winters?|summers?|autumns?|wintry|weather|climate|sky|skies|snow|frost|rain|fog|mist|drafts?|chill(?:y|ed)?)\b|\blight\b(?=\s*$|\s+(?:from|through|in|on|of|across|over|at|into|onto|overhead|above|throughout|everywhere|falling|coming|streaming|pouring|filtering|spilling|shining|that|which)\b)/i;
 /**
  * What lights the place ("lit by a warm desk lamp in the evenings", job 302; "lit by a single overhead
  * bulb", job 272): the light, which is each picture's own — a lamp glow in every picture set there is
  * the staged look the picture check refuses. Cut from where it starts.
  */
 const LIT_BY = /\s*\b(?:lit|lighted|illuminated)\s+(?:only\s+)?(?:by|with|from)\b.*$/i;
+/** A part that only says how the place is lit or warmed: job 207's "lit warm at evening". */
+const LIT_ONLY = /^\s*(?:lit|lighted|illuminated|warmed)\b/i;
 /**
  * A clause about the video rather than the place ("a stretch that the story keeps returning to", job
  * 263), or about one moment in it — something put there ready for what happens next ("furniture
  * staged near the curb for pickup", job 283; "empty except for the furniture piece", job 288): what
- * happens there is each picture's own words'.
+ * happens there is each picture's own words'. Never a house's storeys ("single-story house interior
+ * with hallway, bedroom, …", job 259, lost its whole first part) nor a waiting room.
  */
 const NOT_THE_PLACE =
-  /\b(?:story|stories|video|script|scenes?|narrat\w*|ready|staged|waiting|waits|awaiting|except for|for (?:pickup|sale|delivery|collection))\b/i;
+  /\b(?:(?<!\b(?:one|two|three|four|single|multi|split)[-\s])stor(?:y|ies)|video|script|scenes?|narrat\w*|ready|staged|waiting(?!\s+(?:rooms?|areas?|lounges?)\b)|waits|awaiting|except for|for (?:pickup|sale|delivery|collection))\b/i;
 /** Light, weather and season said as describing words: "dawn-lit", "frost-dusted", "snow-topped", "winter". */
 const PLACE_TIME_WORDS =
   /\b(?:(?:late|early|mid)-(?:autumn|fall|winter|summer|spring|morning|evening|afternoon|night|day|dawn|dusk)|[a-z]+-(?:lit|dusted)|(?:snow|frost|sun|moon|lamp|rain|ice)-[a-z]+|(?:cold|warm|mild|temperate)-(?:climate|weather)|(?:softly|dimly|brightly|evenly|warmly)\s+lit|sunlit|moonlit|lamplit|dim|snowy|frosty|frosted|icy|rainy|foggy|misty|sunny|overcast|wintry|winter|summer|autumn|autumnal|springtime|nighttime|daytime|pre-dawn|predawn)\b/gi;
-/** The words a light or weather cut leaves dangling: "a window letting (in daylight)", "dusted (with frost)". */
+/**
+ * The words a light or weather cut leaves dangling: "a window letting (in daylight)", "dusted (with
+ * frost)", job 198's "adjoining rooms warmed (by lamplight)".
+ */
 const DANGLING_CUT =
-  /(?:(?:^|\s+)(?:letting|coming|streaming|falling|pouring|filtering|shining|glowing|spilling|bathed|flooded|washed|dusted|covered|topped|bordered|edged|lined|lit))+$/i;
+  /(?:(?:^|\s+)(?:letting|coming|streaming|falling|pouring|filtering|shining|glowing|spilling|bathed|flooded|washed|dusted|covered|topped|bordered|edged|lined|lit|warmed))+$/i;
 /** Where the camera is, and what the place is used for or returned to: never its look. */
 const PLACE_CAMERA =
   /\s*\b(?:seen|viewed|shown|photographed|visible|used\s+(?:for|to|as|during|by|in)|returned\s+to)\b.*$/i;
@@ -1454,7 +1471,7 @@ export function placeLook(look: string): string {
     .replace(/[.\s]+$/, "")
     .split(/\s*[,;]\s*|\s+[—–]\s+/)
     .map(c => {
-      if (NOT_THE_PLACE.test(c)) return "";
+      if (NOT_THE_PLACE.test(c) || LIT_ONLY.test(c)) return "";
       let x = c.replace(PLACE_CAMERA, "").replace(LIT_BY, "").trim();
       // A trailing "at pre-dawn hours", "with low golden light", "under a layer of fresh snow" — read
       // from the end, so "a yard with a mowed lawn in the evening" keeps its lawn.
@@ -1469,6 +1486,8 @@ export function placeLook(look: string): string {
         .trim()
         .replace(/^(?:and|or|with)\s+|\s+(?:and|or|with)$/gi, "")
         .replace(/\ba (?=(?!one\b|one-|uni|use)[aeiou])/gi, "an ")
+        // What joined two words cut away: job 184's "autumn/winter chill" left a bare "/".
+        .replace(/^[\s/&+]+|[\s/&+]+$/g, "")
         .trim();
       // "where furniture waits before pickup": what happens there is each picture's own words'.
       return PLACE_TIME.test(x) || WRITING.test(x) || /^where\b/i.test(x) ? "" : x;

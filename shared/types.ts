@@ -665,7 +665,7 @@ export interface StoryboardScene {
   /**
    * The written looks of the PLACES this picture is set in, and of the key things its words name that
    * stand in them with no reference picture showing them (set at render, `memoryFor`): a place never
-   * lends a reference picture — job 411's lawn handed scene 1's yard to four later pictures and its snow
+   * lends a reference picture — job 411's lawn handed scene 2's yard to four later pictures and its snow
    * to the Gulf Coast panel — so a place is held to one look in words, and only where the picture's own
    * words set it in that same place (`placeLookClause`). Job 412's "ankle" list item, drawn from
    * nothing, came back in another bedroom with other bedding.

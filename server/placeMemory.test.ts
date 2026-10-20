@@ -471,3 +471,65 @@ describe("a split panel of no key thing still wears where it is set (withSplitMe
     expect(buildStillPrompt(panel, false, undefined, undefined, true)).toContain(`the bedroom: ${BEDROOM_CUT}`);
   });
 });
+
+describe("review: a home's name and a place's look carry no hour, light or cut-off word (stored props lists)", () => {
+  it("a HOME label after an en dash is named without the dash or its hour (jobs 167 and 252)", () => {
+    expect(
+      homePlaceOf(
+        "HOME – Farmhouse sewing room: wide-plank wood floor, whitewashed walls, treadle sewing machine by the window, wicker baskets along one wall, soft natural daylight."
+      )?.name
+    ).toBe("farmhouse sewing room");
+    const h252 = homePlaceOf(
+      "HOME – single-family house interior at night: pale hallway ceiling and walls, closed bedroom doors along the corridor, a kitchen with a stove, and an unfinished basement with exposed pipes overhead."
+    );
+    expect(h252?.name).toBe("single-family house interior");
+    expect(placeLookClause({ index: 1, placeLooks: [{ name: h252!.name, look: placeLook(h252!.look) }] } as StoryboardScene)).not.toMatch(
+      /night|–/
+    );
+  });
+
+  it("a house's storeys are no story about the video (job 259) — the story one still goes (job 263)", () => {
+    expect(
+      placeLook(
+        "single-story house interior with hallway, bedroom, kitchen, and basement, pale walls, smooth ceilings, warm daylight through windows by day and soft lamp glow at night"
+      )
+    ).toBe("single-story house interior with hallway, bedroom, kitchen, basement, pale walls, smooth ceilings");
+    expect(placeLook("pale carpet runner, white walls, flat ceiling, a stretch that the story keeps returning to")).toBe(
+      "pale carpet runner, white walls, flat ceiling"
+    );
+    // A waiting room is a room, not something waiting for the next moment.
+    expect(placeLook("a small waiting room with a row of cushioned chairs along a plain wall")).toBe(
+      "a small waiting room with a row of cushioned chairs along a plain wall"
+    );
+  });
+
+  it("light said after its source, the chill and a part that only says how it is lit all go (jobs 400, 184, 207, 198)", () => {
+    expect(placeLook("a narrow shelf lined with rows of plain cream envelopes and cards, soft fluorescent light overhead")).toBe(
+      "a narrow shelf lined with rows of plain cream envelopes and cards"
+    );
+    expect(
+      placeLook(
+        "concrete-floored space with a single frosted window, cold-weather light, wood dust settled evenly across the floor, autumn/winter chill visible in a faint window frost."
+      )
+    ).toBe("concrete-floored space with a single window, wood dust settled evenly across the floor");
+    expect(
+      placeLook(
+        "farmhouse room with weathered wood-plank floor and walls, one frost-paned window, a treadle sewing machine and low work table set beneath it, dim and orderly, lit warm at evening."
+      )
+    ).toBe("farmhouse room with weathered wood-plank floor and walls, one window, a treadle sewing machine and low work table set beneath it, orderly");
+    expect(placeLook("plain plank walls and worn wood floor, adjoining rooms warmed by lamplight, home base for all evening sewing")).toBe(
+      "plain plank walls and worn wood floor, adjoining rooms"
+    );
+    // A light that is a fixture stays (job 249's "warm ceiling light fixtures").
+    expect(placeLook("pale hallway with matte off-white walls, warm ceiling light fixtures")).toBe(
+      "pale hallway with matte off-white walls, warm ceiling light fixtures"
+    );
+  });
+
+  it("a home the props list also lists as a key thing is said once", () => {
+    const board = job412();
+    const bedroom: KeyThing = { name: "bedroom", look: "a quiet bedroom, a low wooden bed by the window" };
+    const set = placesSetIn(at(board, 21), [bedroom], homePlaceOf(SHEET_412));
+    expect(set).toEqual([bedroom]);
+  });
+});
