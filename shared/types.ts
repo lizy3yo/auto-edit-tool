@@ -497,6 +497,12 @@ export interface StoryboardScene {
    */
   listItems?: { own: string; others: string[] };
   /**
+   * The items, as said, of the spoken list a picture GATHERS right after it ("the steel in those
+   * three", `listGroupFor` in pictureMemory) — the ones whose own pictures it is drawn from, so each is
+   * drawn as the very one shown a moment before (job 414 scene 8: the froe came back a flat bar).
+   */
+  groupItems?: string[];
+  /**
    * The time and place a list item's sentence is set in when it is not the video's own here and now
    * ("a medieval market town, about 1300") — the list finder's `setting`, put on every item of the
    * list and on its bridge picture (`applySpokenLists`) and said in its prompt (`listItemClause`). An
@@ -588,7 +594,11 @@ export interface StoryboardScene {
    * block" from the hook's finished, oiled holder. Unset: no stage, memory exactly as before.
    */
   buildStage?: BuildStage;
-  /** "steps": one step of a spoken list of steps (`applySpokenLists`) — the same piece, further along. */
+  /**
+   * "steps": one step of a spoken list of steps (`applySpokenLists`) — the same piece, further along.
+   * Steps are done to one thing, never separate things: a step is about its key thing and is drawn
+   * from the steps before it in its list (`ownKeyThing`, `memorySourcesFor`).
+   */
   listKind?: "steps";
   /**
    * Whether something in this picture MOVES BY ITSELF, as judged on its own description

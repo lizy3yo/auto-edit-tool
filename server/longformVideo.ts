@@ -69,11 +69,13 @@ import {
   BLUR_PRINT_VIEW,
   homePlaceOf,
   keyThingLookClause,
+  LIST_GROUP_VIEW,
   lookToHold,
   memoryAttached,
   memoryFor,
   memoryView,
   nearCopyPartner,
+  ownKeyThing,
   panelLook,
   pictureSettled,
   placeLookClause,
@@ -7312,7 +7314,12 @@ export function buildStillPrompt(
  * words, which carry no time — "the farmer complains, … the old complain, and the young …", said
  * inside a passage about a writer of ancient times, came back as a farmer in overalls, an old man on
  * a park bench and a young man in a hoodie. When the list finder read the sentence as set in another
- * time or place, the prompt says so, for every item alike. Pure.
+ * time or place, the prompt says so, for every item alike.
+ *
+ * A STEP IS NO SEPARATE THING (round 14, job 413 scenes 31-32): "drain it outside, | store it sealed,"
+ * are two things done to one can. Told to draw each so it "could never be taken for the other items",
+ * a step is pushed away from the very can the step before showed. A step is told the thing it is done
+ * to is the same in every step. Pure.
  */
 export function listItemClause(scene: StoryboardScene): string {
   const items = scene.listItems;
@@ -7324,6 +7331,12 @@ export function listItemClause(scene: StoryboardScene): string {
     : "";
   if (!items?.others.length) return where;
   const others = items.others.map(o => `"${o}"`).join(", ");
+  if (scene.listKind === "steps")
+    return (
+      ` This picture is one step of a sequence said one after another — it shows "${items.own}", and ` +
+      `the other steps (${others}) each get their own picture. Whatever the steps are done to is the ` +
+      `very same one in every step.${where}`
+    );
   return (
     ` This picture is one item of a list said one after another — it shows "${items.own}", drawn so ` +
     `it is clearly that, by the shape and features that make it what it is, and could never be ` +
@@ -8114,7 +8127,9 @@ export function rightBeforeClause(scene: StoryboardScene): string {
   const n = scene.memoryRefUrls?.length ?? 0;
   const p = scene.memoryRightBefore;
   if (!n || p == null || p < 0 || p >= n || !scene.keyThing) return "";
-  if (scene.memoryView === SCREEN_ITEM_VIEW || scene.memoryView === SET_ITEM_VIEW) return "";
+  // A group picture's references are its items one by one, each lending only itself (`LIST_GROUP_VIEW`).
+  if (scene.memoryView === SCREEN_ITEM_VIEW || scene.memoryView === SET_ITEM_VIEW || scene.memoryView === LIST_GROUP_VIEW)
+    return "";
   const names = scene.memoryOthersOnly
     ? othersOnlyNames(scene)
     : [scene.partOf ?? scene.keyThing, ...shownOthers(scene)];
@@ -8221,6 +8236,20 @@ function memoryReferenceClause(scene: StoryboardScene): string {
       "this one item, close up and filling the frame — the very same one as in the reference: " +
       "identical shape, colours, materials and wear."
     );
+  // A picture that GATHERS the items of the list just said (`LIST_GROUP_VIEW`): each item from its own
+  // picture, together — job 414 scene 8, "the steel in those three", drew the froe from the word alone,
+  // a bare flat bar two seconds after the viewer saw it right.
+  if (n && scene.memoryView === LIST_GROUP_VIEW) {
+    const items = (scene.groupItems ?? []).map(t => `"${t}"`);
+    return (
+      ` ${n === 1 ? "The reference image is" : `The ${n} reference images are`} the picture${n === 1 ? "" : "s"} ` +
+      `of the items of the list just said${items.length ? ` (${namesInSentence(items)})` : ""}, one item in ` +
+      `each. This picture shows them together: draw every item a reference shows as the very same one — ` +
+      `identical shape, size, colours, materials and wear — where this picture's own words put them, from ` +
+      `a new camera position; never copy any reference's framing.` +
+      (scene.humanPresent && scene.brollHostRef ? " The last reference image is the host, only for how they look." : "")
+    );
+  }
   if (n && !scene.keyThing) return continuedMomentClause(scene);
   if (!n) return "";
   // Every key thing in the picture is drawn from its own earlier picture (the heater AND the mattress)
@@ -8245,10 +8274,18 @@ function memoryReferenceClause(scene: StoryboardScene): string {
     const same = beforeFinished(scene)
       ? "the same colours, materials and wear, at the same or an earlier point in the making"
       : "identical shape, size, colours, materials and wear";
+    // A list item whose key thing was only INHERITED (`ownKeyThing`): job 412 scenes 5-7, "knee," "hip,"
+    // "ribs," filed under the cat's paws, are drawn from the cat's picture for the cat whose paw it is.
+    // The inherited thing is no part of the item, so the references are named only for what they lend —
+    // never told to leave out a thing the item may show.
+    const rest =
+      scene.listCut && !ownKeyThing(scene)
+        ? `${n === 1 ? "It is" : "They are"} there only for the ${named}: everything else in this picture is drawn from its own words.`
+        : `${n === 1 ? "It does" : "They do"} NOT show the ${scene.keyThing}: draw it from this picture's own words.`;
     return (
       ` ${which} this exact ${named}, seen earlier in this video: draw the SAME ${named} — ${same} — ` +
       `from a different camera position, never copying the reference's framing. ` +
-      `${n === 1 ? "It does" : "They do"} NOT show the ${scene.keyThing}: draw it from this picture's own words.` +
+      rest +
       apart +
       host
     );
@@ -8273,10 +8310,22 @@ function memoryReferenceClause(scene: StoryboardScene): string {
     );
   // A part that carries printing nobody says (`BLUR_PRINT_VIEW`): the part is the subject, from an
   // arm's length, so the print stays a soft patch.
+  // THE OTHER THINGS IN A CLOSE-UP ARE THE SAME ONES (round 14, job 414 scene 26): "a close-up of a wide
+  // flat broadaxe blade slicing a pale layer of wood from the log's side" was drawn from scene 25, the
+  // broadaxe at work on the log — and told only that it showed "the whole green poplar log", never that
+  // the axe in it was the axe: the blade came back square with a row of holes, on another handle, in the
+  // next picture. The other key things the references show are named as the very same ones.
+  const partOthers = shownOthers(scene);
+  const sameOthers = partOthers.length
+    ? ` The ${namesInSentence(partOthers)} in ${n === 1 ? "it" : "them"} ${partOthers.length > 1 ? "are" : "is"} ` +
+      `this exact ${namesInSentence(partOthers)}: draw the very same ${partOthers.length > 1 ? "ones" : "one"} — ` +
+      `identical shape, size, colours, materials and wear.`
+    : "";
   if (scene.partOf && scene.memoryView === BLUR_PRINT_VIEW)
     return (
       ` ${which} the whole ${scene.partOf}. This picture shows just the part of it the words are ` +
       `about, ${BLUR_PRINT_VIEW}. Keep the same colours, materials and wear as the reference.` +
+      sameOthers +
       host
     );
   if (scene.partOf)
@@ -8284,6 +8333,7 @@ function memoryReferenceClause(scene: StoryboardScene): string {
       ` ${which} the whole ${scene.partOf}. This picture is a CLOSE-UP of just the part of it the ` +
       `words are about, filling the frame — never the whole ${scene.partOf} again. Keep the same ` +
       `fabrics, colours, materials and wear as the reference.` +
+      sameOthers +
       host
     );
   // Where it is: where its memory had it unless its own words put it somewhere else — job 399 scene
@@ -11630,6 +11680,10 @@ async function drawValidatedStill(
         // (`looksAtClosestRelative`) — the picture whose composition it may have copied (job 410
         // scene 20 was scene 3's seat row with the woman gone).
         scene.memoryView !== BACKGROUND_VIEW &&
+        // A picture that gathers a list's items (`LIST_GROUP_VIEW`) is drawn from one picture per item:
+        // no one of them is the whole to compare it with — three tools are not "a different" drawknife.
+        // The near-copy check still lays the pictures it is drawn from beside it.
+        scene.memoryView !== LIST_GROUP_VIEW &&
         // References of the other things only (`memoryOthersOnly`): there is nothing of its own
         // thing to compare it with — a first mattress is not "a different mattress" than a heater.
         !scene.memoryOthersOnly

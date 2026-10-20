@@ -634,12 +634,17 @@ describe("Hank's job 326: a list of STEPS (the operator, 2026-10-02)", () => {
     ];
     const r = applySpokenLists(scenes, lists(scenes), { main: "incense holder" });
     const steps = r.scenes.filter(s => s.listCut);
-    for (const s of steps) {
+    steps.forEach((s, k) => {
       expect(s.buildStage).toBe("making");
       expect(ownKeyThing(s)).toBe("incense holder"); // "oil it," too
-      expect(memorySourcesFor(r.scenes, s)).toEqual([]); // the finished holder is further along
+      // The finished holder is further along, never a source. Round 14: steps are done to one block, so
+      // each is drawn from the steps before it in its list (job 413 scenes 31-32) — the first from none.
+      const from = memorySourcesFor(r.scenes, s);
+      expect(from.some(x => x.buildStage === "done")).toBe(false);
+      expect(from.length > 0).toBe(k > 0);
+      expect(from.every(x => steps.indexOf(x) >= 0 && steps.indexOf(x) < k)).toBe(true);
       expect(requiredThingsFor(s)[0]).toMatch(/^incense holder — when it is what is being made: as it is at this stage of being made/);
-    }
+    });
   });
 
   it("steps that build nothing stay as they were (Frederick's job 359)", () => {
@@ -658,8 +663,10 @@ describe("Hank's job 326: a list of STEPS (the operator, 2026-10-02)", () => {
     expect(steps.map(s => s.scriptText)).toEqual(["get a stepladder,", "take one alarm down,", "and read the label."]);
     expect(steps.map(s => s.buildStage)).toEqual([undefined, undefined, undefined]);
     expect(steps.map(s => s.keyThing)).toEqual(["stepladder", "smoke alarm", "smoke alarm"]);
-    // The list-item rule as before: "read the label" names no alarm, so it is not drawn from one.
-    expect(steps.map(ownKeyThing)).toEqual(["stepladder", "smoke alarm", undefined]);
+    // Round 14: steps are done to one thing — "read the label" is the label of the alarm just taken down,
+    // so it is the alarm's picture, drawn from that step's alarm (job 413 scenes 31-32's gas can).
+    expect(steps.map(ownKeyThing)).toEqual(["stepladder", "smoke alarm", "smoke alarm"]);
+    expect(memorySourcesFor(r.scenes, steps[2]).map(x => x.scriptText)).toEqual(["take one alarm down,"]);
     expect(requiredThingsFor(steps[1])).toEqual(["smoke alarm"]);
     expect(memoryClause({ ...steps[1], memoryRefUrls: ["https://x/alarm.png"] })).toMatch(/identical shape, size, colours/);
   });
@@ -7918,5 +7925,99 @@ describe("round 14: a continuation knows what it continues (jobs 413 and 412)", 
     ];
     expect(continuedPicture(b, b[2])?.index).toBe(169);
     expect(nearCopyPartnerFor(b, b[2])?.index).toBe(169);
+  });
+});
+
+describe("round 14: every thing a picture shows keeps its memory (the verification films 413 and 414)", () => {
+  const row = (index: number, show: string, over: Partial<StoryboardScene> = {}) =>
+    ({ index, narration: "n", scriptText: "n", showSubject: show, visualPrompt: show, ...over }) as StoryboardScene;
+  const src = (i: number) => `https://r2/still-src-${i}.png`;
+
+  it("413: 'drain it outside, | store it sealed,' — the drain step keeps the red mower, the store step the drain step's can", async () => {
+    const { memorySourcesFor } = await import("./pictureMemory");
+    const b = [
+      row(28, "clean push mower sitting finished in the driveway", { keyThing: "mower", buildStage: "done", pictureUrl: src(28) }),
+      row(31, "the host's hands draining gasoline from the mower into the red gas can outdoors on the driveway", {
+        scriptText: "drain it outside,",
+        keyThing: "gas can",
+        otherKeyThings: ["mower"],
+        listCut: true,
+        listKind: "steps",
+        pictureUrl: src(31),
+      }),
+      row(32, "the red gas can with its black cap screwed tight on a shelf in an outdoor shed", {
+        scriptText: "store it sealed,",
+        keyThing: "gas can",
+        listCut: true,
+        listKind: "steps",
+      }),
+    ];
+    // It was drawn from nothing: a black-deck mower and, step to step, two different cans.
+    expect(memorySourcesFor(b, b[1]).map(s => s.index)).toEqual([28]);
+    expect(memorySourcesFor(b, b[2]).map(s => s.index)).toEqual([31]);
+  });
+
+  it("414: the picture under 'those three' is drawn from the axe's, the froe's and the drawknife's own pictures", async () => {
+    const { attachMemory, memorySourcesFor, memoryViewFor, LIST_GROUP_VIEW } = await import("./pictureMemory");
+    const steel: KeyThing[] = [
+      { name: "steel tools", look: "an axe, a froe, and a drawknife hanging together on the cabin's back interior wall", main: true },
+      { name: "white oak bolt", look: "a short pale log section with straight grain" },
+    ];
+    const b = [
+      row(5, "an axe (for the steel tools)", { scriptText: "an axe,", keyThing: "steel tools", listCut: true, pictureUrl: src(5) }),
+      row(6, "a close-up of a froe hanging on the cabin's back log wall: its straight flat steel blade with a wooden handle set upright", {
+        scriptText: "a froe,",
+        keyThing: "steel tools",
+        partOf: "steel tools",
+        listCut: true,
+        pictureUrl: src(6),
+      }),
+      row(7, "a close-up of a drawknife hanging on the cabin's back log wall", {
+        scriptText: "and a drawknife,",
+        keyThing: "steel tools",
+        partOf: "steel tools",
+        listCut: true,
+        pictureUrl: src(7),
+      }),
+      row(8, "a closer view of the steel tools hanging on the cabin wall", {
+        scriptText: "and the steel in those three was the one thing that homestead could not grow.",
+        keyThing: "steel tools",
+      }),
+      row(17, "the host's hands holding a froe upright by its wooden handle, its flat blade driven into the end of a short pale white oak bolt", {
+        keyThing: "white oak bolt",
+      }),
+    ];
+    attachMemory(b, [], steel);
+    // The froe came back a flat bar under "those three" — its memory was the drawknife close-up alone.
+    expect(memorySourcesFor(b, b[3]).map(s => s.index)).toEqual([5, 6, 7]);
+    expect(memoryViewFor(b, b[3])).toBe(LIST_GROUP_VIEW);
+    // The froe ten seconds later, filed under the oak bolt, is drawn from the froe the viewer saw.
+    expect(b[4].otherKeyThings).toEqual(["froe"]);
+    expect(memorySourcesFor(b, b[4]).map(s => s.index)).toEqual([6]);
+  });
+
+  it("Dale's 'Coasters, | ornaments,' stay separate things: never drawn from the pile they inherited, nor from each other", async () => {
+    const { memorySourcesFor } = await import("./pictureMemory");
+    const b = [
+      row(9, "The host's hands sorting small wood coasters and ornaments into neat stacks on the workbench.", {
+        keyThing: "small wood pieces",
+        otherKeyThings: ["workbench"],
+        pictureUrl: src(9),
+      }),
+      row(12, "a close stack of round maple and walnut coasters on the workbench", {
+        scriptText: "Coasters,",
+        keyThing: "small wood pieces",
+        otherKeyThings: ["workbench"],
+        listCut: true,
+        pictureUrl: src(12),
+      }),
+      row(13, "small carved wooden ornaments grouped on the workbench", {
+        scriptText: "ornaments,",
+        keyThing: "small wood pieces",
+        otherKeyThings: ["workbench"],
+        listCut: true,
+      }),
+    ];
+    expect(memorySourcesFor(b, b[2])).toEqual([]);
   });
 });

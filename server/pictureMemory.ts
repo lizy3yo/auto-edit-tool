@@ -20,6 +20,7 @@ import {
   BUILD_STAGES,
   anotherOfItsKind,
   keyThingsIn,
+  namesDevice,
   nearlySameSubject,
   othersOfKindIn,
   repeatsTopic,
@@ -57,8 +58,11 @@ export const MEMORY_VIEWS = [
 
 /**
  * The earlier cutaways `s` is drawn from: the first picture of its key thing (the memory) and the
- * latest one before `s` when that is a different picture. Empty when `s` shows no key thing or is
- * its first picture. Pure — unit-tested.
+ * latest one before `s` when that is a different picture, then the memory of every other key thing
+ * in it — at most `MAX_MEMORY_REFS`. A list item after its list's group picture is drawn from that
+ * picture (`listSetFor`), a picture gathering the list just said from its items' pictures
+ * (`listGroupFor`), a picture of no key thing from the one it continues (`keylessContinued`). Empty
+ * when nothing earlier shows what it shows. Pure — unit-tested.
  */
 export function memorySourcesFor(
   scenes: StoryboardScene[],
@@ -68,6 +72,10 @@ export function memorySourcesFor(
   // close-up is the same machine, cutter or pile as in the group (`listSetFor`).
   const set = listSetFor(scenes, s);
   if (set) return [set];
+  // A picture that GATHERS the items of the list just said is drawn from each item's own picture
+  // (`listGroupFor`, job 414 scene 8).
+  const group = listGroupFor(scenes, s);
+  if (group) return group;
   // A picture of NO key thing is drawn from the picture it CONTINUES, and only that (`keylessContinued`).
   if (!s.keyThing) {
     const from = source(s) ? keylessContinued(scenes, s) : undefined;
@@ -78,15 +86,17 @@ export function memorySourcesFor(
   // that thing, or it is a part of it (`partOf`). Dale's job 397: "Smalls, about $10 to $40.
   // Coasters, ornaments, small cutting boards." — the coasters and the ornaments both inherited the
   // pile of small pieces as their key thing, were drawn from that pile picture, and came back as the
-  // same picture twice.
-  if (!ownKeyThing(s)) return [];
+  // same picture twice. Only the key thing it INHERITED lends nothing: the other key things its own
+  // description names still lend theirs, below (job 412 scene 4, "ankle," keeps the bed).
+  const own = ownKeyThing(s);
   // A SCREEN picture gets its item's memory for what is ON the screen only (`SCREEN_ITEM_VIEW`): with
   // none, Dale's bookcase listing showed four random items (job 306); told to draw "the SAME" board
   // as an object, the picture maker built the tablet out of it (job 295). A screen is still never a
   // memory SOURCE (below).
   const i = scenes.indexOf(s);
   if (i <= 0) return [];
-  // A list item is never drawn from another item's picture: each item is its own thing.
+  // A list item is never drawn from another item's picture: each item is its own thing — but a STEP
+  // is drawn from the steps before it in its own list (`sameSteps`): they are done to one thing.
   // …nor is a screen ever a memory SOURCE: the thing on it is a small photo, not the thing.
   // …nor a picture FURTHER ALONG than this one (`laterStage`): build videos open on the finished
   // piece, and Hank's job 268 drew "hands drilling a hole into a charred cedar block" from the hook's
@@ -110,7 +120,7 @@ export function memorySourcesFor(
       x =>
         source(x) &&
         !isScreen(x) &&
-        !(s.listCut && x.listCut) &&
+        !(s.listCut && x.listCut && !sameSteps(scenes, x, s)) &&
         !laterStage(x, s) &&
         !x.memoryUnfit &&
         !insideView(x.showSubject) &&
@@ -123,19 +133,44 @@ export function memorySourcesFor(
   };
   // Its own thing: the memory (`memoryOf`) and the latest picture before it. Never a PLACE or the
   // weather (`lendsNoPicture`): job 411's lawn handed scene 2's whole yard to every picture set on it.
-  const same = lendsNoPicture(s.keyThing) ? [] : before.filter(x => shows(x, s.keyThing!));
-  add(memoryOf(same, s.keyThing));
-  // …the latest before it, or — marked to continue — the picture its topic continues (`topicPictureBefore`):
-  // job 412 scene 8 ("cat continuing steady walk across owner's body in bed") came after a list cut out
-  // of its beat, "ankle, knee, hip, ribs", and was drawn from the "ribs" close-up as its latest picture
-  // and as the one it continued, so its camera and its checks looked at a paw while it copied scene 3.
-  const chain = s.sameShot && !s.listCut ? topicPictureBefore(scenes, s) : undefined;
-  add(chain && same.includes(chain) ? chain : same[same.length - 1]);
+  // Never the DEVICE a screen picture is filed under: its references are what is ON the screen, and the
+  // device is "an ordinary real device" (`SCREEN_ITEM_VIEW`) — job 412 scene 15, the step "run it back,"
+  // on the phone's screen, would have been handed the phone's own picture as "the item for sale".
+  if (own && !(isScreen(s) && namesDevice(own))) {
+    const same = lendsNoPicture(own) ? [] : before.filter(x => shows(x, own));
+    add(memoryOf(same, own));
+    // …the latest before it, or — marked to continue — the picture its topic continues (`topicPictureBefore`):
+    // job 412 scene 8 ("cat continuing steady walk across owner's body in bed") came after a list cut out
+    // of its beat, "ankle, knee, hip, ribs", and was drawn from the "ribs" close-up as its latest picture
+    // and as the one it continued, so its camera and its checks looked at a paw while it copied scene 3.
+    const chain = s.sameShot && !s.listCut ? topicPictureBefore(scenes, s) : undefined;
+    add(chain && same.includes(chain) ? chain : same[same.length - 1]);
+  }
   // Every other key thing in it: that thing's memory (the heater beside the mattress) — a place's
   // never (job 411 scene 16: "a green lawn in a Gulf Coast yard" drawn from the northern lawn in snow).
+  // A LIST ITEM KEEPS THEM whatever its own key thing lends: job 413 scene 31, the step "drain it
+  // outside," filed under the gas can, "the host's hands draining gasoline from the mower into the red
+  // gas can", gave up the mower's memory with the can's, was drawn from no picture at all and came back
+  // with a black-deck mower where every other mower picture had the faded red deck; job 412 scene 4,
+  // "ankle," under the cat it only inherited, keeps the bed of scene 2. Never from a picture that shows
+  // the thing an item only inherited, though: handed the pile, a coaster is drawn as the pile (Dale's
+  // job 397).
   for (const t of s.otherKeyThings ?? [])
-    if (!lendsNoPicture(t)) add(memoryOf(before.filter(x => shows(x, t)), t));
+    if (!lendsNoPicture(t)) add(memoryOf(before.filter(x => shows(x, t) && (!!own || !shows(x, s.keyThing!))), t));
   return out;
+}
+
+/**
+ * Whether picture `x` is an earlier STEP of the same spoken list of steps as `s` — every picture from
+ * `x` to `s` is an item of that list. Steps are done to one thing, so one is drawn from the steps
+ * before it (job 413 scenes 31-32: the gas can drained into, then stored sealed). Pure.
+ */
+function sameSteps(scenes: StoryboardScene[], x: StoryboardScene, s: StoryboardScene): boolean {
+  if (x.listKind !== "steps" || s.listKind !== "steps") return false;
+  const [a, b] = [scenes.indexOf(x), scenes.indexOf(s)];
+  if (a < 0 || a >= b) return false;
+  for (let k = a; k <= b; k++) if (!scenes[k].listCut) return false;
+  return true;
 }
 
 /**
@@ -580,10 +615,14 @@ export function listItemsAround(
  */
 export function ownKeyThing(s: StoryboardScene): string | undefined {
   if (!s.keyThing) return undefined;
-  // A STEP of making the thing is about that thing whatever its words call it ("oil it,"): it is
-  // drawn from the thing's memory, and only at the same or an earlier stage (`laterStage`). A step
-  // with no stage builds nothing ("and read the label.") and keeps the list-item rule below.
-  if (s.listCut && s.listKind === "steps" && s.buildStage) return s.keyThing;
+  // A STEP is about the thing it is done to, whatever its words call it ("oil it,", "store it
+  // sealed,"): steps are done to ONE thing, never separate things like the items of a list of things.
+  // Job 413 scenes 31-32, "drain it outside, store it sealed," — both filed under the gas can, neither
+  // naming it — came back as two different cans, the first beside a black-deck mower where every other
+  // picture had the faded red one. A step of making the thing is drawn only from pictures of it at the
+  // same or an earlier stage (`laterStage`); a step with no stage builds nothing ("and read the label.")
+  // and is drawn from the thing as it is.
+  if (s.listCut && s.listKind === "steps") return s.keyThing;
   if (s.listCut && !s.partOf && !wordsName(s.scriptText ?? s.narration ?? "", s.keyThing)) return undefined;
   return s.keyThing;
 }
@@ -1113,6 +1152,118 @@ export function listSetFor(scenes: StoryboardScene[], s: StoryboardScene): Story
   return i >= 0 && scenes[i].listSet ? scenes[i] : undefined;
 }
 
+/*
+ * THE GROUP AFTER A LIST IS DRAWN FROM ITS ITEMS (round 14, job 414 scene 8). "But on the back wall hung
+ * | an axe, | a froe, | and a drawknife, | and the steel in those three was the one thing that homestead
+ * could not grow." Each item had its own picture — the froe correct, a flat blade with an upright wooden
+ * handle at one end — and the picture under "those three" was filed under the key thing all three were
+ * filed under ("steel tools"). Its memory was that thing's first picture about it and the latest one,
+ * both the drawknife close-up: the axe and the froe were drawn from the words alone, and the froe came
+ * back a bare flat bar two seconds after the viewer saw it right. The list's items are the very things
+ * the group shows, so the group is drawn from each item's own picture (`listGroupFor`), told to draw
+ * each as that same one (`LIST_GROUP_VIEW`). Replayed over the 350 stored storyboards: two pictures —
+ * this one, and job 407 scene 7 under the same words (whose items were key things of their own, so it
+ * was drawn from them already).
+ */
+
+/** The camera position of a picture that gathers a list's items, drawn from each item's own picture. */
+export const LIST_GROUP_VIEW =
+  "the items together in one picture, where this picture's own words put them — never one of the item pictures again";
+
+/**
+ * Words of a line that gather the items just said: "those three", "all four", "all of them", "each of
+ * them", "the two of them". Never a bare "both" ("both hands") or "none of those", which says the
+ * opposite.
+ */
+const GATHERS =
+  /\b(?:those|these|all|both)\s+(?:two|three|four|five|six|seven|eight|nine|ten)\b|\b(?:all|each|both)\s+of\s+(?:them|those|these)\b|\bthem\s+all\b|\bthe\s+(?:two|three|four|five|six|seven|eight|nine|ten)\s+of\s+them\b/i;
+
+/** Words in front of a list item that say nothing of what it is: joining words, articles, counts, owners. */
+const ITEM_LEAD =
+  /^(?:(?:and|or|plus|then|a|an|the|some|any|one|two|three|four|five|six|my|your|his|her|their|our|its|this|that|these|those|each|every)\s+)+/i;
+
+/** One word, singular: "coasters" → "coaster", "boxes" → "box", "berries" → "berry". */
+const singular = (w: string) =>
+  /(?:ss|us|is)$/.test(w)
+    ? w
+    : /ies$/.test(w)
+      ? `${w.slice(0, -3)}y`
+      : /(?:ches|shes|xes|zes|sses)$/.test(w)
+        ? w.slice(0, -2)
+        : /s$/.test(w)
+          ? w.slice(0, -1)
+          : w;
+
+/**
+ * The THING a list item's own words name, singular: "and a drawknife," → "drawknife", "Coasters," →
+ * "coaster", "two keepsake boxes" → "keepsake box". Undefined when the words are no short name of a
+ * thing: more than three words that name it, a number, or a clause ("the star looks fine"). Pure.
+ */
+export function itemThingName(said: string): string | undefined {
+  const rest = itemWords(said).toLowerCase().replace(ITEM_LEAD, "").trim();
+  if (!rest || !/^[a-z][a-z' -]*$/.test(rest)) return undefined;
+  const words = rest.split(/\s+/);
+  const meaningful = nameWords(rest).filter(w => !NOT_A_NAME_WORD.has(w));
+  if (!meaningful.length || meaningful.length > 3 || words.length > 4) return undefined;
+  words[words.length - 1] = singular(words[words.length - 1]);
+  return words.join(" ");
+}
+
+/** Whether two words are one, singular or plural: "axe"/"axes", "box"/"boxes", "coaster"/"coasters". */
+const sameWord = (a: string, b: string) =>
+  a === b || a === `${b}s` || b === `${a}s` || a === `${b}es` || b === `${a}es`;
+
+/**
+ * What a tool or thing LEAVES, said right after its name: "scalloped axe marks", "saw lines", "drill
+ * holes" are no axe, saw or drill (job 414 scene 29: "a hewn poplar log wall with scalloped axe marks").
+ */
+const LEFT_BY = /^(?:marks?|cuts?|chips?|shavings?|dust|scratch(?:es)?|dents?|nicks?|prints?|tracks?|stains?|burns?|scars?|grooves?|strokes?|holes?|kerfs?|lines?|scrapes?)$/;
+
+/**
+ * Whether `text` names the thing `name` (`itemThingName`) as that thing: every word of its name that
+ * says which thing it is, singular or plural, with its last word somewhere not followed by what the
+ * thing leaves (`LEFT_BY`). Pure.
+ */
+export function namesItemThing(text: string | undefined, name: string): boolean {
+  const toks = (text ?? "").toLowerCase().replace(/['’]s\b/g, " ").replace(/[^a-z0-9]+/g, " ").split(" ").filter(Boolean);
+  const want = nameWords(name).filter(w => !NOT_A_NAME_WORD.has(w));
+  if (!want.length || !want.every(w => toks.some(t => sameWord(t, w)))) return false;
+  const head = want[want.length - 1];
+  return toks.some((t, k) => sameWord(t, head) && !LEFT_BY.test(toks[k + 1] ?? ""));
+}
+
+/**
+ * The items of the spoken list a picture GATHERS right after it, whose own pictures it is drawn from;
+ * undefined for any other picture. The picture's line gathers them ("those three", "all of them",
+ * `GATHERS`); the list ends right before it (only host takes between); two or more of its items are
+ * drawn pictures of a thing (`itemThingName`) — never a list of steps, which are done to one thing —
+ * and the picture is about them: filed under the very key thing every item was filed under (job 414
+ * scene 8, "steel tools"), or its own words name two or more of them (job 407 scene 7, "the steel blades
+ * of the axe, the froe and the drawknife"). At most `MAX_MEMORY_REFS`, the ones its words name first,
+ * in film order. Never a list item, a list's own group picture, a close-up of one part, or a screen.
+ * Pure.
+ */
+export function listGroupFor(scenes: StoryboardScene[], s: StoryboardScene): StoryboardScene[] | undefined {
+  if (!drawn(s) || s.listCut || s.listSet || s.partOf || isScreen(s)) return undefined;
+  if (!GATHERS.test(s.scriptText ?? s.narration ?? "")) return undefined;
+  const i = scenes.indexOf(s);
+  let j = i - 1;
+  while (j >= 0 && !scenes[j].listCut && !drawn(scenes[j])) j--;
+  if (j < 0 || !scenes[j].listCut) return undefined;
+  let a = j;
+  while (a > 0 && scenes[a - 1].listCut) a--;
+  const run = scenes.slice(a, j + 1);
+  if (run.some(x => x.listKind === "steps")) return undefined;
+  const items = run.filter(x => source(x) && !isScreen(x) && !!itemThingName(x.scriptText ?? x.narration ?? ""));
+  if (items.length < 2) return undefined;
+  const words = s.hostPresent ? s.splitVisual ?? "" : `${s.showSubject ?? ""} ${s.visualPrompt ?? ""}`;
+  const named = items.filter(x => namesItemThing(words, itemThingName(x.scriptText ?? x.narration ?? "")!));
+  const filed = !!s.keyThing && items.every(x => x.keyThing === s.keyThing);
+  if (named.length < 2 && !filed) return undefined;
+  const picked = [...named, ...items.filter(x => !named.includes(x))].slice(0, MAX_MEMORY_REFS);
+  return items.filter(x => picked.includes(x));
+}
+
 /**
  * How a remembered thing is drawn when it is NOT what the picture is about (2026-10-02, Frederick's
  * job 335 at 0:07: "the one kind of fire that likes to start while the house is asleep" drew the
@@ -1271,6 +1422,11 @@ const shows = (x: StoryboardScene, t: string) =>
  */
 export function memoryViewFor(scenes: StoryboardScene[], s: StoryboardScene): string | undefined {
   if (listSetFor(scenes, s)) return SET_ITEM_VIEW;
+  if (listGroupFor(scenes, s)) return LIST_GROUP_VIEW;
+  // A list item whose key thing was only inherited is drawn from the OTHER things in it alone, as a first
+  // picture beside them is (`memoryOthersOnly`): no camera of its own thing to move — and never the
+  // screen's view, which would call a reference of another thing "the item for sale".
+  if (s.listCut && s.keyThing && !ownKeyThing(s)) return undefined;
   if (isScreen(s) && s.keyThing && drawn(s)) return SCREEN_ITEM_VIEW;
   // A picture of NO key thing has a camera only as a continuation, drawn from the picture it continues
   // (`keylessContinued`): a concrete one (`REDRAW_CAMERAS`) — job 413 scene 16 had only its words' "a
@@ -1319,6 +1475,8 @@ export function memoryViewFor(scenes: StoryboardScene[], s: StoryboardScene): st
  */
 export function tagKeyThings(scenes: StoryboardScene[], things: KeyThing[] | undefined): number {
   let n = 0;
+  const members = groupMembersOf(scenes, things);
+  const at = new Map(scenes.map((x, k) => [x, k] as const));
   for (const s of scenes) {
     if (!drawn(s)) continue;
     // THE ITEM, NOT WHAT IT SITS ON (job 410 scene 20): the juice under "Juice works the same way"
@@ -1371,9 +1529,113 @@ export function tagKeyThings(scenes: StoryboardScene[], things: KeyThing[] | und
     // Every other key thing the picture names is remembered too, and every surface it gave up.
     const others = named.filter(name => name !== s.keyThing);
     for (const t of surfaces) if (!others.includes(t)) others.push(t);
+    // …and every member of a group it shows (`groupMembersOf`): its own item picture, and every picture
+    // after it whose words name it as that thing — never another item of its own list, each of which is
+    // its own thing, and never where a key thing the picture names already holds the name ("kitchen
+    // knife" for a "knife"). A picture filed under nothing is filed under the member, as under any key
+    // thing it names (job 414 scene 13, "a student … pulling a drawknife", after the drawknife's item).
+    const shown = members.filter(m => {
+      if (m.item === s) return true;
+      const [k, item] = [at.get(s)!, at.get(m.item)!];
+      if (k <= item || (s.listCut && scenes.slice(item, k + 1).every(x => x.listCut))) return false;
+      return namesItemThing(text, m.name) && !named.some(name => namesItemThing(name, m.name));
+    });
+    for (const m of shown)
+      if (m.name !== s.keyThing && !others.includes(m.name)) {
+        if (!s.keyThing && m.item !== s) {
+          s.keyThing = m.name;
+          n++;
+        } else others.push(m.name);
+      }
     s.otherKeyThings = others.length ? others : undefined;
   }
   return n;
+}
+
+/*
+ * A GROUP'S MEMBERS ARE THINGS OF THEIR OWN (round 14, job 414 scenes 6, 17 and 20). The props list may
+ * write ONE key thing for things the script then lists one by one — "steel tools: an axe, a froe, and a
+ * drawknife hanging together" — and "an axe, | a froe, | and a drawknife," was cut one picture per item,
+ * each filed under that group. Later pictures named the froe ("the host's hands holding a froe upright
+ * by its wooden handle…", "…levering a froe's handle sideways…") but were filed under the oak bolt and
+ * the shingle: the froe was no key thing, so no picture of it was ever a reference, and it changed shape
+ * from one picture to the next — right at scene 17, a hatchet-like bar at scene 20, ten seconds later.
+ * So when two or more items of one list are filed under one key thing whose written look names each of
+ * them, each of those items is a MEMBER: a thing of its own, first shown by its item picture, and every
+ * picture from there on whose own words name it is drawn from its pictures like any other key thing
+ * (`tagKeyThings`, `otherKeyThings`). Never a part of a thing ("face, | edge, | length", job 352), a
+ * place, a screen, the group itself, a thing that is a key thing already, or the colours of ONE thing
+ * (jobs 354 and 378: "Ivory, | oat, | a warm coral," the beads of one necklace). Replayed over the 350
+ * stored storyboards: 7 groups in 5 films, 15 members — the steel tools, and the coasters, ornaments,
+ * engraved boards and keepsake boxes of a woodworker's piles of pieces.
+ */
+
+/** Words that name a collection of things: "smalls pile", "tool set", "sewing kit". */
+const COLLECTION = /^(?:pile|heap|set|collection|kit|stack|group|assortment|bundle|batch|selection|trio|array)$/;
+
+/** A member of a group key thing (`groupMembersOf`): its name, the item picture that first shows it, and its group. */
+export type GroupMember = { name: string; item: StoryboardScene; of: string };
+
+/**
+ * The members of the group key things of `scenes` (see above), in film order: from each run of a list
+ * of things, the items filed under one key thing that has a written look, two or more of them, whose
+ * own words name a thing (`itemThingName`) that look names (`namesItemThing`) — never the group itself
+ * (the item's words name it), a part of a thing (`PART_OF_IT`), a place or the weather
+ * (`lendsNoPicture`), a screen, or a thing that is a key thing of its own. Pure.
+ */
+export function groupMembersOf(scenes: StoryboardScene[], things: KeyThing[] | undefined): GroupMember[] {
+  const out: GroupMember[] = [];
+  if (!things?.length) return out;
+  // A group names MANY things — "steel tools", "small wood pieces", "smalls pile" — never one thing
+  // whose look lists its colours ("light bead necklace: … beads in ivory, oat, warm coral", jobs 354,
+  // 364, 380, 395: "Ivory, | oat, | a warm coral," are that one necklace's beads).
+  const isGroup = (name: string) => {
+    const head = nameWords(name).pop() ?? "";
+    return COLLECTION.test(head) || (singular(head) !== head && !/(?:ss|us|is)$/.test(head));
+  };
+  // An item whose own picture names the group's last word is the group itself in one variant, no
+  // member of it: job 378's "chunky light beads in ivory finish" under "chunky light beads". The
+  // "(for the …)" a list adds to a bare item names its group, not what the picture shows.
+  const showsGroup = (x: StoryboardScene, of: string) => {
+    const head = nameWords(of).pop() ?? "";
+    const words = (x.showSubject ?? x.visualPrompt ?? "").replace(/\(for the [^)]*\)/gi, " ");
+    return !!head && nameWords(words).some(w => sameWord(w, head));
+  };
+  const isKeyThing = (name: string) => {
+    const w = nameWords(name).filter(x => !NOT_A_NAME_WORD.has(x));
+    return things.some(k => {
+      const v = nameWords(k.name).filter(x => !NOT_A_NAME_WORD.has(x));
+      return v.length === w.length && v.every((x, i) => sameWord(x, w[i]));
+    });
+  };
+  let a = 0;
+  while (a < scenes.length) {
+    if (!scenes[a].listCut) {
+      a++;
+      continue;
+    }
+    let b = a;
+    while (b + 1 < scenes.length && scenes[b + 1].listCut) b++;
+    const run = scenes.slice(a, b + 1);
+    a = b + 1;
+    if (run.some(x => x.listKind === "steps")) continue;
+    const byThing = new Map<string, GroupMember[]>();
+    for (const x of run) {
+      const of = x.keyThing;
+      const look = of ? things.find(k => k.name === of)?.look : undefined;
+      if (!of || !look?.trim() || lendsNoPicture(of) || !isGroup(of) || !source(x) || isScreen(x)) continue;
+      if (showsGroup(x, of)) continue;
+      const said = x.scriptText ?? x.narration ?? "";
+      const name = itemThingName(said);
+      if (!name || wordsName(said, of) || lendsNoPicture(name) || isKeyThing(name)) continue;
+      if (PART_OF_IT.test(name.split(" ").pop()!) || !namesItemThing(look, name)) continue;
+      const ms = byThing.get(of) ?? [];
+      if (!ms.some(m => m.name === name)) ms.push({ name, item: x, of });
+      byThing.set(of, ms);
+    }
+    for (const ms of Array.from(byThing.values())) if (ms.length >= 2) out.push(...ms);
+  }
+  return out.sort((x, y) => scenes.indexOf(x.item) - scenes.indexOf(y.item));
 }
 
 /*
@@ -1884,14 +2146,24 @@ function attachEach(board: StoryboardScene[], keyThings: KeyThing[] | undefined,
     else delete s.listItems;
     const sources = memorySourcesFor(board, s);
     const set = listSetFor(board, s);
+    const group = listGroupFor(board, s);
+    if (group) s.groupItems = group.map(x => itemWords(x.scriptText ?? x.narration ?? ""));
+    else delete s.groupItems;
     sourcesOf.set(s, sources);
     // A reference is never a picture of a PLACE the picture is about (`lendsNoPicture`), whatever it
     // was filed under: told "this exact pharmacy aisle" it would hand its aisle on (job 409 scene 3).
-    const placeOwn = lendsNoPicture(s.keyThing);
+    // A list item's INHERITED key thing is not its own (`ownKeyThing`): a reference that shows it was
+    // picked for another thing in it, never for the item. A group picture's items are what it shows.
     // A picture of no key thing has only the picture it continues (`keylessContinued`): its own subject.
+    const own = ownKeyThing(s);
     ownSourcesOf.set(
       s,
-      sources.filter(x => x === set || (s.keyThing ? !placeOwn && shows(x, s.keyThing) : x === keylessContinued(board, s)))
+      sources.filter(
+        x =>
+          x === set ||
+          !!group?.includes(x) ||
+          (own ? !lendsNoPicture(own) && shows(x, own) : !s.keyThing && x === keylessContinued(board, s))
+      )
     );
     viewOf.set(s, memoryViewFor(board, s));
     lookOf.set(s, keyThingLookFor(s, keyThings, makes));

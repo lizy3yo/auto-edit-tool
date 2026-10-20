@@ -418,17 +418,21 @@ describe("412: the wilderness lends no picture; the bedroom keeps one look, list
     expect(placeLookClause(s)).not.toMatch(/golden|dawn/);
   });
 
-  it("scene 4, the 'ankle' list item: no reference, but the bedroom's look and the bed's", async () => {
+  it("scene 4, the 'ankle' list item: the bed from the bed's picture, the bedroom's look in words", async () => {
     const board = job412();
     attachMemory(board, [at(board, 4)], K412, homePlaceOf(SHEET_412));
     const s = await rendered(at(board, 4));
-    expect(s.memoryRefUrls).toBeUndefined();
-    expect(s.placeLooks).toEqual([
-      { name: "bedroom", look: BEDROOM_CUT },
-      { name: "bed", look: BED_CUT, in: "bedroom" },
-    ]);
+    // Round 14: a list item keeps the memory of the other key things its words name — only the cat it
+    // inherited lends nothing (scene 3, the cat's picture, is never its reference). The bed comes from
+    // scene 2, so it is no longer written in beside the reference.
+    expect(s.memoryRefUrls).toEqual([url(412, 2)]);
+    expect(s.memoryOthersOnly).toBe(true);
+    expect(s.placeLooks).toEqual([{ name: "bedroom", look: BEDROOM_CUT }]);
     const prompt = buildStillPrompt(s);
-    expect(prompt).toContain(`the bedroom: ${BEDROOM_CUT}; the bed in the bedroom: ${BED_CUT}.`);
+    expect(prompt).toContain(`the bedroom: ${BEDROOM_CUT}.`);
+    expect(prompt).toMatch(/this exact bed, seen earlier in this video/);
+    expect(prompt).toContain("It is there only for the bed: everything else in this picture is drawn from its own words.");
+    expect(prompt).not.toMatch(/NOT show the cat/);
     expect(prompt).not.toContain("blue-grey light");
   });
 
