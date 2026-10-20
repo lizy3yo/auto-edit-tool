@@ -464,15 +464,25 @@ const NOT_AN_AGENT = new Set(
     "hamper wrapper liner " +
     // what is worn, which walks and wears with its wearer ("worn leather sneakers walking across the lot")
     "sweater sneaker loafer slipper blazer suspender trouser jumper pullover romper garter holster " +
-    // trees, plants and animals
+    // trees, plants and animals — an animal eats, watches, sings and looks up like a person ("a deer
+    // eating the hostas", "a male warbler singing on a fence post", "a rooster watching from the fence")
     "juniper alder conifer clover lavender retriever terrier pointer setter boxer lobster oyster " +
+    "deer reindeer steer heifer rooster otter beaver badger hamster gopher spider grasshopper alligator " +
+    "predator panther tiger viper adder critter warbler flycatcher kingfisher woodpecker " +
+    "sapsucker creeper plover sandpiper tanager thrasher " +
+    // what a script's prose says teaches, counts or explains ("Each chapter teaches one thing", "all
+    // those numbers are really doing is counting", jobs 220 and 351)
+    "chapter number letter " +
     // no noun at all, a title ("Master Locksmith") and the camera ("angled toward the viewer")
     "other another either neither whether rather together ever never however whatever under over " +
     "after upper lower inner outer later earlier former latter water viewer master mister"
   ).split(" ")
 );
-/** "Two birdwatchers", "a group of birders": several people. */
-const MANY_OF = /^(?:group|crowd|pair|team|line|handful|couple|row|circle)$/;
+/**
+ * "A group of birders", "a crowd of onlookers": several people. Never "a pair of": a pair of
+ * scissors, pliers, clippers or waders is one thing.
+ */
+const MANY_OF = /^(?:group|crowd|team|line|handful|couple|row|circle)$/;
 /**
  * What only a person does — never a tool, a machine or a container, which cut, split, hold, carry,
  * stand, sit, lean, run, use fuel, offer shade and "let light in". Verbs of the body, the eyes and
@@ -504,11 +514,18 @@ const CLOTHING =
   /^(?:coats?|jackets?|parkas?|shirts?|tunics?|robes?|cloaks?|aprons?|overalls|coveralls|uniforms?|vests?|sweaters?|cardigans?|hoodies?|hats?|caps?|bonnets?|dress|dresses|skirts?|blouses?|suits?|scrubs|waders|togas?|kimonos?|gowns?|boots|gloves|jeans|clothes|clothing)$/;
 /** A garment named as one worn ("in a coat", "in her apron") or as several ("in winter coats", "in overalls"). */
 const WORN_AS = /^(?:a|an|the|his|her|their|its|my|your|our)$/;
-/** A word before an "-ing" word that makes it a thing's name or a gerund: "writing materials", "before signing off". */
-const NOT_ITS_DOING = /^(?:a|an|the|this|that|its|after|before|for|with|without|from|of|about|by|into|on)$/;
-/** Words before the noun that only a person takes: "an elderly carver", "a bearded trapper". */
+/**
+ * A word before an "-ing" word that makes it a thing's name or a gerund: "writing materials", "before
+ * signing off", "your shopping list" (job 352), "a ledger beside counting beads".
+ */
+const NOT_ITS_DOING =
+  /^(?:a|an|the|this|that|its|your|my|our|after|before|for|with|without|from|of|about|by|into|onto|on|in|at|beside|near|under|over|behind|across|along|through|toward|towards|against|around|among|between|beneath|below|above|inside|outside)$/;
+/**
+ * Words before the noun that only a person takes: "an elderly carver", "a bearded trapper". Never
+ * "male" or "female", which a bird ("a male warbler") and a pipe fitting ("a male coupler") take too.
+ */
 const PERSON_ADJ =
-  /^(?:elderly|bearded|balding|middle-aged|pregnant|barefoot|retired|uniformed|fellow|female|male|[a-z]+-haired|[a-z]+-bearded|[a-z-]+-year-old)$/;
+  /^(?:elderly|bearded|balding|middle-aged|pregnant|barefoot|retired|uniformed|fellow|[a-z]+-haired|[a-z]+-bearded|[a-z-]+-year-old)$/;
 /**
  * How only a person stands or looks: "the Roman advisor standing somberly alone". Never a way a
  * machine runs ("working quietly", "glowing warmly").
@@ -568,12 +585,13 @@ const PERSON_PRONOUN = /^(?:he|she|his|her|him|hers|they|them|their)$/;
  *   - "who" follows, or something only a person does ("a birder looking up at the trees", "a
  *     messenger handing over a scroll", "letting me try it", "standing somberly"), or it is dressed
  *     ("in a winter coat"), or a word before it only a person takes ("an elderly carver"), or
- *   - two weak signs agree, one of them a person's — "older", several of them ("a group of
- *     birdwatchers"), "from behind" — beside standing, working, waiting or "alone": "an older log
- *     restorer standing", "working at the log wall, seen from behind".
+ *   - two weak signs agree, one of them a person's — "older" or "from behind" — beside standing,
+ *     working, waiting, "alone" or several of them: "an older log restorer standing", "working at the
+ *     log wall, seen from behind", "a group of birdwatchers seen from behind".
  * Never a thing that does any of it: "a heater glowing", "a planter holding basil", "a sprayer
- * using compressed air", "a coffee maker on the counter", "a typewriter standing alone". Holding
- * and carrying are no sign: a holder, a planter and a trailer do both. Pure.
+ * using compressed air", "a coffee maker on the counter", "a typewriter standing alone", "three
+ * timbers standing in the yard" (things stand in numbers as often as people). Holding and carrying
+ * are no sign: a holder, a planter and a trailer do both. Pure.
  */
 function agentAt(tokens: string[], h: number): { lemma: string; plural: boolean } | undefined {
   const tok = tokens[h];
@@ -675,10 +693,12 @@ function agentAt(tokens: string[], h: number): { lemma: string; plural: boolean 
     if (isWord(t) && otherPerson(t, t.toLowerCase())) break;
     if (t.toLowerCase() === "behind" && tokens[k - 1]?.toLowerCase() === "from") weak.add("behind");
   }
-  // Two weak signs, one of them a person's: an age, several of them, or "from behind" (the framing
-  // every picture of a person is told to use: 59 of the 61 stored descriptions "seen from behind"
-  // show someone). Standing alone is a thing's as often ("a typewriter standing alone on the desk").
-  const personish = weak.has("age") || weak.has("many") || weak.has("behind");
+  // Two weak signs, one of them a person's: an age or "from behind" (the framing every picture of a
+  // person is told to use: 59 of the 61 stored descriptions "seen from behind" show someone).
+  // Standing alone is a thing's as often ("a typewriter standing alone on the desk"), and so is
+  // standing several at once ("three timbers standing in the yard", "a pair of scissors standing in
+  // a jar").
+  const personish = weak.has("age") || weak.has("behind");
   return strong || (personish && weak.size >= 2) ? { lemma, plural } : undefined;
 }
 

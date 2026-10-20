@@ -10091,4 +10091,20 @@ describe("job 418 #2: the log restorer the line names is in the picture the labe
     expect(namedPeople("a red rubber plunger standing idle in the corner of the bathroom")).toBeUndefined(); // job 403 #21
     expect(namedPeople("a fire extinguisher standing within reach of the workbench")).toBeUndefined(); // job 146 #258
   });
+
+  it("a bird or an animal named the same way is drawn with nobody in it", () => {
+    // The robin films (jobs 404, 411) are about birds: "a male robin singing" names nobody, and a
+    // warbler singing or a deer eating the hostas must not become "the only person in this shot".
+    for (const showSubject of [
+      "a male robin singing with its beak open on a branch at sunrise in spring", // job 404 #18
+      "a male warbler singing on a fence post at sunrise",
+      "a deer eating the hostas at the edge of the garden",
+    ]) {
+      const s = { ...scene2(), showSubject, scriptText: "They come back every spring." } as StoryboardScene;
+      markHostBroll([s], { hostLook: LOOK }, "https://x/sam.png");
+      expect(s.otherPerson, showSubject).toBeUndefined();
+      expect(s.humanPresent, showSubject).toBeUndefined();
+      expect(s.brollHostRef, showSubject).toBeUndefined();
+    }
+  });
 });

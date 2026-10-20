@@ -664,6 +664,38 @@ describe("a person named by what they do (job 418 scene 2)", () => {
     expect(namedPeople("a head outdoors on a cold winter morning wearing the finished cream ribbed hat, seen from behind")).toBeUndefined(); // job 297 scene 2
   });
 
+  it("never an animal, a word in a script's prose, a doing used as a name, or things in numbers", () => {
+    // An animal eats, watches, sings and looks up like a person, and takes "male" like one: the
+    // robin films (jobs 404, 411) drew "a male robin singing with its beak open on a branch".
+    for (const animal of [
+      "a male robin singing with its beak open on a branch at sunrise in spring", // job 404 scene 18
+      "a male warbler singing on a fence post at sunrise",
+      "a kingfisher looking down at the creek from a branch",
+      "a deer eating the hostas at the edge of the garden",
+      "a deer looking up at the camera from the edge of the woods",
+      "a rooster watching from the fence rail",
+      "an otter eating a fish on the riverbank",
+    ])
+      expect(namedPeople(animal), animal).toBeUndefined();
+    // A script's prose (keepListHolders reads it): a chapter teaches, numbers count.
+    for (const line of [
+      "Each chapter teaches one thing and hands you something real to make with it, a dishcloth, a hat, a blanket, a scarf,", // job 220 scene 23
+      "But all those numbers are really doing is counting.", // job 351 scene 12
+      "That number is your shopping list.", // job 352 scene 55
+    ])
+      expect(namedPeople(line), line).toBeUndefined();
+    // A doing after a possessive or a place word names a thing ("your shopping list", "beside
+    // counting beads"); "male" and "female" are a fitting's as well as a person's.
+    expect(namedPeople("a ledger open beside counting beads on the desk")).toBeUndefined();
+    expect(namedPeople("a male coupler on the garden hose")).toBeUndefined();
+    // A pair of them is one thing, and things stand in numbers as often as people.
+    expect(namedPeople("a pair of scissors standing upright in a mason jar")).toBeUndefined();
+    expect(namedPeople("three oak timbers standing upright against the barn wall")).toBeUndefined();
+    // …while people in numbers with a person's sign are still found.
+    expect(namedPeople("two birdwatchers seen from behind on a snowy street")?.people[0]).toMatchObject({ noun: "birdwatcher", count: 2 });
+    expect(namedPeople("a female birder in a winter coat on the trail")?.people[0]).toMatchObject({ noun: "birder", sex: "f" });
+  });
+
   it("the worker, the maker, the seller at the stall: whoever does the shown work", () => {
     const forearms = "the flame's blue tip just touching the wood grain, soft garage light across the darkened surface and the worker's forearms"; // job 143 scene 232
     expect(namedPeople(forearms)?.people[0]).toMatchObject({ noun: "worker", kind: "self" });
