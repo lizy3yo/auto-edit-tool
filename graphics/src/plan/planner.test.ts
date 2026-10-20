@@ -2096,3 +2096,59 @@ describe("a chapter series is every part the film counts, not the total a kicker
     expect(out.rounds[0].problems.map(p => p.cue)).toEqual(expect.arrayContaining(["chapter-two", "chapter 2"]));
   });
 });
+
+describe("a chapter series the film counts some other way keeps its promise (round 14 review of job 413's fix)", () => {
+  // The film's counts ("number N", an ordinal a sentence opens on) decide how far a series reaches
+  // only when every label sits on one of them. A film that counts "Tip one: … Tip two: … Tip three: …"
+  // shows no count to that reader, and a planner that labelled only the first two would otherwise read
+  // as a film that stops at two: the third part would go unlabelled under a series cut down to "· 1",
+  // "· 2". There the kicker's promise stands, as it did before job 413's fix.
+  const tips = [
+    ...W("Tip one: buy used. Every tool here was bought used.", 10),
+    ...W("Tip two: sell local. Every buyer lives close.", 40),
+    ...W("Tip three: keep receipts. Every receipt counts.", 70),
+  ];
+  const film = {
+    scenes: [
+      scene(1, 0, 30, { hostPresent: true, split: true, scriptText: "Tip one: buy used. Every tool here was bought used." }),
+      scene(2, 30, 60, { hostPresent: true, split: true, scriptText: "Tip two: sell local. Every buyer lives close." }),
+      scene(3, 60, 90, { hostPresent: true, split: true, scriptText: "Tip three: keep receipts. Every receipt counts." }),
+    ],
+  };
+  const tip = (n: number, start: string, of: number): CueSpec => ({
+    id: `tip-${n}`,
+    template: "ChapterLabel",
+    start,
+    startPad: -0.15,
+    durationSec: 4.5,
+    props: { kicker: `Tool tips · ${n} of ${of}`, number: n, title: start.split(" ").slice(2).join(" ") },
+  });
+  const once = (cues: CueSpec[]) => {
+    let n = 0;
+    return async () => JSON.stringify({ cues: n++ === 0 ? cues : [] });
+  };
+
+  it("two labels of a film that says 'Tip three' are dropped with the series, not cut down to '· 1', '· 2'", async () => {
+    const out = await planGraphics({ words: tips, cuts: [30, 60], film, ask: once([tip(1, "Tip one: buy used", 3), tip(2, "Tip two: sell local", 3)]), ensureIcon: async () => true });
+    expect(out.cues).toEqual([]);
+    expect(out.rounds[0].problems).toContainEqual({ cue: "chapter 3", problem: "chapter 3 of 3 is missing — label every counted part or none" });
+  });
+
+  it("every tip labelled keeps the series and its total", async () => {
+    const out = await planGraphics({
+      words: tips,
+      cuts: [30, 60],
+      film,
+      ask: once([tip(1, "Tip one: buy used", 3), tip(2, "Tip two: sell local", 3), tip(3, "Tip three: keep receipts", 3)]),
+      ensureIcon: async () => true,
+    });
+    expect(out.rounds.flatMap(r => r.problems)).toEqual([]);
+    expect(out.cues.map(c => c.props.kicker)).toEqual(["Tool tips · 1 of 3", "Tool tips · 2 of 3", "Tool tips · 3 of 3"]);
+  });
+});
+
+describe("a row read in the script's own words keeps every letter (round 14 review)", () => {
+  it("a word ending on a letter outside A-Z is not cut short", () => {
+    expect(rowsAsWritten(["a cafe", "a bakery"], "Down the road there's a café, a bakery, and a mill.")).toEqual(["a café", "a bakery"]);
+  });
+});

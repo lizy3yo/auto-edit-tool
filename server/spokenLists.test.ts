@@ -1397,3 +1397,23 @@ describe("a list ends where its sentence turns at a dash or a colon (round 13 gr
     expect(notAListAsSaid(whoHeWas, ["an advisor standing one step from the throne", "buried under exactly the kind of obligations we are about to talk about", "and a man who, years later, would be ordered to end his own life"])).toBeUndefined();
   });
 });
+
+describe("an aside closed again, or a colon inside a time, turns no list (round 14 review of job 413's fix)", () => {
+  it("a dash aside the sentence closes before the next row is no turn; job 413's one dash still is", () => {
+    expect(notAListAsSaid("You need a saw — any saw — a drill, and a chisel.", ["a saw", "a drill", "a chisel"])).toBeUndefined();
+    // job 413's line with the cost written as an aside still ends the crime at its first dash
+    expect(
+      notAListAsSaid("Nine times out of ten the crime is stale fuel and a gummed-up carburetor — an afternoon of cleaning and a two-dollar gasket.", [
+        "stale fuel",
+        "a gummed-up carburetor",
+        "a two-dollar gasket",
+      ])
+    ).toMatch(/are on two sides of the script's "—"/);
+  });
+
+  it("the colon in a time or a ratio is no turn; a colon between words still is", () => {
+    expect(notAListAsSaid("You want coffee at 6:30, toast, and eggs.", ["coffee", "toast", "eggs"])).toBeUndefined();
+    expect(notAListAsSaid("Mix the cement at 1:3, the sand, and the water.", ["the cement", "the sand", "the water"])).toBeUndefined();
+    expect(notAListAsSaid("Two things went wrong: the fuel, the gasket: the rest was fine.", ["the fuel", "the gasket", "the rest"])).toMatch(/are on two sides of the script's ":"/);
+  });
+});

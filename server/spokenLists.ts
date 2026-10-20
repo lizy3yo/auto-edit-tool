@@ -489,8 +489,12 @@ const POINT = /^(?:how|what|when|where|why|which|whether)\b/i;
 /** A sentence quoted in a message, cut to a readable length. */
 const quoted = (s: string, max = 140) => `"${s.length > max ? `${s.slice(0, max - 1).trimEnd()}…` : s}"`;
 
+/** A dash between two words, spaced or not. */
+const DASH = /—|–|\s-\s/g;
+/** A colon between two words — never one inside a time or a ratio ("at 7:30", "2:1"). */
+const COLON = /(?<!\d):|:(?!\d)/;
 /** Where a sentence TURNS between two words: a dash (spaced or not) or a colon. */
-const TURN = /—|–|\s-\s|:/;
+const TURN = new RegExp(`${DASH.source}|${COLON.source}`);
 
 /**
  * A LIST ENDS WHERE ITS SENTENCE TURNS (2026-10-20, Gary's job 413 at 2:06): "the crime is stale fuel
@@ -500,12 +504,15 @@ const TURN = /—|–|\s-\s|:/;
  * cure as two more crimes. The script still writes the turn. The dash or colon `sentence` writes
  * between two rows (from character `from` to `to`), or undefined — also when the words after it go on
  * with a joining word: "…the obligations we are about to talk about — and a man who, years later…"
- * (job 400's "Who Seneca was") is the list's last item, said after a pause. Pure.
+ * (job 400's "Who Seneca was") is the list's last item, said after a pause. Nor is an ASIDE the
+ * sentence closes again before the next row ("a saw — any saw — a drill, and a chisel"): the list
+ * picks up where the second dash leaves off. Pure.
  */
 function turnBetween(sentence: string, from: number, to: number): string | undefined {
   const between = sentence.slice(from, to);
   const m = TURN.exec(between);
   if (!m) return undefined;
+  if (!COLON.test(between) && (between.match(DASH)?.length ?? 0) >= 2) return undefined;
   const after = tokenSpans(between.slice(m.index + m[0].length) + " " + sentence.slice(to))[0]?.tok;
   return after && JOINERS.has(after) ? undefined : m[0].trim();
 }

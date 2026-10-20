@@ -1495,6 +1495,11 @@ function signsAsWords(row: string): string {
   );
 }
 
+/** The punctuation at a row's two ends, which is no part of the row. Any letter is a letter: an
+ * A-Z class read "café," as "caf". (Built with the constructor: the "u" flag in a literal needs an
+ * ES6 target.) */
+const ROW_ENDS = new RegExp("^[^\\p{L}\\p{N}$£€]+|[^\\p{L}\\p{N}%°¢]+$", "gu");
+
 /**
  * A LIST GRAPHIC'S ROWS IN THE SCRIPT'S OWN WORDS, so the list rules read them at the script's own
  * punctuation. The rows are the HEARD words, and the voice may read the script's punctuation another
@@ -1518,7 +1523,7 @@ export function rowsAsWritten(rows: string[], script: string): string[] {
     from = hits[hits.length - 1] + 1;
     const a = written[index[hits[0]].word];
     const b = written[index[hits[hits.length - 1]].word];
-    const text = script.slice(a.start, b.end).replace(/^[^A-Za-z0-9$£€]+|[^A-Za-z0-9%°¢]+$/g, "");
+    const text = script.slice(a.start, b.end).replace(ROW_ENDS, "");
     return text || row;
   });
 }
@@ -2250,13 +2255,17 @@ export async function planGraphics(input: PlanInput): Promise<PlanResult> {
     // label asked for (placed or refused) and the highest count it says aloud outside the call to
     // action, up to the promised total (`countsSaidAloud`). A part below that with no label still drops
     // the series; a promise past it leaves the kicker ("· 1 of 17" → "· 1"), so the screen never
-    // promises parts the film does not show.
+    // promises parts the film does not show. The film's counts are trusted only when every label
+    // sits on one of them: a film that counts some other way ("Tip three:", or "two" heard as "to")
+    // shows no count here, and a label it forgot would look like the end of the film — there the
+    // promise stands, as before.
     const chapters = placed.filter(p => p.spec.template === "ChapterLabel");
     if (chapters.length) {
       const numberOf = (s: CueSpec) => Number(s.props?.number);
       const promised = Math.max(0, ...chapters.map(p => kickerTotal(p.spec)));
-      const asked = [...kept0, ...newSpecs].filter(s => s.template === "ChapterLabel").map(numberOf);
-      const reached = Math.max(0, ...[...asked, ...Array.from(countedAloud).filter(n => n <= promised)].filter(n => Number.isInteger(n) && n > 0));
+      const asked = [...kept0, ...newSpecs].filter(s => s.template === "ChapterLabel").map(numberOf).filter(n => Number.isInteger(n) && n > 0);
+      const heard = asked.every(n => countedAloud.has(n));
+      const reached = Math.max(0, ...asked, ...(heard ? Array.from(countedAloud).filter(n => n <= promised) : [promised]));
       const have = new Set(chapters.map(p => numberOf(p.spec)));
       const lost = Array.from({ length: reached }, (_, i) => i + 1).filter(n => !have.has(n));
       if (lost.length) {
