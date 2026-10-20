@@ -61,6 +61,7 @@ import {
   showsScreen,
 } from "./shotList";
 import {
+  anotherOfItsKindClause,
   attachMemory,
   beforeFinished,
   requiredThingsFor,
@@ -7286,12 +7287,15 @@ export function buildStillPrompt(
   // WHERE IT IS SET, in words (`placeLookClause`): a place lends no reference picture, so a recurring
   // place keeps one look this way — job 412's "ankle" list item came back in another bedroom.
   const place = !visualOverride ? scrubLegibleWriting(placeLookClause(scene)) : "";
+  // ANOTHER ONE OF ITS KIND (`anotherOfItsKindClause`): job 412's "wild cat" came back as the video's own
+  // house cat, coat, bib and all — it is told it is not the one shown before.
+  const another = !visualOverride ? scrubLegibleWriting(anotherOfItsKindClause(scene)) : "";
   // A PART HIDDEN INSIDE IS SEEN FROM OUTSIDE (`drawnFromOutside`): job 403 drew its trapway sawn open
   // on every picture that named it ("close view of the toilet's internal porcelain S-shaped trapway
   // channel") or was about it ("close-up of the smooth white curved S-shaped porcelain channel").
   const outside = !visualOverride && drawnFromOutside(scene) ? ` ${SEEN_FROM_OUTSIDE_CLAUSE}` : "";
   return withAllowedText(
-    `${lead}${visual}${scrubLegibleWriting(namedLookClause(scene))}${look}${place}${outside}${item}${angleSuffix}${personSuffix}${memory}${app} ${amateurIphoneLook(subject, motion)} ${framing} ${noFigures} ${NO_BOOK_SUFFIX}`,
+    `${lead}${visual}${scrubLegibleWriting(namedLookClause(scene))}${look}${place}${another}${outside}${item}${angleSuffix}${personSuffix}${memory}${app} ${amateurIphoneLook(subject, motion)} ${framing} ${noFigures} ${NO_BOOK_SUFFIX}`,
     scene.pictureText,
     scene.blurPrint
   );

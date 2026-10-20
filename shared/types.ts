@@ -573,6 +573,14 @@ export interface StoryboardScene {
    */
   otherKeyThings?: string[];
   /**
+   * Key things this picture's own words name only as ANOTHER one of their kind (`othersOfKindIn`),
+   * with the words that say so — "a wild cat" for the video's own cat (job 412 scenes 23-26), "the
+   * neighbour's dog". Never `keyThing` or `otherKeyThings`, so never drawn from that thing's pictures
+   * or look; the prompt says it is not the one shown before (`anotherOfItsKindClause`). Set by
+   * `tagKeyThings` on every pass.
+   */
+  othersOfKind?: { name: string; said: string }[];
+  /**
    * How far along the thing the video MAKES is in this picture, set only on a picture of that thing
    * or what it is made from (the shot list, the line check, a step of a spoken list). The picture is
    * drawn only from pictures of the same or an EARLIER stage (`memorySourcesFor`): a build video

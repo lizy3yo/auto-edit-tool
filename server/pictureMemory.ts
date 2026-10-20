@@ -18,8 +18,10 @@ import type { KeyThing, MemoryRef, PlaceLook, StoryboardScene, ThingLook } from 
 import { REDRAW_CAMERAS } from "./pictureVariety";
 import {
   BUILD_STAGES,
+  anotherOfItsKind,
   keyThingsIn,
   nearlySameSubject,
+  othersOfKindIn,
   repeatsTopic,
   sameSubject,
   showsScreen,
@@ -852,6 +854,26 @@ export function keyThingLookClause(scene: StoryboardScene): string {
   return `${ownThingLookClause(scene)}${otherThingLooksClause(scene)}`;
 }
 
+/**
+ * ANOTHER ONE OF ITS KIND, TOLD APART (`scene.othersOfKind`, job 412 scenes 23-26). A picture whose
+ * words name a key thing only as another one of its kind — "a wild cat" in a video about one house
+ * cat — gets none of that thing's pictures or look, and is told in so many words that it is not the
+ * one shown before: drawn from its own words, the prompt writer's rewrite may still carry the props
+ * list's coat and markings. Never for a thing the picture also shows plainly. Pure.
+ */
+export function anotherOfItsKindClause(scene: StoryboardScene): string {
+  const shown = new Set([scene.keyThing, ...(scene.otherKeyThings ?? [])]);
+  return (scene.othersOfKind ?? [])
+    .filter(o => !shown.has(o.name) && o.said.trim())
+    .map(
+      o =>
+        ` ANOTHER ONE OF ITS KIND: this picture shows ${o.said.trim()} — not the ${o.name} shown in this ` +
+        `video's other pictures, nor a copy of it. Draw only what this picture's own words describe, ` +
+        `with a look of its own.`
+    )
+    .join("");
+}
+
 /** The line for its OWN key thing's look (`keyThingLook`), as it always was. */
 function ownThingLookClause(scene: StoryboardScene): string {
   if (scene.namedLook || !scene.keyThingLook || !scene.keyThing) return "";
@@ -1126,9 +1148,22 @@ export function tagKeyThings(scenes: StoryboardScene[], things: KeyThing[] | und
     if (!things?.length) {
       if (surfaces.length)
         s.otherKeyThings = [...surfaces, ...(s.otherKeyThings ?? []).filter(t => !surfaces.includes(t))];
+      s.othersOfKind = undefined;
       continue;
     }
     const text = s.hostPresent ? s.splitVisual : (s.showSubject ?? s.visualPrompt);
+    // ANOTHER OF ITS KIND IS NOT THE KEY THING (`anotherOfItsKind`, job 412 scenes 23-26): "a wild cat
+    // stalking low through scattered brush" was filed beside its landscape under the video's own cat
+    // and drawn from the pet's first picture — the pet in the desert. `keyThingsIn` no longer names it;
+    // a planner's or a check's filing under it is given up here too (with the stage, which belongs to
+    // the picture of that thing), and the prompt is told it is not the one shown before.
+    const another = othersOfKindIn(text, things);
+    s.othersOfKind = another.length ? another : undefined;
+    if (s.keyThing && another.some(a => a.name === s.keyThing)) {
+      s.keyThing = undefined;
+      s.buildStage = undefined;
+    }
+    if (s.partOf && another.some(a => a.name === s.partOf)) s.partOf = undefined;
     const named = keyThingsIn(text, things).map(t => t.name);
     // Filed anew only under a key thing the picture is ABOUT (or the item a screen shows): one beside
     // the subject would take the view that keeps its memory small (`BACKGROUND_VIEW`), and the surface
@@ -1541,7 +1576,8 @@ export function placeLooksFor(
   for (const t of things ?? []) {
     if (n >= MAX_PLACE_THINGS) break;
     if (t.name === own || t.name === s.partOf || lendsNoPicture(t.name) || namedKindIs(s, t.name)) continue;
-    if (!namesAll(text, t.name)) continue;
+    // Another one of its kind ("a stray cat on the bed") stands there with no look of the thing's own.
+    if (!namesAll(text, t.name) || anotherOfItsKind(text, t)) continue;
     const where = setIn.find(p => standsIn(t, p));
     // Held to the place's rule too: no hour or light of its own ("a tall bedroom window …, framing the
     // quiet night street outside", job 405) — the clause gives those to the picture's own words.

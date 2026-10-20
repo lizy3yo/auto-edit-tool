@@ -7768,3 +7768,46 @@ describe("a place lends no picture; a place set again keeps one written look (ro
     expect(s3.placeLooks?.map(p => p.name)).toEqual(["bedroom"]);
   });
 });
+describe("another of the same kind is not the key thing (round 14, job 412 scenes 23, 25 and 26)", () => {
+  // "Her wild relatives do their serious hunting in the low light at the edges of the day" was drawn as
+  // "a wild cat stalking …" and came back as the video's own house cat — the same coat, bib, socks and
+  // eyes — because the word "cat" filed the picture under the MAIN key thing and the pet's first picture
+  // was handed over as "this exact cat". The full cases are in anotherOfItsKind.test.ts.
+  const WILD = "a wild cat stalking low through scattered brush across the dawn-lit wild landscape toward a small mouse";
+  const things: KeyThing[] = [
+    { name: "cat", look: "a domestic shorthair cat, soft grey-and-white coat, medium build, a long tail held low, pale green eyes", main: true },
+    { name: "wild landscape", look: "an open dawn-lit wilderness with low golden light, scattered brush and distant hills, calm and empty of people" },
+  ];
+  const board = (): StoryboardScene[] =>
+    [
+      {
+        index: 2,
+        showSubject: "cat walking across sleeping owner's legs in bed",
+        keyThing: "cat",
+        pictureUrl: "https://r2/412/still-src-2.png",
+      },
+      { index: 21, showSubject: "the grey-and-white cat resting calmly at the foot of the bed in the dim bedroom at night", keyThing: "cat" },
+      { index: 22, showSubject: WILD, keyThing: "wild landscape", otherKeyThings: ["cat"] },
+    ].map(s => ({ narration: "n", scriptText: "n", visualPrompt: s.showSubject, ...s }) as StoryboardScene);
+
+  it("412: the wild cat is drawn from no picture of the pet, with none of her look, and told it is another one", async () => {
+    const { attachMemory, memoryFor, memorySourcesFor, memoryView } = await import("./pictureMemory");
+    const { buildStillPrompt, memoryFields } = await import("./longformVideo");
+    const b = board();
+    attachMemory(b, b, things);
+    expect(memorySourcesFor(b, b[2])).toEqual([]);
+    const wild = { ...b[2], ...memoryFields(await memoryFor(b[2], 0), memoryView(b[2])) } as StoryboardScene;
+    const prompt = buildStillPrompt(wild);
+    expect(prompt).toContain("this picture shows a wild cat — not the cat shown in this video's other pictures, nor a copy of it.");
+    expect(prompt).not.toContain("soft grey-and-white coat");
+  });
+
+  it("412: the pet on the bed is still the cat — drawn from her first picture, with no such line", async () => {
+    const { attachMemory, memorySourcesFor } = await import("./pictureMemory");
+    const { buildStillPrompt } = await import("./longformVideo");
+    const b = board();
+    attachMemory(b, b, things);
+    expect(memorySourcesFor(b, b[1]).map(s => s.index)).toEqual([2]);
+    expect(buildStillPrompt(b[1])).not.toContain("ANOTHER ONE OF ITS KIND");
+  });
+});

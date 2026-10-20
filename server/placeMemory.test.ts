@@ -401,14 +401,17 @@ describe("412: the wilderness lends no picture; the bedroom keeps one look, list
     expect(sources(board, 26)).not.toContain(25);
   });
 
-  it("scene 23: its references show only the other thing in it, and the landscape is drawn by its words and written look", async () => {
+  it("scene 23: no reference at all — the wild cat is not the video's cat — and the landscape is drawn by its words and written look", async () => {
     const board = job412();
     attachMemory(board, [at(board, 23)], K412, homePlaceOf(SHEET_412));
     const s = await rendered(at(board, 23));
-    expect(s.memoryRefUrls).toEqual([url(412, 3)]);
-    expect(s.memoryOthersOnly).toBe(true);
+    // It used to be drawn from the pet's picture (scene 3) for "the other thing in it": the pet in the
+    // desert. "A wild cat" is another one of its kind (`anotherOfItsKind`, anotherOfItsKind.test.ts).
+    expect(s.memoryRefUrls).toBeUndefined();
+    expect(s.otherKeyThings).toBeUndefined();
+    expect(s.othersOfKind).toEqual([{ name: "cat", said: "a wild cat" }]);
     expect(s.keyThingLook).toBeUndefined();
-    expect(memoryClause(s)).toContain("NOT show the wild landscape: draw it from this picture's own words.");
+    expect(memoryClause(s)).toBe("");
     expect(s.placeLooks).toEqual([
       { name: "wild landscape", look: "an open wilderness, scattered brush and distant hills, calm and empty of people" },
     ]);
