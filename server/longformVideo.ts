@@ -307,6 +307,13 @@ export const UNHELD_TOOL_CLAUSE =
  * …AND SO IS A TOOL LEFT HUNG OR PROPPED UP WITH NOBODY IN THE PICTURE (2026-10-20, job 418 scene 25:
  * a panel's froe on a bare wire hook, its handle out over nothing, broken on all three draws): told
  * how a tool nobody holds is put down (`UNHELD_TOOL_CLAUSE`, `UNHELD_POSE` in `namedFaultClause`).
+ *
+ * …AND SO IS A SEAT TURNED AGAINST ITS ROWS (round 16, 2026-10-20, job 421 scene 29: one seat turned
+ * about 90° while every other row faced forward; scene 2: the row ahead drawn front-on, two rows knee
+ * to knee; job 399 scene 2: a torso through its seat back — now named by the check): told that every
+ * fixed seat faces the way its rows face (`SEAT_FACING_FIX`, `SEAT_TURNED`) in ANY picture, since a row
+ * turned round is as wrong with nobody in it, and with someone in it how they sit in their seat
+ * (`SEATED_PERSON_FIX`, `SEATED_WRONG`).
  */
 export type FaultRedraw = "at rest" | "soft print" | "named fault";
 export function faultRedrawFor(
@@ -369,6 +376,32 @@ export const NATURAL_POSE_FIX =
   "and framed below the chin — never by turning the person round, reversing a seat or a row, or " +
   "twisting the body away from what it is doing.";
 /**
+ * The redraw's rule for a SEAT TURNED AGAINST ITS ROWS (round 16, 2026-10-20, job 421, the round-15
+ * film): scene 29's seat turned about 90° toward the gap between the rows, her knees at the camera,
+ * while every other row faced forward — a side view bought by turning the seat, not the camera; scene
+ * 2's row ahead drawn front-on beside a woman whose own seat faced away, two rows knee to knee (job 417
+ * scene 8 again); job 399 scene 2's torso drawn through its seat back. It speaks of the furniture and
+ * the camera only, so it rides a picture with nobody in it too and never asks for a person there; a
+ * picture with someone in it also takes `SEATED_PERSON_FIX`. Seats BUILT in facing pairs are kept as
+ * built, so a booth the check misread is not turned into a row. It names no place and no kind of seat:
+ * a thing a prompt names is a thing the picture maker draws.
+ */
+export const SEAT_FACING_FIX =
+  "Every fixed seat faces the way the rows around it face: where rows of seats all face one way, " +
+  "every seat and every row faces that same way — none turned sideways and none turned round to face " +
+  "the row behind it — so a row seen from behind shows the backs of all its seats; seats built in " +
+  "facing pairs are left as built. Show a seat from another side by moving the CAMERA, never by " +
+  "turning the seat or the row.";
+/**
+ * …and the person in such a seat (round 16): scene 29's passenger turned with her seat to face the one
+ * handing her something, where a seated person turns only the head and shoulders; job 399 scene 2's
+ * torso in front of the seat back it sat against. Only in a picture with someone drawn in it.
+ */
+export const SEATED_PERSON_FIX =
+  "Each person sits on their own seat's cushion with its back behind them, never through it, knees " +
+  "pointing the way the seat faces, and turns only the head and shoulders toward anyone the " +
+  "description has them talk to or take something from.";
+/**
  * A fault the check names in a person's POSE: the words the check is asked to start with
  * ("unnatural pose:", `STILL_DEFECT_SYSTEM`), and the words it uses on its own for the same faults —
  * sitting backwards or sideways in a seat, facing its own seat back, a row turned round, a body
@@ -411,6 +444,59 @@ const POSE_FAULT = new RegExp(
     // in one hand — never arm's length alone (a phone held out at arm's length is how phones are held).
     String.raw`\b(?:one[-\s]handed|(?:with|in)\s+one\s+hand)\b[^,;]*\barm'?s'?\s+length\b|\barm'?s'?\s+length\b[^,;]*\b(?:one[-\s]handed|(?:with|in)\s+one\s+hand)\b`,
     String.raw`\b(?:one[-\s]handed|with\s+one\s+hand|in\s+one\s+hand)\b[^,;]*\bheavy\b|\bheavy\b[^,;]*\b(?:one[-\s]handed|with\s+one\s+hand|in\s+one\s+hand)\b`,
+  ].join("|"),
+  "i"
+);
+/**
+ * A fault the check names in WHICH WAY A SEAT FACES (round 16, job 421 scenes 2 and 29, job 417 scene
+ * 8) — told `SEAT_FACING_FIX` in any picture: the words the check is asked to start with ("seat
+ * turned:", `STILL_DEFECT_SYSTEM`), and its own words for the same faults — a seat or a row turned,
+ * rotated or facing sideways, round, backwards, the wrong way, front-on, each other, the gap between the
+ * rows, a wall or the person behind it; two rows knee to knee. With someone in the picture, also a
+ * person sitting backwards or sideways, facing their own seat back, knees across the seat or at the gap
+ * beside it, and a body or a limb through a seat, a seat back or an armrest (`SEATED_WRONG`, job 417
+ * scene 2, job 399 scene 2). Never a seat's own fault with no way to face in it — "plane seat back
+ * merging into the window" (job 410 scene 2) and "second tray table folded up on seatback, unattached"
+ * (the render logs) keep their plain reroll — nor a workbench, a bench vise, a seat belt or a row of
+ * things that are no seats ("row of jars facing the wall").
+ */
+const FIXED_SEAT = String.raw`(?:seat[\s-]*backs?|seatbacks?|seats?(?![\s-]*belts?)|chairs?|armchairs?|recliners?|pews?|sofas?|couch(?:es)?|benches?(?!\s+(?:vi[sc]es?|hooks?|tops?|grinders?|dogs?|stops?|planes?|saws?|press(?:es)?|clamps?|power|supply))|rows?(?!\s+of\b)|rows?\s+of\s+(?:\w+\s+){0,2}(?:seats|chairs|benches|pews))`;
+/** Words between a seat and what it does — never the start of a clause about the person in it. */
+const SEAT_BETWEEN = String.raw`(?:(?!(?:with|and|while|but|her|his|their|head|body|torso|face|neck|shoulders?)\b)[\w'-]+\s+){0,2}`;
+/** How far it is turned: "about 90 degrees", "fully round", "almost sideways". */
+const SEAT_ADVERB = String.raw`(?:(?:about|almost|nearly|roughly|some|fully|right|completely|partly|half|all\s+the\s+way|\w+ly)\s+)?`;
+/** What a turned seat faces: the gap beside it, a wall, the camera, the seats behind or the person there. */
+const SEAT_FACED = String.raw`(?:each\s+other|one\s+another|(?:the\s+)?(?:aisles?|walkways?|gangways?|corridors?|walls?|windows?|camera|viewer|lens|others)\b|(?:the\s+)?(?:other\s+)?(?:rows?|seats?|chairs?|pews?)\s+(?:behind|ahead|in\s+front|opposite|beside)\b|(?:the\s+)?other\s+(?:rows?|seats?|chairs?|pews?)\b|the\s+(?:man|woman|person|people)\b|(?:her|him|them)\b(?![\s-]+[a-z]))`;
+/** A body or a limb — never a chair's or a sofa's own arm. */
+const SEAT_BODY = String.raw`(?:body|torso|chest|shoulders?|(?<!(?:chair|sofa|seat|couch)\s)arms?|elbows?|legs?|knees?|hips?|thighs?|feet|foot|person|people|man|men|woman|women|figure|someone)`;
+const SEAT_TURNED = new RegExp(
+  [
+    // The words the check is asked to start a seat fault with.
+    String.raw`\bseats?\s+turned\s*:`,
+    // A seat or a row turned against its rows, or facing what such seats never face.
+    String.raw`\b${FIXED_SEAT}\s+${SEAT_BETWEEN}(?:turned|rotated|swivell?ed|swung|spun|twisted|flipped)\s+${SEAT_ADVERB}(?:sideways|side-?on|backwards?|(?:a)?round|180|90|ninety|the\s+(?:wrong|other|opposite)\s+way|(?:to|toward|towards|into|at)\s+(?:face\s+)?${SEAT_FACED})`,
+    String.raw`\b${FIXED_SEAT}\s+${SEAT_BETWEEN}(?:facing|faces?|pointing|points?|angled|oriented|set|placed|drawn|shown)\s+${SEAT_ADVERB}(?:sideways|side-?on|backwards?|front-?on|head-?on|the\s+(?:wrong|other|opposite)\s+way|(?:(?:to|toward|towards|into|at)\s+)?${SEAT_FACED})`,
+    String.raw`\b(?:reversed|backwards?|sideways)\s+${FIXED_SEAT}\b|\b${FIXED_SEAT}\s+${SEAT_BETWEEN}reversed\b`,
+    String.raw`\b${FIXED_SEAT}\s+${SEAT_BETWEEN}(?:knee|face)[\s-]+to[\s-]+(?:knee|face)\b`,
+  ].join("|"),
+  "i"
+);
+/**
+ * …and a person sitting against the way their seat faces, or through it — read only in a picture with
+ * someone drawn in it, where it is told `SEAT_FACING_FIX` and `SEATED_PERSON_FIX` beside the pose's rule.
+ */
+const SEATED_WRONG = new RegExp(
+  [
+    // A person sitting against the way their seat faces.
+    String.raw`\b(?:sit(?:s|ting)?|sat|seated|kneel(?:s|ing)?|perched)\s+(?:\w+\s+){0,2}(?:backwards?|sideways|the\s+wrong\s+way)\b`,
+    String.raw`\b(?:backwards?|sideways|the\s+wrong\s+way(?:\s+round)?)\s+(?:in|on|across)\s+(?:(?:the|their|his|her|a|an|its)\s+)?(?:own\s+)?${FIXED_SEAT}\b`,
+    String.raw`\bfacing\s+(?:into\s+)?(?:the|their|his|her|its)\s+(?:own\s+)?seat[\s-]*backs?\b|\bfacing\s+(?:into\s+)?the\s+back\s+of\s+(?:the|their|his|her|its)\s+(?:own\s+)?seat\b`,
+    String.raw`\b(?:turned|twisted)\s+(?:a)?round\s+in\s+(?:(?:the|their|his|her|a)\s+)?${FIXED_SEAT}\b`,
+    String.raw`\b(?:legs|knees|thighs|feet)\s+(?:\w+\s+){0,2}(?:across|over|along)\s+(?:the|their|his|her|its)\s+(?:own\s+)?seats?\b`,
+    String.raw`\b(?:legs|knees|thighs)\s+(?:point(?:s|ing)?|facing|faces?|turned)\s+(?:\w+\s+)?(?:at|toward|towards|into|to)\s+the\s+(?:aisle|walkway|gangway|camera|wall|window)\b`,
+    // A body through its seat.
+    String.raw`\b${SEAT_BODY}\s+(?:\w+\s+){0,3}(?:through|(?:merged|merging|fused)\s+(?:with|into)|inside)\s+(?:(?:the|their|his|her|a|its)\s+)?(?:own\s+)?(?:seat[\s-]*backs?|seatbacks?|seats?|armrests?|chairs?|pews?|sofas?|couch(?:es)?|benches?)\b`,
+    String.raw`\b(?:seat[\s-]*backs?|seatbacks?|seats?|armrests?)\s+(?:\w+\s+)?(?:passing|running|cutting|going|growing)\s+(?:right\s+)?through\s+(?:her|him|them|(?:the|her|his|their)\s+${SEAT_BODY})\b`,
   ].join("|"),
   "i"
 );
@@ -472,7 +558,10 @@ const UNHELD_POSE =
  * own kind, named by the fault or else by the picture's words (`SPLIT_STRIKE_CLAUSE`,
  * `SHAVING_STROKE_CLAUSE`), else `TOOL_AT_WORK_FIX`; and on a picture with someone in it, a person in
  * an unnatural pose (`POSE_FAULT`) the natural pose and the camera moved (`NATURAL_POSE_FIX`), before
- * any tool's rule the same fault names. Undefined for any other fault, a fault with no
+ * any tool's rule the same fault names; and in any picture, a seat turned against its rows
+ * (`SEAT_TURNED`, round 16) how fixed seats face (`SEAT_FACING_FIX`), after the pose's rule — with, in a
+ * picture with someone in it, a person sitting against their seat or through it (`SEATED_WRONG`) told
+ * that too and how to sit in it (`SEATED_PERSON_FIX`). Undefined for any other fault, a fault with no
  * words, a finger or a hand too many (`BODY_COUNT_FAULT`), and a tool in a picture with nobody in it —
  * a tool with no hand on it cannot be put to work, so that frame keeps its plain reroll and then the
  * at-rest draw — unless the check found that tool hung, balanced or propped up (`UNHELD_POSE`, job 418
@@ -496,8 +585,15 @@ export function namedFaultClause(
   const aircraft = AIRCRAFT.test(`${fault} ${words}`);
   const faultTool = toolWords(fault, aircraft);
   // A person's pose (`POSE_FAULT`, job 417 scene 2) is told the natural pose and where the camera goes,
-  // beside a tool's own rule when the same fault names one too.
-  const pose = atWork && POSE_FAULT.test(fault) ? [NATURAL_POSE_FIX] : [];
+  // beside a tool's own rule when the same fault names one too. A seat turned against its rows
+  // (`SEAT_TURNED`, round 16, job 421 scenes 2 and 29) is told how fixed seats face — in a picture with
+  // nobody in it too, since a row turned round is as wrong empty — and, with someone in the picture, so is
+  // a person sitting against their seat or through it (`SEATED_WRONG`), who is told how to sit in it.
+  const seat = SEAT_TURNED.test(fault) || (atWork && SEATED_WRONG.test(fault));
+  const pose = [
+    ...(atWork && POSE_FAULT.test(fault) ? [NATURAL_POSE_FIX] : []),
+    ...(seat ? [SEAT_FACING_FIX, ...(atWork ? [SEATED_PERSON_FIX] : [])] : []),
+  ];
   // A tool hung or propped up with nobody in the picture is put down (`UNHELD_POSE`, job 418 scene 25)
   // — never told the rule for lines because it hangs from a "wire hook" (`NOT_A_CONNECTING_LINE`). A
   // fault that ALSO names a real lead ("drill hanging off the bench by its power cord") keeps the rule
