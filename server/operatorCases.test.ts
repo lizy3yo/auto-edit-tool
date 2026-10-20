@@ -8206,3 +8206,33 @@ describe("job 414: what a later line reveals is not shown early; a search that f
     expect(saysNothingThere("Keep the stack off bare concrete,")).toBe(false);
   });
 });
+
+/**
+ * THE CHECK NEVER EMPTIES A PICTURE (2026-10-20, the review of the job 414 fix, replayed over the local
+ * storyboards): taking out a key thing a later line names took the part of the rewrite it sat in, and
+ * on "is that clean Japanese look really worth anything on a market table" (job 264 scene 7) the part
+ * was the work itself — the EMPTY market table the operator refused on job 269 came back. A part that
+ * carries the scene's own words is the picture: the scene keeps its own words instead.
+ */
+describe("the later-line check: a market table keeps its finished pieces (job 264 scene 7, the job 269 case)", () => {
+  it("the trim that would leave an empty table is refused for the scene's own words", async () => {
+    const { ownWordsOf, rewriteFallback, withoutAddedKeyThings } = await import("./brollRewrite");
+    const scene = {
+      scriptText: "wondering if that clean Japanese look is really worth anything on a market table.",
+      showSubject: "market table outdoors holding finished wood pieces set in rows",
+    };
+    const holder = {
+      name: "charred cedar incense holder",
+      look: "small blackened cedar block, square-edged, single angled hole drilled halfway, oiled matte-black finish, felt dot on underside, sits on workbench",
+    };
+    const r = withoutAddedKeyThings(
+      "Fold-out wooden table outdoors draped with plain cloth, holding finished charred cedar incense holders and kumiko lattice panels arranged in rows.",
+      ownWordsOf(scene, scene.showSubject),
+      [holder]
+    );
+    expect(r.added).toEqual(["charred cedar incense holder"]);
+    expect(r.text).toBeUndefined();
+    expect(r.left).toBe("Fold-out wooden table outdoors draped with plain cloth.");
+    expect(rewriteFallback(scene, scene.showSubject)).toBe("market table outdoors holding finished wood pieces set in rows");
+  });
+});

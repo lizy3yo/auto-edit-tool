@@ -316,6 +316,23 @@ function allStems(text: string | undefined): Set<string> {
   return new Set(tokens(text).map(stem));
 }
 
+/**
+ * A word as it SHOWS a thing: its stem, but a "-ed"/"-ing" form kept apart from the plain word, so
+ * "an angled drilled hole" shows no drill and "brushing the surface clean" no brush (job 261 scene 2,
+ * job 264 scene 17 — both lost a part of the picture to a key thing that was never in it). A name that
+ * is itself such a word ("cutting mat", "sewing machine") meets the same word. Read only where a
+ * rewrite is judged to SHOW a thing; the scene's own words and the lines are read loosely, so "I
+ * drilled the hole" still names the drill.
+ */
+function shownKey(word: string): string {
+  return word.length > 4 && /(?:ed|ing)$/.test(word) ? `~${stem(word)}` : stem(word);
+}
+
+/** Every word of `text` as it shows a thing (`shownKey`). */
+function shownKeys(text: string | undefined): Set<string> {
+  return new Set(tokens(text).map(shownKey));
+}
+
 // A word that ends a list item's noun phrase: a preposition, a joining word, a word of placing.
 const ITEM_END =
   /^(?:on|in|at|by|of|to|for|from|with|into|onto|over|under|above|below|beside|near|against|along|across|behind|inside|outside|around|atop|hung|set|laid|that|which|where|while|all|together)$/;
@@ -330,6 +347,11 @@ const ITEM_END =
  * reddish-orange breast, a dark gray-brown back…", job 411) are no list of things. Pure.
  */
 export function listedItems(look: string | undefined): string[] {
+  return Array.from(new Set(listedHeads(look).map(stem)));
+}
+
+/** `listedItems` as the words were written, before stemming. Pure. */
+function listedHeads(look: string | undefined): string[] {
   const chunks = (look ?? "")
     .toLowerCase()
     .replace(/['’]s\b/g, "")
@@ -350,30 +372,42 @@ export function listedItems(look: string | undefined): string[] {
       phrase.push(w);
     }
     if (!phrase.length || phrase.length > 4) break;
-    heads.push(stem(phrase[phrase.length - 1]));
+    heads.push(phrase[phrase.length - 1]);
     closed = joined;
     if (ranOn || joined) break;
   }
-  return heads.length >= 2 && closed ? Array.from(new Set(heads)) : [];
+  return heads.length >= 2 && closed ? heads : [];
 }
 
-/** A key thing as it can be named: its name's words and the items its look lists. */
+/**
+ * A key thing as it can be named: its name's words and the items its look lists, as stems (read
+ * loosely, in the scene's own words and the lines) and as `shownKey`s (read in a rewrite).
+ */
 interface ThingWords {
   name: string;
   stems: string[];
   items: string[];
+  keys: string[];
+  itemKeys: string[];
 }
 
-const thingWords = (t: { name: string; look?: string }): ThingWords => ({
-  name: t.name,
-  stems: nameStems(t.name),
-  items: listedItems(t.look),
-});
+function thingWords(t: { name: string; look?: string }): ThingWords {
+  const named = tokens(t.name.replace(/^MAIN\b/i, "")).filter(w => w.length >= 3 && !NOT_A_NAME.has(w));
+  // Each item once, its stem and its key side by side (`ownWordsName` reads one by the other).
+  const items = new Map(listedHeads(t.look).map(w => [shownKey(w), stem(w)] as const));
+  return {
+    name: t.name,
+    stems: nameStems(t.name),
+    items: Array.from(items.values()),
+    keys: Array.from(new Set(named.map(shownKey))),
+    itemKeys: Array.from(items.keys()),
+  };
+}
 
-/** Words (their stems) that name the thing for sure: every word of its name, or two of its listed items. */
-function namesForSure(stems: Set<string>, t: ThingWords): boolean {
-  if (t.stems.length && t.stems.every(w => stems.has(w))) return true;
-  return t.items.filter(w => stems.has(w)).length >= 2;
+/** A rewrite's words (`shownKeys`) name the thing for sure: every word of its name, or two of its listed items. */
+function namesForSure(keys: Set<string>, t: ThingWords): boolean {
+  if (t.keys.length && t.keys.every(w => keys.has(w))) return true;
+  return t.itemKeys.filter(w => keys.has(w)).length >= 2;
 }
 
 /**
@@ -395,7 +429,7 @@ function holdsLoosely(stems: Set<string>, word: string): boolean {
  */
 function ownWordsName(own: Set<string>, t: ThingWords, rewrite: Set<string>): boolean {
   if (t.stems.some(w => holdsLoosely(own, w))) return true;
-  const named = t.items.filter(w => rewrite.has(w));
+  const named = t.items.filter((_, k) => rewrite.has(t.itemKeys[k]));
   return named.length > 0 && named.every(w => holdsLoosely(own, w));
 }
 
@@ -414,15 +448,15 @@ const PART_BREAK = /(\s*[,;]\s*|\s*[—–]\s*|\s+-\s+)/;
  * lamp glowing softly" is the lamp shown, not a place. Pure.
  */
 function onlyAsPlace(sentence: string, t: ThingWords): boolean {
-  if (!t.stems.length) return false;
-  if (t.items.filter(w => allStems(sentence).has(w)).length >= 2) return false;
+  if (!t.keys.length) return false;
+  if (t.itemKeys.filter(w => shownKeys(sentence).has(w)).length >= 2) return false;
   let found = false;
   for (const part of sentence.split(PART_BREAK)) {
     const words = tokens(part);
-    const stems = words.map(stem);
-    for (let k = 0; k < stems.length; k++) {
+    const keys = words.map(shownKey);
+    for (let k = 0; k < keys.length; k++) {
       // The first word of each mention of the name.
-      if (!t.stems.includes(stems[k]) || (k > 0 && t.stems.includes(stems[k - 1]))) continue;
+      if (!t.keys.includes(keys[k]) || (k > 0 && t.keys.includes(keys[k - 1]))) continue;
       found = true;
       let place = false;
       for (let j = k - 1; j >= Math.max(0, k - 5); j--) {
@@ -448,7 +482,7 @@ export function addedKeyThings(
   things: readonly { name: string; look?: string }[] | undefined
 ): string[] {
   if (!things?.length) return [];
-  const said = allStems(rewrite);
+  const said = shownKeys(rewrite);
   const mine = allStems(own);
   return things
     .map(thingWords)
@@ -466,10 +500,10 @@ function sentencesOf(text: string): string[] {
  * "oil lamp", "tools" of "steel tools"), or one of the items its look lists. Pure.
  */
 function speaksOf(part: string, t: ThingWords): boolean {
-  const stems = allStems(part);
-  if (namesForSure(stems, t)) return true;
-  const head = t.stems[t.stems.length - 1];
-  return (!!head && stems.has(head)) || t.items.some(w => stems.has(w));
+  const keys = shownKeys(part);
+  if (namesForSure(keys, t)) return true;
+  const head = t.keys[t.keys.length - 1];
+  return (!!head && keys.has(head)) || t.itemKeys.some(w => keys.has(w));
 }
 
 /**
@@ -498,13 +532,24 @@ function withoutParts(sentence: string, shown: ThingWords[]): string | undefined
 const MIN_KEPT_SHARE = 0.4;
 
 /**
+ * A part taken out with this many of the scene's own picture words in it carried the picture, not
+ * only the thing beside it (job 293 scene 5, "craft fairs,": "…long folding table with plain cloth,
+ * small wood coasters, ornaments, and house signs arranged along the front edge" lost its subject's
+ * "small wood … arranged along the front edge" with the coasters, and an EMPTY market table — the
+ * picture the operator refused on job 269 — still passed the subject check; job 264 scene 7 the same).
+ * The scene keeps its own words instead. One word lost is a detail (job 411 scene 24's "wintry").
+ */
+const MAX_OWN_WORDS_LOST = 2;
+
+/**
  * `rewrite` with every key thing its scene's own words do not name taken out (`addedKeyThings`;
  * a thing named only as where something sits stays): a sentence about it goes whole, a thing beside
  * the subject goes with its part of the sentence (`withoutParts`). `text` is the rewrite as it may be
  * adopted — the same string when nothing was taken out — or undefined when what is left is under
- * `MIN_KEPT_SHARE` of it or says none of the scene's own words (the added thing was the picture):
- * the scene then keeps its own words. `added` names what was taken out or refused, and `left` is
- * what was left either way. Pure.
+ * `MIN_KEPT_SHARE` of it, says none of the scene's own words (the added thing was the picture), or
+ * lost `MAX_OWN_WORDS_LOST` of them with what went (the part carried the picture): the scene then
+ * keeps its own words. `added` names what was taken out or refused, and `left` is what was left
+ * either way. Pure.
  */
 export function withoutAddedKeyThings(
   rewrite: string,
@@ -517,17 +562,30 @@ export function withoutAddedKeyThings(
   const added = new Set<string>();
   const kept: string[] = [];
   for (const sentence of sentencesOf(rewrite)) {
-    const stems = allStems(sentence);
-    const shown = words.filter(t => namesForSure(stems, t) && !onlyAsPlace(sentence, t));
+    const keys = shownKeys(sentence);
+    const shown = words.filter(t => namesForSure(keys, t) && !onlyAsPlace(sentence, t));
     shown.forEach(t => added.add(t.name));
     const left = shown.length ? withoutParts(sentence, shown) : sentence;
     if (left) kept.push(left);
   }
   if (!added.size) return { text: rewrite, added: [] };
-  const text = kept.join(" ").trim();
+  // A sentence cut short by its last part going (";" ends a sentence here) ends in a full stop.
+  const text = kept.join(" ").trim().replace(/\s*[,;:—–-]+$/, ".");
   const mine = new Set(pictureStems(own));
   const share = tokens(text).length / Math.max(1, tokens(rewrite).length);
-  if (!text || share < MIN_KEPT_SHARE || !pictureStems(text).some(w => mine.has(w)))
+  // The scene's own words that went out with the thing — never the thing's own words, which are
+  // meant to go.
+  const thingStems = new Set(words.flatMap(t => [...t.stems, ...t.items]));
+  const still = new Set(pictureStems(text));
+  const lost = new Set(
+    pictureStems(rewrite).filter(w => mine.has(w) && !still.has(w) && !thingStems.has(w))
+  );
+  if (
+    !text ||
+    share < MIN_KEPT_SHARE ||
+    !pictureStems(text).some(w => mine.has(w)) ||
+    lost.size >= MAX_OWN_WORDS_LOST
+  )
     return { added: Array.from(added), left: text };
   return { text, added: Array.from(added), left: text };
 }
@@ -554,11 +612,11 @@ function lineNames(line: string | undefined, t: ThingWords): boolean {
  * drawknife, first said at 21 s, are not yet said under every picture before it; a thing no line
  * ever says (a workbench the props list gave the setting) reveals nothing, and neither does one an
  * earlier line already said. Only these are taken out of a rewrite in code (`withoutAddedKeyThings`):
- * replayed over the 227 local films that have a props list, holding every rewrite to every key
- * thing its line does not name would have changed one rewrite in five — mostly a workbench or a
- * finished piece in the background of a picture about something said before — which the prompt
- * writer is told instead; held to these, 471 of 15,593 cutaway rewrites (3%) and 46 of 1,334 panels
- * change, 78 and 15 of them back to their own words. Pure.
+ * replayed over the 129 local films that have key things (3,279 cutaway rewrites, 508 panels),
+ * holding every rewrite to every key thing its line does not name would have changed one rewrite in
+ * six (552) — mostly a workbench or a finished piece in the background of a picture about something
+ * said before — which the prompt writer is told instead; held to these, 166 cutaway rewrites (5%)
+ * change, 60 of them back to their own words, and 23 panels. Pure.
  */
 export function notYetSaid<T extends { name: string; look?: string }>(
   lines: readonly (string | undefined)[],
@@ -608,6 +666,23 @@ const SAYS_EMPTY = [
 ];
 
 /**
+ * Said NOT to happen in the same clause: "nobody leaves the market empty-handed", "you'll never come
+ * up empty" mean the place is full. A bare "no" is not one ("with no list you come up empty").
+ */
+const NOT_SO = /\b(?:never|not|nobody|no one|hardly|rarely|seldom)\b|n't\b/i;
+
+/** `r` matches `t` in a clause that does not say it is not so (`NOT_SO`). */
+function saysPlainly(r: RegExp, t: string): boolean {
+  const every = new RegExp(r.source, r.flags.includes("g") ? r.flags : `${r.flags}g`);
+  for (const m of Array.from(t.matchAll(every))) {
+    const before = t.slice(0, m.index ?? 0);
+    const clause = before.slice(before.search(/[^.,;:!?—–]*$/));
+    if (!NOT_SO.test(clause)) return true;
+  }
+  return false;
+}
+
+/**
  * NOTHING THERE (2026-10-20, job 414 scene 2): under "a store sold, and you will come up nearly
  * empty-handed" the cabin was crowded with crocks, a tin pail, bowls, chests and a barrel, and read
  * as well stocked — the stretch line's "scattered salvage" and the props list filled a picture of
@@ -617,5 +692,5 @@ const SAYS_EMPTY = [
  */
 export function saysNothingThere(line: string | undefined): boolean {
   const t = (line ?? "").replace(/[’‘]/g, "'");
-  return !!t.trim() && SAYS_EMPTY.some(r => r.test(t));
+  return !!t.trim() && SAYS_EMPTY.some(r => saysPlainly(r, t));
 }

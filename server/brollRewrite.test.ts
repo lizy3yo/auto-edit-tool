@@ -469,6 +469,110 @@ describe("withoutAddedKeyThings — a rewrite shows nothing its line does not na
     expect(withoutAddedKeyThings(REWRITE_2, "", undefined)).toEqual({ text: REWRITE_2, added: [] });
     expect(withoutAddedKeyThings(REWRITE_2, "", [])).toEqual({ text: REWRITE_2, added: [] });
   });
+
+  // The review of this check, replayed over the local storyboards: a part taken out with the thing
+  // can be the picture itself.
+  it("a part that carried the picture is never taken out with the thing: the scene keeps its own words (jobs 293, 264)", () => {
+    // Job 293 scene 5, "craft fairs,": the coasters, ornaments and house signs a later line names sat in
+    // the part that WAS the subject — "small wood … arranged along the front edge" — and the trim left
+    // an empty table, which still passed the subject check.
+    const fair = {
+      scriptText: "craft fairs,",
+      showSubject: "craft fair table outdoors with small wood items arranged along the front edge",
+    };
+    const things293 = [
+      { name: "coasters", look: "small round walnut discs, smooth sanded finish, stacked in a neat pile near the shipping boxes" },
+      { name: "ornaments", look: "small carved wood shapes with a drilled hole and thin cord loop, pale maple finish, grouped in a tidy pile" },
+      { name: "house sign", look: "rectangular wood plaque with a routed border, natural wood tone, resting against finished pieces" },
+      { name: "driveway", look: "paved slab outside the garage, open and empty, used as a pickup spot for larger pieces" },
+    ];
+    const r293 = withoutAddedKeyThings(
+      "Craft fair table outdoors under a canopy, long folding table with plain cloth, small wood coasters, ornaments, " +
+        "and house signs arranged along the front edge, empty driveway and garage visible behind.",
+      ownWordsOf(fair, fair.showSubject),
+      things293
+    );
+    expect(r293.added).toEqual(["coasters", "ornaments", "house sign", "driveway"]);
+    expect(r293.text).toBeUndefined();
+    expect(r293.left).toBe("Craft fair table outdoors under a canopy, long folding table with plain cloth.");
+    // Job 264 scene 7: the empty market table the operator refused on job 269 — the work goes too.
+    const market = {
+      scriptText: "wondering if that clean Japanese look is really worth anything on a market table.",
+      showSubject: "market table outdoors holding finished wood pieces set in rows",
+    };
+    const holder = {
+      name: "charred cedar incense holder",
+      look: "small blackened cedar block, square-edged, single angled hole drilled halfway, oiled matte-black finish, felt dot on underside, sits on workbench",
+    };
+    expect(
+      withoutAddedKeyThings(
+        "Fold-out wooden table outdoors draped with plain cloth, holding finished charred cedar incense holders and " +
+          "kumiko lattice panels arranged in rows.",
+        ownWordsOf(market, market.showSubject),
+        [holder]
+      ).text
+    ).toBeUndefined();
+    // Job 414 scene 3 still loses only the tools: the restorer's wall stays in what is kept.
+    expect(withoutAddedKeyThings(REWRITE_3, ownWordsOf(SCENE_3, SCENE_3.showSubject), later(2)).text).toMatch(
+      /^Close view of bare weathered hands working on a hewn poplar log wall/
+    );
+  });
+
+  it("'drilled' shows no drill and 'brushing' no brush; a named tool and a name that is such a word still count (jobs 261, 264, 304)", () => {
+    const drill = { name: "drill", look: "corded hand drill, gray-black body, thin metal bit, laid horizontally near vise" };
+    const holderShot = {
+      scriptText:
+        "the one that paid me best for my time came out of a coffee can of burnt scraps I almost threw in the trash.",
+      showSubject: "small charred cedar incense holder on workbench beside the coffee can of scraps",
+    };
+    const rewrite261 =
+      "Small blackened cedar incense holder, palm-sized with angled drilled hole and felt dot base, resting on " +
+      "honey-brown workbench beside a squat metal can filled with charred cedar scraps, garage workshop in background.";
+    expect(withoutAddedKeyThings(rewrite261, ownWordsOf(holderShot, holderShot.showSubject), [drill])).toEqual({
+      text: rewrite261,
+      added: [],
+    });
+    const brush = {
+      name: "brush",
+      look: "small stiff-bristled brush with wood handle, used for cleaning charred surfaces, resting on bench",
+    };
+    const steps = {
+      scriptText: "Now the winner. Charred cedar incense holders, made from the scraps in that coffee can.",
+      showSubject: "host's hands shaping a charred cedar block at the workbench, with the coffee can of burnt scraps sitting nearby",
+    };
+    const rewrite17 =
+      "Bare weathered hands at an unheated garage workbench selecting a charred wood scrap from a dented metal coffee " +
+      "can filled with burnt offcuts, squaring it with a handsaw, brushing the blackened surface clean, then drilling " +
+      "an angled hole partway through.";
+    expect(addedKeyThings(rewrite17, ownWordsOf(steps, steps.showSubject), [brush, drill])).toEqual([]);
+    // The tool itself, named, is still found…
+    expect(
+      addedKeyThings("A corded drill lies on the bench beside the holder.", ownWordsOf(holderShot, holderShot.showSubject), [drill])
+    ).toEqual(["drill"]);
+    // …and so is a name made of such a word (job 304 scene 4's cutting mat).
+    expect(
+      addedKeyThings(
+        "Cream-colored straight-stitch sewing machine on a work table, with a green cutting mat nearby.",
+        "a sewing machine on the table",
+        [{ name: "cutting mat", look: "a green self-healing cutting mat with a printed grid" }]
+      )
+    ).toEqual(["cutting mat"]);
+  });
+
+  it("a sentence left ending on the part that went ends in a full stop (job 303 scene 18's panel)", () => {
+    const hand = { name: "hand tools", look: "wood chisels, a hand plane, and a mallet with worn wooden handles, lined up neatly on the bench" };
+    const own = "Top-down view of a phone resting on the maple workbench. Its screen shows the Etsy app.";
+    expect(
+      withoutAddedKeyThings(
+        "A smartphone lying flat on a wooden workbench, its screen showing the Etsy app interface with a search bar " +
+          "and grid of product photos; the phone and bench are in a garage workshop with hand tools visible at the edges.",
+        own,
+        [hand]
+      ).text
+    ).toBe(
+      "A smartphone lying flat on a wooden workbench, its screen showing the Etsy app interface with a search bar and grid of product photos."
+    );
+  });
 });
 
 describe("saysNothingThere — a line about an empty place or a search that finds nothing", () => {
@@ -495,5 +599,19 @@ describe("saysNothingThere — a line about an empty place or a search that find
     ])
       expect(saysNothingThere(line), line).toBe(false);
     expect(saysNothingThere(undefined)).toBe(false);
+  });
+
+  it("said NOT to happen is a full place; a 'no' that is not the verb's is still empty", () => {
+    for (const line of [
+      "Nobody leaves my table at the market empty-handed.",
+      "You'll never come up empty at a farm auction.",
+      "and you won't come up empty-handed.",
+    ])
+      expect(saysNothingThere(line), line).toBe(false);
+    for (const line of [
+      "With no list in hand, you come up empty.",
+      "I never planned it, but the shelves were bare by March.", // the "never" is another clause
+    ])
+      expect(saysNothingThere(line), line).toBe(true);
   });
 });
