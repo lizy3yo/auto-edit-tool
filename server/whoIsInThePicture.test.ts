@@ -11,6 +11,7 @@ import {
   castOfPicture,
   markHostBroll,
   namedPeople,
+  rolesOnlyPictured,
   SHOWS_PERSON,
   selfRolesOf,
   sexOfLook,
@@ -25,6 +26,7 @@ import {
   applyPictureJoins,
   applyPictureSplits,
   applyShotPlan,
+  applyWho,
   otherPeopleOf,
   otherPersonOf,
   parsePictureFixes,
@@ -593,5 +595,128 @@ describe("everyone in a picture of someone else gets a person clause (job 399 sc
     });
     // With nobody else it could be, the host's job still takes the planner's person (it said so).
     expect(castOfPicture("a flight attendant speaking with a man", "a woman", attendant)).toEqual({ who: "a woman and a man", count: 2 });
+  });
+});
+
+describe("a person named by what they do (job 418 scene 2)", () => {
+  // Sawdust Sam's practice film: "an older log restorer standing beside its door" named nobody —
+  // "restorer" is no listed role — so no person clause was added, the rewrite dropped him, and an
+  // empty cabin shipped under the label "A log restorer".
+  const RESTORER =
+    "a restored log cabin in Grayson County Virginia, an older log restorer standing beside its door, seen from the side"; // job 418 scene 2
+  const RESTORER_LINE = "A log restorer in Grayson County, Virginia, let me try it.";
+
+  it("is a person when the words around the noun say so", () => {
+    expect(SHOWS_PERSON.test(RESTORER)).toBe(false);
+    expect(showsPerson(RESTORER)).toBe(true);
+    expect(namedPeople(RESTORER)?.people).toEqual([
+      { phrase: "an older log restorer", noun: "restorer", kind: "role", count: 1, sex: undefined, byWork: true },
+    ]);
+    const found: [string, string][] = [
+      ["a log restorer working at the cabin's log wall, seen from behind", "a log restorer"], // job 414 scene 3
+      ["a birder in a winter coat seen from behind, looking through binoculars at trees in a snowy park", "a birder"], // job 411 scene 11
+      ["a birdwatcher on a snowy street looking up at trees", "a birdwatcher"], // job 404 scene 9
+      ["the Roman advisor standing somberly alone in a quiet hall, with Seneca in the picture", "the Roman advisor"], // job 415 scene 24
+      ["A Roman courtyard with stone columns and tiled floor. A messenger in a tunic hands a sealed scroll to a robed figure standing before him.", "a messenger"], // job 415 scene 25
+      ["A miniature bonsai tree displayed on a wooden stand in a private home, the collector's hands visible carefully tending or adjusting it", "the collector"], // job 149 scene 135
+      ["a carver whittling a spoon on the porch steps", "a carver"],
+      ["an elderly gardener with a hoe at the end of the row", "an elderly gardener"],
+    ];
+    for (const [text, phrase] of found) expect(namedPeople(text)?.people[0].phrase, text).toBe(phrase);
+    // Several of them: "a group of", or a plural in winter coats.
+    expect(namedPeople("a group of birdwatchers seen from behind on a snowy small-town street, one writing on a clipboard tally sheet while another looks through binoculars")?.count).toBe(2); // job 404 scene 10
+    expect(namedPeople("birders in winter coats with binoculars along a snowy small town street, one marking a tally on a clipboard, seen from behind")?.people[0].phrase).toBe("birders"); // job 416 scene 10
+  });
+
+  it("never a thing named the same way, nor a word of that shape that names no one", () => {
+    for (const thing of [
+      "a red rubber plunger standing idle in the corner of the bathroom", // job 403 scene 21
+      "a fire extinguisher standing within reach of the workbench", // job 146 scene 258
+      "An aluminum four-step folding stepladder standing beneath the hallway ceiling alarm", // job 224 scene 15
+      "A compact black-grille space heater sitting on the bedroom floor beside a plain white quilted mattress, at night.", // job 224 scene 8
+      "a jointer flattening the face of a rough oak board in a workshop", // job 352 scene 137
+      "hardwood dealer warehouse with racks of rough boards sorted by species", // job 352 scene 62
+      "a handful of dollar bills and receipts beside the tabletop guided knife sharpener on the workbench", // job 406 scene 11
+      "garage workshop with table saw and benchtop planer along back wall", // job 352 scene 9
+      "flame burning on a stovetop burner in a clean kitchen", // job 375 scene 6
+      "Shallow wooden jewelry drawer lined with pale felt, half-open on a dresser, showing chunky very dark round matte beads coiled inside.", // job 364 scene 8
+      "A computer or tablet screen showing the description section of a video page", // job 149 scene 81
+      "spray bottle of water sitting beside the propane torch on the driveway", // job 143 scene 193
+      "worn leather sneakers walking across flat grey parking lot asphalt, viewed at shoe level", // job 357 scene 18
+      "A long, narrow pieced table runner in soft flannel and cotton scraps draped down the center of a farmhouse dining table", // job 117 scene 56
+      "a dog standing behind a closed door looking out a window of the house", // job 146 scene 263
+      "A wooden desk with a slim bound paper booklet lying open beside a notepad and pen, the pen resting on the paper after writing.", // job 415 scene 20
+      "A wooden chair pulled close to a desk in a quiet study; a desk surface with papers and writing materials visible beyond.", // job 401 scene 26
+      "An indoor scene: a medium-sized golden retriever or similar dog visible through a closed glass door, looking out toward the patio", // job 152 scene 166
+      "a planter holding basil on the porch rail",
+      "an old heater standing in the corner",
+      "a sprayer using compressed air to coat the fence",
+      "a typewriter standing alone on the desk",
+      "a cooler waiting on the porch steps",
+      "the other kneeling beside the bench",
+      "Baxter kneeling by the bin", // a capital mid-sentence is a name, never "a baxter"
+    ])
+      expect(namedPeople(thing), thing).toBeUndefined();
+    // The person beside such a word is still found, and only that person.
+    expect(namedPeople("woman over sixty in a navy crewneck sweater wearing the pearl necklace at the collarbone, looking")?.people.map(p => p.noun)).toEqual(["woman"]); // job 354 scene 7
+    expect(namedPeople("An early-60s man with weathered friendly face, seated indoors talking directly to camera")?.people.map(p => p.noun)).toEqual(["man"]); // job 117 scene 114
+    expect(namedPeople("The host seated indoors, speaking to camera, delivering a final safety reminder with a knowing smile before signing off.")?.people.map(p => p.noun)).toEqual(["host"]); // job 136 scene 204
+    expect(namedPeople("a head outdoors on a cold winter morning wearing the finished cream ribbed hat, seen from behind")).toBeUndefined(); // job 297 scene 2
+  });
+
+  it("the worker, the maker, the seller at the stall: whoever does the shown work", () => {
+    const forearms = "the flame's blue tip just touching the wood grain, soft garage light across the darkened surface and the worker's forearms"; // job 143 scene 232
+    expect(namedPeople(forearms)?.people[0]).toMatchObject({ noun: "worker", kind: "self" });
+    expect(someoneElse(forearms, { look: MAN })).toBeUndefined();
+    const stall = "exchanging cash across a craft-fair table, the seller's palm open receiving payment, the buyer's hand passing over coins or bills"; // job 152 scene 8
+    expect(castOfPicture(stall, undefined, { look: MAN, hostLed: true })).toEqual({ who: "the buyer", count: 1, host: "the seller" });
+    // "a coffee maker on the counter" is still a thing.
+    expect(namedPeople("a coffee maker on the counter")).toBeUndefined();
+  });
+
+  it("someone in the story when the line speaks of them; the host's own work when only the picture names it", () => {
+    expect(rolesOnlyPictured(RESTORER, RESTORER_LINE)).toEqual([]);
+    // "birders" in the line names the planner's "birdwatchers" (job 404 scene 10); "folks" names someone (job 411 scene 10).
+    expect(rolesOnlyPictured("a group of birdwatchers seen from behind on a snowy street", "the big holiday tally birders have kept going for more than a hundred years")).toEqual([]);
+    expect(rolesOnlyPictured("a birder in a winter coat seen from behind, looking through binoculars", "Ask the folks who head out every winter for the Christmas Bird Count,")).toEqual([]);
+    // Job 31 scene 7: the line speaks of nobody, so the knitter is whoever knits — the host.
+    const lap = "A knitter's lap cradling needles, yarn, row counter, and a half-finished blanket in muted autumn afternoon light through a window.";
+    const lapLine = "They come from four small habits nobody bothers to teach you,";
+    expect(rolesOnlyPictured(lap, lapLine)).toEqual(["knitter"]);
+    const s = pic(7, lap, { scriptText: lapLine });
+    markHostBroll([s], { hostLook: WOMAN }, HOST_PHOTO);
+    expect(s.otherPerson).toBeUndefined();
+    expect(s.brollHostRef).toBe(HOST_PHOTO);
+  });
+
+  it("job 418 scene 2: the restorer is drawn as someone else, with a person clause, never the host", () => {
+    const s = pic(2, RESTORER, {
+      scriptText: RESTORER_LINE,
+      // The rewrite that dropped him: the person clause must not depend on it.
+      visualPrompt: "A restored log cabin in Grayson County, Virginia, with hewn poplar walls and a split-oak shingled roof, its wooden-pinned door visible, seen from outside.",
+      stillImage: true,
+    });
+    markHostBroll([s], { hostLook: MAN }, HOST_PHOTO);
+    expect(s.otherPerson).toBe("an older log restorer");
+    expect(s.humanPresent).toBe(true);
+    expect(s.brollHostRef).toBeUndefined();
+    expect(buildStillPrompt(s)).toContain(otherPersonClause("an older log restorer"));
+    // The line check's "who" now reaches such a picture: it used to stop at "no person in the words".
+    const asked = pic(2, RESTORER, { scriptText: RESTORER_LINE });
+    applyWho(asked, "a log restorer");
+    expect(asked).toMatchObject({ otherPerson: "a log restorer", humanPresent: true });
+  });
+
+  it("a trade the host gives themself in that shape is the host", () => {
+    expect(selfRolesOf("", "Dog Trainer")).toEqual(["trainer"]);
+    expect(selfRolesOf("I'm Ana, a log restorer from the hills")).toEqual(["restorer"]);
+    expect(selfRolesOf("I'm Dale, and I've sold to a thousand customers")).toEqual([]);
+    const own = pic(5, "a trainer kneeling beside the dog on the porch, seen from behind");
+    markHostBroll([own], { hostLook: MAN, hostTitle: "Dog Trainer" }, HOST_PHOTO);
+    expect(own.otherPerson).toBeUndefined();
+    expect(own.brollHostRef).toBe(HOST_PHOTO);
+    const other = pic(5, "a trainer kneeling beside the dog on the porch, seen from behind");
+    markHostBroll([other], { hostLook: MAN }, HOST_PHOTO);
+    expect(other.otherPerson).toBe("a trainer");
   });
 });

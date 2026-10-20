@@ -10051,3 +10051,44 @@ describe("job 418 #25: a person-free panel puts its tool down and shows the hold
     expect(namedFaultClause("drawknife lying across the board", "a drawknife resting across it", false)).toBeUndefined();
   });
 });
+
+// ─── Round 15: a person named by what they do (job 418 #2) ───────────────────────────────────────
+
+describe("job 418 #2: the log restorer the line names is in the picture the label names", () => {
+  // Sawdust Sam's practice film on the round-14 code (7.15-11.79 s): under "A log restorer in Grayson
+  // County, Virginia, let me try it." the shot list asked for "an older log restorer standing beside
+  // its door", but "restorer" was no person word, so no someone-else was set and no person clause was
+  // added; the rewrite kept only the cabin, both draws were flagged "missing", and the SmallLabel "A
+  // log restorer" sat over an empty cabin.
+  const LOOK =
+    "A lean man in his sixties with fair skin, short grey hair, and a trimmed grey beard, wearing an olive button-up shirt over a dark grey t-shirt";
+  const scene2 = () =>
+    ({
+      index: 2,
+      scriptText: "A log restorer in Grayson County, Virginia, let me try it.",
+      narration: "A log restorer in Grayson County, Virginia, let me try it.",
+      showSubject:
+        "a restored log cabin in Grayson County Virginia, an older log restorer standing beside its door, seen from the side",
+      visualPrompt:
+        "A restored log cabin in Grayson County, Virginia, with hewn poplar walls and a split-oak shingled roof, its wooden-pinned door visible, seen from outside.",
+      stillImage: true,
+    }) as StoryboardScene;
+
+  it("the restorer is someone else, drawn with a person clause from behind or the side, never the host", () => {
+    const s = scene2();
+    markHostBroll([s], { hostLook: LOOK }, "https://x/sam.png");
+    expect(s).toMatchObject({ otherPerson: "an older log restorer", humanPresent: true });
+    expect(s.brollHostRef).toBeUndefined();
+    expect(buildStillPrompt(s)).toContain(otherPersonClause("an older log restorer"));
+  });
+
+  it("the line check's who reaches it, and a thing named the same way stays a thing", async () => {
+    const { applyWho } = await import("./shotList");
+    const s = scene2();
+    applyWho(s, "a log restorer");
+    expect(s.otherPerson).toBe("a log restorer");
+    const { namedPeople } = await import("./hostLook");
+    expect(namedPeople("a red rubber plunger standing idle in the corner of the bathroom")).toBeUndefined(); // job 403 #21
+    expect(namedPeople("a fire extinguisher standing within reach of the workbench")).toBeUndefined(); // job 146 #258
+  });
+});
