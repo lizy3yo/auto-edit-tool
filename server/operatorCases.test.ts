@@ -7697,4 +7697,17 @@ describe("the book cover comes up when the host names the book (jobs 411 and 412
     expect(shape(out).map(([k]) => k).join("")).toBe("HBQ");
     expect(out.find(s => s.coverHero)?.scriptText).toMatch(/^The Kitchen Table Crochet Book is a digital book/);
   });
+
+  it("unchanged: a block that OPENS on a short lead-in to the book keeps the cover on the whole beat", () => {
+    // Nothing before it in its block for those words to join (no fold or join crosses a marked CTA
+    // edge), so alone they would be held to the host floor: a frozen face over silence before the book.
+    const out = run("Everything Your Cat Can't Tell You", [
+      host(1, "Hello.", { hostOpener: true }),
+      cta(2, "along with what behaviorists and lifelong cat people have worked out, into my book, Everything Your Cat Can’t Tell You.", false),
+      cta(3, "It’s a digital download, five hundred and ninety-two pages. Getting it is simple."),
+      cta(4, "Aim your phone’s camera at the code on your screen, hold steady, and tap the message that appears."),
+    ]);
+    expect(shape(out).map(([k]) => k).join("")).toBe("BHQ");
+    expect(out.find(s => s.coverHero)?.scriptText).toMatch(/^along with what behaviorists/);
+  });
 });

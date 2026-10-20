@@ -12,6 +12,7 @@ import { describe, expect, it } from "vitest";
 import type { LongformInputParams, StoryboardScene } from "@shared/types";
 import {
   bookNamedAt,
+  COVER_HEAD_ALONE_MIN_WORDS,
   COVER_LEAD_MAX_WORDS,
   coverCutAt,
   markCoverReveal,
@@ -93,6 +94,15 @@ describe("coverCutAt — where the cover beat is cut", () => {
     expect(before(hostess, "100 Air Hostess Secrets")).toBeNull();
   });
 
+  it("a clause that starts too near the beat's start for the host hands over at the naming instead", () => {
+    // "Over the years," alone would be three words on the host: the cover would have kept all eight.
+    expect(
+      before("Over the years, I wrote it all into my book, The Backyard Birder.", "The Backyard Birder")
+    ).toEqual(["Over the years, I wrote it all into", "my book, The Backyard Birder."]);
+    // …but a whole beat that is only a short lead-in still keeps the cover.
+    expect(before("Over the years, it went into my book, The Backyard Birder.", "The Backyard Birder")).toBeNull();
+  });
+
   it("a short lead-in inside the beat's own clause keeps it whole (401: 'my work was gathering it into')", () => {
     expect(
       before(
@@ -126,13 +136,34 @@ describe("splitCoverAtNaming", () => {
 
   it("splits the beat in two, both keeping the beat's own register, and returns the cover's index", () => {
     const scenes = [
+      beat("While the robins work on that holly, here’s something to help you name everything else out there.", { visualPrompt: "the host" }),
       beat("What bird scientists and patient window-watchers have learned over the years, I boiled down into one digital book, The Backyard Birder."),
     ];
-    expect(splitCoverAtNaming(scenes, 0, "The Backyard Birder")).toBe(1);
-    expect(scenes.map(s => [s.scriptText, s.cta, s.ctaIndex, s.visualPrompt])).toEqual([
+    expect(splitCoverAtNaming(scenes, 1, "The Backyard Birder")).toBe(2);
+    expect(scenes.slice(1).map(s => [s.scriptText, s.cta, s.ctaIndex, s.visualPrompt])).toEqual([
       ["What bird scientists and patient window-watchers have learned over the years,", true, 0, "a frosty yard"],
       ["I boiled down into one digital book, The Backyard Birder.", true, 0, "a frosty yard"],
     ]);
+  });
+
+  it(`a beat that opens its block splits only when the head can stand alone (${COVER_HEAD_ALONE_MIN_WORDS} words)`, () => {
+    // Nothing folds or joins across a marked CTA edge, so a short head would be held to the host
+    // floor over silence. 411's eleven words ("…over the years,") measured 3.9 s against that 4 s.
+    const short = "What bird scientists and patient window-watchers have learned over the years, I boiled down into one digital book, The Backyard Birder.";
+    const opening = [content(1, "and that’s easy to miss with the storm windows shut."), beat(short)];
+    expect(splitCoverAtNaming(opening, 1, "The Backyard Birder")).toBe(1);
+    expect(opening).toHaveLength(2);
+    // After an operator's asset in the same block: nothing to join either.
+    const afterAsset = [beat("Here is the stand.", { assetImageUrl: "a.png" }), beat(short)];
+    expect(splitCoverAtNaming(afterAsset, 1, "The Backyard Birder")).toBe(1);
+    // A head long enough to stand alone is still split, at the block's start too.
+    const long = "What bird scientists, banders and patient window-watchers all over the country have learned over the last fifty years, I boiled down into one digital book, The Backyard Birder.";
+    const opensLong = [content(1, "and that’s easy to miss with the storm windows shut."), beat(long)];
+    expect(splitCoverAtNaming(opensLong, 1, "The Backyard Birder")).toBe(2);
+    expect(opensLong[2].scriptText).toBe("I boiled down into one digital book, The Backyard Birder.");
+    // An unmarked script (no `ctaIndex`) folds across its CTA edge as before, so it always splits.
+    const unmarked = [content(1, "and that’s easy to miss with the storm windows shut."), beat(short, { ctaIndex: undefined })];
+    expect(splitCoverAtNaming(unmarked, 1, "The Backyard Birder")).toBe(2);
   });
 
   it("leaves a cold-open, scan-window, cover or asset beat alone", () => {
@@ -202,6 +233,13 @@ describe("the CTA blocks of jobs 411 and 412", () => {
     expect(order(out)).toBe("HHBHQ");
     expect(out.find(s => s.coverHero)?.scriptText).toBe("into my book, Everything Your Cat Can’t Tell You.");
     expect(out.find(s => s.qrHero)?.scriptText).toMatch(/^Aim your phone’s camera/);
+  });
+
+  it("a block that opens on the naming beat keeps it whole when its head is short (no frozen host before the book)", () => {
+    const [before412, , ...rest] = cats(); // the block now opens on "along with what behaviorists…"
+    const out = markCtaQrBlock([before412, ...rest], book("Everything Your Cat Can't Tell You"), true);
+    expect(order(out)).toBe("BHQ");
+    expect(out.find(s => s.coverHero)?.scriptText).toMatch(/^along with what behaviorists/);
   });
 
   it("the cut lands in the real pause before the clause once the voice is aligned (411: 164.14-164.56 s, 412: 159.08-159.46 s)", () => {

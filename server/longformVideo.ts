@@ -10024,9 +10024,12 @@ const CLAUSE_END = /(?:[,;:.!?…]["'”’)\]]*|[—–]|--)$/;
  * of the naming; the beat's own start counts as one, so a short lead-in keeps the beat whole. A
  * longer clause hands over at the natural break nearest the naming (`breakBetween`: before "my", "a",
  * a count or a preposition with its object — job 403's "…are gathered in | a digital book called…"),
- * else at the clause start. Never when the host would say fewer than `COVER_HEAD_MIN_WORDS` first:
- * a title at the start of its beat ("The Kitchen Table Crochet Book is a digital book…") keeps it.
- * Pure — unit-tested.
+ * else at the clause start. So does a clause that starts too near the beat's start to leave the host
+ * enough words, when the naming is still more than a short lead-in into the beat: "Over the years, |
+ * I wrote it all into my book" would keep only "Over the years," for the host, so the hand-off goes
+ * before "my" instead of the cover taking all eight words. Never when the host would say fewer than
+ * `COVER_HEAD_MIN_WORDS` first: a title at the start of its beat ("The Kitchen Table Crochet Book is
+ * a digital book…") keeps it. Pure — unit-tested.
  */
 export function coverCutAt(text: string, title: string | undefined): number {
   const named = bookNamedAt(text, title);
@@ -10043,7 +10046,13 @@ export function coverCutAt(text: string, title: string | undefined): number {
     }
   }
   const at = (c: number) => (c >= COVER_HEAD_MIN_WORDS ? words[c].at : -1);
-  if (k - clause <= COVER_LEAD_MAX_WORDS) return at(clause);
+  // Near its clause's start: cut on the clause break's pause — unless that leaves the host too few
+  // words while the naming is past a short lead-in of the whole beat; then look for a break below.
+  if (
+    k - clause <= COVER_LEAD_MAX_WORDS &&
+    (clause >= COVER_HEAD_MIN_WORDS || k <= COVER_LEAD_MAX_WORDS)
+  )
+    return at(clause);
   for (let c = k; c > clause && c >= k - COVER_LEAD_MAX_WORDS; c--) {
     if (c < COVER_HEAD_MIN_WORDS) break;
     if (breakBetween(text.slice(0, words[c].at), text.slice(words[c].at))) return words[c].at;
@@ -10058,6 +10067,13 @@ export function coverCutAt(text: string, title: string | undefined): number {
  * caller turns into the cover. Runs before voicing, so the final alignment puts the cut on the
  * transcript (the pause the clause break leaves). Returns the index of the beat that takes the cover:
  * `k`, or `k + 1` after a split. Mutates `scenes` (splices). Pure otherwise — unit-tested.
+ *
+ * A beat that OPENS its marked CTA block (or follows a QR, cover or asset beat in it) is split only
+ * when the words kept back can stand alone (`COVER_HEAD_ALONE_MIN_WORDS`): nothing folds across a
+ * marked CTA edge or into a fixed beat (`coalesceShortScenes`), and `joinBackToBackHostTakes` never
+ * joins across one either, so a short head would be held to the host floor
+ * (`applySceneHoldFloor`, 4 s) — a frozen face over spliced silence right before the book, worse
+ * than the cover coming up early.
  */
 export function splitCoverAtNaming(
   scenes: StoryboardScene[],
@@ -10070,9 +10086,24 @@ export function splitCoverAtNaming(
   if (cut <= 0) return k;
   const [head, tail] = splitSceneAtOffset(s, cut);
   if (!head.scriptText || !tail.scriptText) return k;
+  const prev = scenes[k - 1];
+  const alone =
+    s.ctaIndex != null &&
+    (!prev ||
+      prev.cta !== true ||
+      prev.ctaIndex !== s.ctaIndex ||
+      !!prev.qrHero ||
+      !!prev.coverHero ||
+      !!prev.assetImageUrl);
+  if (alone && wordCount(head.scriptText) < COVER_HEAD_ALONE_MIN_WORDS) return k;
   scenes.splice(k, 1, head, tail);
   return k + 1;
 }
+
+/** The fewest words a cover beat's head needs when it has nothing in its block to join
+ * (`splitCoverAtNaming`): the host floor's worth at the estimated pace, with a quarter to spare for
+ * a quick narrator — under it the head is held to `HOST_MIN_HOLD_SEC` over silence. */
+export const COVER_HEAD_ALONE_MIN_WORDS = Math.ceil(HOST_MIN_HOLD_SEC * WORDS_PER_SEC * 1.25);
 
 /**
  * Whitespace/apostrophe-tolerant matcher for a fixed anchor phrase: the phrase's own runs of
