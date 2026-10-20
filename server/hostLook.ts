@@ -1824,6 +1824,14 @@ function withoutQuotedSpeech(line: string): string {
  */
 const SPEECH_FRAME =
   /\b(?:I|[Ww]e)(?:['’](?:d|ll|m))?\s+(?:(?:do|did|would|will|really|honestly|just|still|also|must|can|could|should|have\s+to)\s+)?(?:think|thought|believe|guess|suppose|reckon|mean|meant|bet|promise|swear|admit|say|said|argue|hope|wish|know|doubt|suspect|imagine|expect|tell)\b/g;
+/**
+ * The host only SEEING something — "I've seen it a hundred times", "I noticed it on every flight",
+ * "we met at the market" — whose picture is what was seen: a picture leading with "a woman customer
+ * haggling over a bowl" under "I've seen it a hundred times" is the customer, and drawing her as the
+ * host would show the host doing what she only watched.
+ */
+const OBSERVING =
+  /\b(?:I|[Ww]e)(?:['’](?:d|ll|ve))?\s+(?:(?:have|had|has|will|would|always|often|once|never|just|first|only|still|even|already|sometimes|all|both)\s+){0,2}(?:see|saw|seen|watch|watched|notice|noticed|hear|heard|meet|met|spot|spotted|overhear|overheard|witness|witnessed)\b/g;
 /** "I" (capital only: never a letter in a list) or "we", in any contraction, as the one doing it. */
 const NARRATOR_I = /\bI(?:['’](?:m|ve|ll|d))?\b/;
 const NARRATOR_WE = /\b[Ww]e(?:['’](?:re|ve|ll|d))?\b/;
@@ -1849,6 +1857,13 @@ const RELATIVES = new Set(
     "grandkid grandson granddaughter husband wife spouse son daughter sister brother sibling aunt uncle " +
     "cousin niece nephew boyfriend girlfriend baby infant toddler child kid teen teenager girl boy").split(" ")
 );
+/**
+ * A child, or a person named young: never the host, in an "I" line too — the host's look and photo
+ * are the host as they are NOW, so "When I was ten, I learned to fish off that dock" over "a young
+ * boy fishing off a wooden dock" would draw a man in his sixties as the boy. The boy stays a boy.
+ */
+const CHILDREN = new Set("baby infant toddler child kid teen teenager girl boy".split(" "));
+const YOUNG = /\b(?:young|younger|youthful|teenage|teenaged)\b|\blittle\b(?!\s+old\b)/i;
 
 /** A line the host tells of themself: whether it is told as "we" (the host and others) rather than "I". */
 export type NarratorLine = { we: boolean };
@@ -1862,8 +1877,9 @@ export type NarratorLine = { we: boolean };
  * the film's opening story had followed. Undefined when the line names anyone else at all: "you" (the
  * viewer's rules decide), "he", "she", "they" (even of things — "They sell for $16, and I sold every
  * one" is the buyer's side as much as the host's), "someone", a person word ("folks who like to burn
- * incense", "my neighbour"), or a capitalised name; when its only "I" is in what someone SAYS (a quote)
- * or frames what follows ("I think…", "I'll say it plain…"); or when it has no "I" doing anything ("It
+ * incense", "my neighbour"), or a capitalised name; when its only "I" is in what someone SAYS (a quote),
+ * frames what follows ("I think…", "I'll say it plain…") or only sees it ("I've seen it a hundred
+ * times": the picture is what was seen, `OBSERVING`); or when it has no "I" doing anything ("It
  * took me twenty hours"). A role the host gives themself in the line ("when I was just a passenger")
  * is theirs, not someone else (`NARRATOR_IS`). Pure.
  */
@@ -1893,7 +1909,7 @@ export function narratorOwnLine(line: string | undefined, hostName?: string): Na
     const opensClause = k === 0 || /^[.!?:;—–(“"]$/.test(tokens[k - 1]);
     if (/^[A-Z]/.test(t) && !opensClause && !/^I(?:['’](?:m|ve|ll|d))?$/.test(t)) return undefined;
   }
-  const doing = rest.replace(SPEECH_FRAME, " ");
+  const doing = rest.replace(SPEECH_FRAME, " ").replace(OBSERVING, " ");
   if (NARRATOR_I.test(doing) || NARRATOR_BODY.test(doing)) return { we: false };
   if (NARRATOR_WE.test(doing)) return { we: true };
   return undefined;
@@ -1966,35 +1982,48 @@ export function personAsHost(text: string, noun: string): string {
  * the story's savvy woman passenger, who got the whole can, was drawn nursing the host's thimble of
  * ginger ale a minute later. Left as it was: a picture of two or more people, one with the host among
  * them, a person the words do it WITH or TO ("…with a buyer"), a name ("Seneca"), a description that
- * names someone other than the planner's person, a person the line itself names. On a "we" line also
- * a relative and a person of the other sex: they are the one the host is with. Replayed over the 355
- * local storyboards (24,056 pictures): this one picture changes. Pure.
+ * names someone other than the planner's person, a person the line itself names. BOTH descriptions
+ * are read — the shot list's and the enhancer's rewrite — so a rewrite that adds someone ("…beside
+ * another passenger", "…while a man in a red cap browses") never turns into "the host beside the host"
+ * or the host's photo beside a stranger. A child or someone named young stays who they are: the
+ * host's look is the host today (`CHILDREN`, `YOUNG`). On a "we" line also a relative and a person of
+ * the other sex: they are the one the host is with. Replayed over the 355 local storyboards (24,056
+ * pictures): this one picture changes. Pure.
  */
 export function narratorPictured(
   scenes: StoryboardScene[],
   i: number,
   cast: PictureCast | undefined,
   opts: { look?: string; hostName?: string } = {}
-): { noun?: string } | undefined {
+): { noun: string } | undefined {
   const s = scenes[i];
   if (!s || !cast || cast.host || cast.count !== 1) return undefined;
   const line = narratorOwnLine(sentenceAround(scenes, i), opts.hostName);
   if (!line) return undefined;
-  const text = withHostNamed(s.showSubject ?? s.visualPrompt ?? "", opts.hostName);
-  const desc = namedPeople(text);
   const planner = s.otherPerson ? namedPeople(s.otherPerson) : undefined;
   // A planner's someone with no person word is a name ("Seneca", "Grandpa Joe"): someone, by name.
   if (s.otherPerson && (!planner || planner.people.length !== 1 || planner.count !== 1)) return undefined;
-  const one = desc ?? planner;
+  const named = [s.showSubject, s.visualPrompt]
+    .filter((t): t is string => !!t?.trim())
+    .map(t => withHostNamed(t, opts.hostName))
+    .map(t => ({ t, people: namedPeople(t) }))
+    .filter((d): d is { t: string; people: NamedPeople } => !!d.people);
+  const one = named[0]?.people ?? planner;
   if (!one || one.people.length !== 1 || one.count !== 1 || one.people[0].kind === "self") return undefined;
   const person = one.people[0];
-  if (desc && planner && planner.people[0].noun !== person.noun) return undefined;
-  if (desc && !personSpans(text, person.noun).some(p => p.lead)) return undefined;
+  if (planner && planner.people[0].noun !== person.noun) return undefined;
+  // Every description that names anyone names this one person, and leads with them.
+  for (const d of named) {
+    const only = d.people.people.length === 1 && d.people.count === 1 ? d.people.people[0] : undefined;
+    if (!only || only.noun !== person.noun || !personSpans(d.t, person.noun).some(p => p.lead)) return undefined;
+  }
+  const phrases = [...named.map(d => d.people.people[0].phrase), s.otherPerson ?? ""];
+  if (CHILDREN.has(person.noun) || phrases.some(p => YOUNG.test(p))) return undefined;
   if (line.we) {
     const hostSex = sexOfLook(opts.look);
     if (RELATIVES.has(person.noun) || (hostSex && person.sex && person.sex !== hostSex)) return undefined;
   }
-  return { noun: desc ? person.noun : undefined };
+  return { noun: person.noun };
 }
 
 /**
@@ -2084,10 +2113,10 @@ export function markHostBroll(
     // (`narratorPictured`).
     const narrator = on ? narratorPictured(scenes, i, other, { look, hostName: params.hostName }) : undefined;
     if (narrator) {
-      if (narrator.noun) {
-        if (s.showSubject) s.showSubject = personAsHost(s.showSubject, narrator.noun);
-        if (s.visualPrompt) s.visualPrompt = personAsHost(s.visualPrompt, narrator.noun);
-      }
+      // Both descriptions: a rewrite still saying "a woman passenger" over the host's "hands holding
+      // a cup" would ask for the passenger in the host's picture.
+      if (s.showSubject) s.showSubject = personAsHost(s.showSubject, narrator.noun);
+      if (s.visualPrompt) s.visualPrompt = personAsHost(s.visualPrompt, narrator.noun);
       s.otherPerson = undefined;
       s.otherPeople = undefined;
       other = undefined;

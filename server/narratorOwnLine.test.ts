@@ -85,6 +85,11 @@ describe("narratorOwnLine — a line the host tells of themself, naming nobody e
     // "I" only framing what follows (job 137 scene 114)
     expect(narratorOwnLine("Number three. The potholder loops, no, I'll say it plain, the hemmed dish towels from old bedsheets, and these were the first thing gone every market day.")).toBeUndefined();
     expect(narratorOwnLine("I think it's the best trick on any flight.")).toBeUndefined();
+    // "I" only seeing it: the picture is what was seen
+    expect(narratorOwnLine("I've seen it a hundred times.")).toBeUndefined();
+    expect(narratorOwnLine("I noticed it on every flight that summer.")).toBeUndefined();
+    // …but seeing beside doing is still the host's own line
+    expect(narratorOwnLine("I watched the clouds for an hour, and I nursed my drink the whole way.")).toEqual({ we: false });
     // the story's "he"/"she" (round 13's rule)
     expect(narratorOwnLine("He figures she must know somebody on the crew.")).toBeUndefined();
     expect(narratorOwnLine("I saw him as a friend from the first day.")).toBeUndefined();
@@ -133,6 +138,45 @@ describe("markHostBroll — the host's own 'I' is the host, never someone else",
     expect(scenes[0].otherPerson).toBeUndefined();
     expect(scenes[0].brollHostLook).toBe(HELENA);
     expect(scenes[0].showSubject).toBe("hands holding a small plastic cup with a little ginger ale");
+    // the enhancer's rewrite naming the planner's person is the host too — never a passenger in the
+    // host's picture
+    const rewritten = [
+      pic(19, film417()[1].scriptText!, "hands holding a small plastic cup with a little ginger ale", {
+        otherPerson: "a woman passenger",
+        visualPrompt: "A woman passenger holding a small plastic cup with a little ginger ale, seated in an airline seat.",
+      }),
+    ];
+    markHostBroll(rewritten, PARAMS_417, PHOTO);
+    expect(rewritten[0].brollHostLook).toBe(HELENA);
+    expect(rewritten[0].visualPrompt).toBe("The host holding a small plastic cup with a little ginger ale, seated in an airline seat.");
+  });
+
+  it("a rewrite that adds someone, a child or a young self, and what the host only saw: as before", () => {
+    const LOOK = "A man in his sixties with a white beard, wearing a flannel shirt";
+    const cases: [StoryboardScene, string][] = [
+      // the rewrite names a second one of the same kind, or someone else: never "the host beside the host"
+      [pic(1, "I stood there for an hour.", "a customer standing at the booth", { otherPerson: "a customer", visualPrompt: "A customer standing at the booth beside another customer browsing the shelf." }), "a customer"],
+      [pic(1, "I stood there for an hour.", "a customer standing at the booth", { otherPerson: "a customer", visualPrompt: "A customer standing at the booth while a man in a red cap browses the shelf." }), "a customer"],
+      // the rewrite has the person on the receiving end
+      [pic(1, "I loaded the truck before dawn.", "hands lifting a crate into a truck", { otherPerson: "a delivery driver", visualPrompt: "Hands passing a crate to a delivery driver at the truck." }), "a delivery driver"],
+      // the host's younger self is not today's look
+      [pic(1, "When I was ten, I learned to fish off that dock.", "a young boy fishing off a wooden dock", { otherPerson: "a young boy" }), "a young boy"],
+      [pic(1, "As a kid, I spent every summer at the lake.", "a boy swimming in a lake", { otherPerson: "a boy" }), "a boy"],
+      [pic(1, "When I was young, I worked the cannery line.", "a young man packing cans on a cannery line", { otherPerson: "a young man" }), "a young man"],
+      // what the host only saw
+      [pic(1, "I've seen it a hundred times.", "a woman customer haggling over a bowl at the market table", { otherPerson: "a woman customer" }), "a woman customer"],
+    ];
+    for (const [s, who] of cases) {
+      markHostBroll([s], { hostLook: LOOK }, PHOTO);
+      expect(s.otherPerson).toBe(who);
+      expect(s.brollHostLook).toBeUndefined();
+      expect(`${s.showSubject} ${s.visualPrompt}`).not.toMatch(/\bthe host\b/i);
+    }
+    // "a little old woman" is no child: on a woman host's own line she is the host
+    const porch = [pic(1, "I sat on the porch all afternoon.", "a little old woman rocking on a porch", { otherPerson: "a little old woman" })];
+    markHostBroll(porch, { hostLook: "An older woman in her seventies with white hair in a bun, wearing a cardigan" }, PHOTO);
+    expect(porch[0].otherPerson).toBeUndefined();
+    expect(porch[0].showSubject).toBe("the host rocking on a porch");
   });
 
   it("the part the host played then, and a planner who got the host's sex wrong", () => {

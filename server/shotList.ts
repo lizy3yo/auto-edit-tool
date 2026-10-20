@@ -1750,7 +1750,8 @@ export const SHOT_LIST_SYSTEM =
   "6a. SOMEONE ELSE. When a line is about ANOTHER person doing something — a customer, a buyer, " +
   "a neighbour, a relative, a stranger, a person of the story the line calls \"he\" or \"she\" " +
   "(rule 1f); never the host — nor the host's own \"I\" or \"we\": what the host did, had or was " +
-  "is the host, even in a part they played then (a guest, a customer, a patient) — and never \"you\" (the viewer's work is " +
+  "is the host, even in a part they played then (a guest, a customer, a patient), though the " +
+  "child they once were is a child — and never \"you\" (the viewer's work is " +
   "shown as the host's) unless THE VIEWER is given below — the picture may show THAT person, the " +
   "same way: from behind or from the side, the face never shown. Write them into show, and set " +
   "other to who they are in 2-6 plain words from the line (\"a woman customer\", \"an older " +
