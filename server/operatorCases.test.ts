@@ -7810,4 +7810,24 @@ describe("another of the same kind is not the key thing (round 14, job 412 scene
     expect(memorySourcesFor(b, b[1]).map(s => s.index)).toEqual([2]);
     expect(buildStillPrompt(b[1])).not.toContain("ANOTHER ONE OF ITS KIND");
   });
+
+  it("411: in a video about a WILD kind, 'another robin' is still the robin — the species' look and picture kept", async () => {
+    // Job 411's key thing is the species ("an American robin, a reddish-orange breast…") and its script
+    // says "nobody sees another robin until spring": the words that tell a pet apart from a wild cat
+    // must not strip the regional kind's look off a robin.
+    const { attachMemory, memorySourcesFor } = await import("./pictureMemory");
+    const { buildStillPrompt } = await import("./longformVideo");
+    const robin: KeyThing[] = [
+      { name: "robin", look: "an American robin, a reddish-orange breast, a dark gray-brown back, a white lower belly, a white eye ring", main: true },
+    ];
+    const b = [
+      { index: 5, showSubject: "a robin standing on the grass with its head tilted", keyThing: "robin", pictureUrl: "https://r2/411/still-src-5.png" },
+      { index: 9, showSubject: "another robin pulling a worm from the wet grass" },
+    ].map(s => ({ narration: "n", scriptText: "n", visualPrompt: s.showSubject, ...s }) as StoryboardScene);
+    attachMemory(b, b, robin);
+    expect(b[1].keyThing).toBe("robin");
+    expect(b[1].othersOfKind).toBeUndefined();
+    expect(memorySourcesFor(b, b[1]).map(s => s.index)).toEqual([5]);
+    expect(buildStillPrompt(b[1])).not.toContain("ANOTHER ONE OF ITS KIND");
+  });
 });

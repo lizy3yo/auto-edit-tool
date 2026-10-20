@@ -6,16 +6,18 @@
  * grey-and-white coat, white bib, white socks and green eyes as the pet on the bed. `keyThingsIn` counted
  * the MAIN key thing "cat" as named by the word in "a wild cat", `tagKeyThings` filed it beside the
  * picture's "wild landscape", and the pet's first picture was handed over as "this exact cat". A word that
- * makes it a different one — someone else's (of anything), or wild, stray, feral, another, other,
- * different, a second, every, most, all, many, plenty of (of an animal) — now keeps it from the key thing:
- * never filed under it, never given its pictures or its look, and the prompt says it is not the one shown
- * before. The rows are the stored ones (job 412's props list and pictures; the things' words from jobs
- * 261, 263, 298, 302, 357, 371, 399 and 402); the rule names no channel's things.
+ * makes it a different one — someone else's (of anything), or wild, stray, feral, every, most, all, many,
+ * plenty of (of a KEPT animal: a pet or the host's own stock), and another, other, different, a second (of
+ * one named as one) — now keeps it from the key thing: never filed under it, never given its pictures or
+ * its look, and the prompt says it is not the one shown before. A wild kind (job 411's robin, the
+ * species) and a flock named as a group (job 368's hens) keep their name under those words. The rows are
+ * the stored ones (job 412's props list and pictures; the things' words from jobs 261, 263, 298, 302,
+ * 357, 368, 371, 399, 402 and 411); the rule names no channel's things.
  */
 import { describe, expect, it } from "vitest";
 import type { KeyThing, StoryboardScene } from "@shared/types";
 import {
-  animalName,
+  keptAnimal,
   anotherOfItsKind,
   applyPictureFixes,
   keyThingsIn,
@@ -150,13 +152,50 @@ describe("another of the same kind is not the key thing (round 14, job 412 scene
     expect(names("the neighbour's fence across the yard", [thing("fence")])).toEqual([]);
   });
 
-  it("which key things are animals: the animal or its part, never a thing named after one", () => {
-    expect(["cat", "hens", "robin", "dog's nose", "cat paws", "Dog's body", "puppies"].map(animalName)).toEqual([
-      true, true, true, true, true, true, true,
+  it("which key things are KEPT animals: the animal or its part, never a thing named after one, never a wild kind", () => {
+    expect(["cat", "hens", "Hens", "DOG", "dog's nose", "cat paws", "cat's paws", "Dog's body", "puppies"].map(keptAnimal)).toEqual([
+      true, true, true, true, true, true, true, true, true,
     ]);
-    expect(["chicken feeder", "chicken coop", "dog bed", "wild landscape", "owner's legs", "bear paw block"].map(animalName)).toEqual([
-      false, false, false, false, false, false,
-    ]);
+    expect(
+      ["chicken feeder", "chicken coop", "dog bed", "wild landscape", "owner's legs", "bear paw block", "robin", "fox", "computer mouse"].map(
+        keptAnimal
+      )
+    ).toEqual([false, false, false, false, false, false, false, false, false]);
+  });
+
+  // Job 411's key thing is the SPECIES: the props list's "robin" is "an American robin, a reddish-orange
+  // breast…", and its script says "nobody sees another robin until spring" and "you see the most robins
+  // all year". Every robin it shows is one of that kind; told "not the robin shown before, a look of its
+  // own" it would lose the look that keeps it from coming back as the European bird.
+  it("411: a WILD kind keeps its name and its look under those words — another robin is still the robin", () => {
+    const things411: KeyThing[] = [
+      { name: "robin", look: "an American robin, a reddish-orange breast, a dark gray-brown back, a white lower belly, a white eye ring", main: true },
+      { name: "kitchen window", look: "a rectangular window with white wooden frame, clear glass panes, looking out over the lawn" },
+    ];
+    for (const show of [
+      "another robin pulling a worm from the wet lawn",
+      "most robins gathered in a holly bush in winter",
+      "a wild robin perched on a bare branch",
+      "many robins feeding on berries along a fence",
+      "a second robin landing on the kitchen window sill",
+    ]) {
+      expect(keyThingsIn(show, things411).map(t => t.name)).toContain("robin");
+      expect(othersOfKindIn(show, things411)).toEqual([]);
+    }
+    expect(plannedKeyThing("robin", "another robin pulling a worm from the wet lawn", things411)?.name).toBe("robin");
+  });
+
+  it("a FLOCK named as a group: the other hens and all three hens are the video's own; most hens, a stray hen are not", () => {
+    // Job 368's props list, as stored.
+    const hens: KeyThing[] = [
+      { name: "hens", look: "brown and white feathered chickens of mixed size, gathered near feeder scratching dirt" },
+    ];
+    expect(names("one hen at the feeder while the other hens scratch the dirt nearby", hens)).toEqual(["hens"]);
+    expect(names("all three hens crowded around the feeder at dawn", hens)).toEqual(["hens"]);
+    expect(names("another two hens dust-bathing by the coop", hens)).toEqual(["hens"]);
+    expect(anotherOfItsKind("most hens in a commercial barn under bright lights", hens[0])).toBe("most hens");
+    expect(anotherOfItsKind("the neighbour's hens pecking along the fence", hens[0])).toBe("the neighbour's hens");
+    expect(anotherOfItsKind("feral hens roosting in a roadside tree", hens[0])).toBe("feral hens");
   });
 
   it("a planner's or a check's 'thing' is not taken for a picture of another one", () => {
