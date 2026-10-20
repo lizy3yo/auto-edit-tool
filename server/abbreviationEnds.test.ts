@@ -17,7 +17,7 @@ import {
 } from "./longformVideo";
 import { breakBetween, checkPlan } from "./planGate";
 import { planSentencePauses, scriptSentenceEnds } from "./sentencePauses";
-import { applyShotPlan, spokenListItems } from "./shotList";
+import { applyShotPlan, leadIntoNext, spokenListItems } from "./shotList";
 import { splitSentences } from "./spokenLists";
 
 /** Job 417's paragraph, word for word. */
@@ -189,6 +189,22 @@ describe("the shot list never cuts between the letters of 'U. S.'", () => {
     expect(scenes[0].scriptText).toBe(beat.scriptText);
   });
 
+  it("written closed, 'U.S.' is no two words either: a shot starting on 'S. airlines' is dropped", () => {
+    // The cutters find words run of letters by run of letters, so "U.S." is the words "u" and "s".
+    const closed = { ...beat, scriptText: beat.scriptText!.replace("U. S.", "U.S.") } as StoryboardScene;
+    const { scenes } = applyShotPlan(
+      [closed, after],
+      [{ scene: 1, shots: [{ from: "On a lot", show: "a jet on the runway" }, { from: "S. airlines", show: "an airline cabin" }] }]
+    );
+    expect(scenes[0].scriptText).toBe(closed.scriptText);
+    // Negative: a shot starting on the whole word after it still cuts.
+    const cut = applyShotPlan(
+      [closed, after],
+      [{ scene: 1, shots: [{ from: "On a lot", show: "a jet on the runway" }, { from: "the flight attendant", show: "a flight attendant pouring soda" }] }]
+    ).scenes;
+    expect(cut[0].scriptText).toBe("On a lot of U.S. airlines,");
+  });
+
   it("negative: a shot starting on a whole word after 'U. S.' still cuts", () => {
     const { scenes } = applyShotPlan(
       [beat, after],
@@ -236,3 +252,16 @@ describe("the lists' sentences", () => {
   });
 });
 
+
+describe("a split panel's lead-in passes over a full stop that ends no sentence", () => {
+  it("the words after the last REAL sentence end are the lead — stopping at 'S.' found none", () => {
+    expect(
+      leadIntoNext("The cart comes down the aisle and the attendant pours your drink into a cup of ice. On a lot of U. S. airlines the")
+    ).toEqual({ words: "On a lot of U. S. airlines the" });
+  });
+
+  it("negative: one sentence with a short form in it is still no lead-in", () => {
+    expect(leadIntoNext("We drove all the way across three counties to St. Louis to buy")).toBeUndefined();
+    expect(leadIntoNext("On a lot of U. S. airlines the attendant pours half and keeps the")).toBeUndefined();
+  });
+});

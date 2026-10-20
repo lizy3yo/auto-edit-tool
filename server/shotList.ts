@@ -4360,11 +4360,16 @@ export function leadIntoNext(
 ): { words: string; sec?: number } | undefined {
   const text = (line ?? "").replace(/\s+/g, " ").trim();
   if (!text || /[.!?,;:—–-]["'”’)\]]*$/.test(text)) return undefined;
-  // The LAST sentence end followed by more words (greedy). A title's or a place name's full stop
-  // ends no sentence: "…drove all the way to St. Louis to buy" is one sentence, cut mid-clause.
-  const m = /^(.*[.!?]["'”’)\]]*)\s+(\S.*)$/.exec(text);
-  if (!m || endsOnAbbreviation(m[1], m[2])) return undefined;
-  const words = m[2].trim();
+  // The LAST sentence end followed by more words. A title's, a place name's or an initial's full stop
+  // ends no sentence (`abbreviationBreakAt`) and is passed over for the real end before it: "…drove
+  // all the way to St. Louis to buy" is one sentence, cut mid-clause, and "…hung on wooden pins. But
+  // on the U. S. side hung" leads on from "pins." — stopping at "S." it found no lead at all.
+  const ends = Array.from(text.matchAll(/[.!?]["'”’)\]]*\s+(?=\S)/g)).filter(
+    e => !abbreviationBreakAt(text, e.index! + e[0].length)
+  );
+  const last = ends[ends.length - 1];
+  if (!last) return undefined;
+  const words = text.slice(last.index! + last[0].length).trim();
   const all = text.split(" ").length;
   const n = words.split(" ").length;
   if (n < 2 || n * 3 > all) return undefined;

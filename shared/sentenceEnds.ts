@@ -64,7 +64,9 @@ export function isAbbreviationStop(
     const before = (prev ?? "").trim().replace(OPENERS, "");
     return !(after && /^[a-z]/.test(before));
   }
-  if (/^[A-Za-z]{1,3}(?:\.[A-Za-z]{1,3})+$/.test(body)) return true;
+  // Letters joined by full stops, one or two a group ("U.S", "a.m", "Ph.D"): never a web address,
+  // whose names run longer and which a sentence may well end on ("…go to irs.gov. Then…").
+  if (/^[A-Za-z]{1,2}(?:\.[A-Za-z]{1,2})+$/.test(body)) return true;
   if (TITLES.has(body) || LOWER_FORMS.has(body.toLowerCase())) return true;
   if (/^no$/i.test(body)) return /^[#(]?\d/.test(after);
   return false;
@@ -99,9 +101,14 @@ export function abbreviationBreakAt(text: string, end: number): boolean {
  * spelt as initials with spaces: "U. | S. airlines", "6 a. | m.", "J. | R. R.". The voice says
  * "U.S." in one breath and the transcript hears one word, so there is no gap to cut in — any
  * cutter that picks its own words (the shot list's `from`, the line check's splits) refuses it,
- * as the sentence splitters refuse the full stop. Pure.
+ * as the sentence splitters refuse the full stop. The same word written closed is refused too:
+ * those cutters find words run of letters by run of letters, so "U.S." is the two words "u" and
+ * "s", and a `from` of "S. airlines" would start a picture INSIDE the written word ("…of U." |
+ * "S. airlines") — as it would inside "a.m." or a price ("$1.|50"). Pure.
  */
 export function splitsInitials(text: string, at: number): boolean {
+  // Right after a full stop with no space: inside one written word.
+  if (/[A-Za-z0-9]\.$/.test(text.slice(0, at)) && /^[A-Za-z0-9]/.test(text.slice(at))) return true;
   const before = /(\S+)\s+$/.exec(text.slice(0, at))?.[1];
   const word = /^\S+/.exec(text.slice(at))?.[0];
   const bare = (w: string) => w.replace(CLOSERS, "").replace(OPENERS, "");

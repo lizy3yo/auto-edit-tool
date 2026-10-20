@@ -110,4 +110,23 @@ describe("the text helpers", () => {
     expect(splitsInitials(WHOLE_CAN, WHOLE_CAN.indexOf("On a lot"))).toBe(false);
     expect(splitsInitials("asked Dr. Hale", "asked Dr. ".length)).toBe(false);
   });
+
+  it("splitsInitials: never inside the same word written closed ('U.S.', 'a.m.', a price)", () => {
+    // The cutters find words run of letters by run of letters: "U.S." is "u" and "s".
+    const closed = "On a lot of U.S. airlines, the flight attendant pours your soda.";
+    expect(splitsInitials(closed, closed.indexOf("S. airlines"))).toBe(true);
+    expect(splitsInitials("doors open at 6 a.m. sharp", "doors open at 6 a.".length)).toBe(true);
+    expect(splitsInitials("a can costs $1.50 on board", "a can costs $1.".length)).toBe(true);
+    // Negative: a cut after a full stop and a space, or after a dash with none, is between words.
+    expect(splitsInitials(closed, closed.indexOf("airlines"))).toBe(false);
+    expect(splitsInitials("The whole can. On a lot", "The whole can. ".length)).toBe(false);
+    expect(splitsInitials("hold it—then let go", "hold it—".length)).toBe(false);
+  });
+
+  it("a web address a sentence ends on is no short form; letters in groups of one or two are", () => {
+    expect(isAbbreviationStop("irs.gov.", "Then")).toBe(false);
+    expect(isAbbreviationStop("ssa.gov.", "You")).toBe(false);
+    expect(abbreviationBreakAt("Go to irs.gov. Then fill in the form.", "Go to irs.gov. ".length)).toBe(false);
+    for (const w of ["U.S.A.", "Ph.D.", "N.Y."]) expect(isAbbreviationStop(w, "Then")).toBe(true);
+  });
 });
