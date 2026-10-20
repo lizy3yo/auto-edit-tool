@@ -12542,6 +12542,63 @@ describe("someone else's face is asked about in the one check, and drawn again f
     expect(out.buffer.equals(c)).toBe(true);
   });
 
+  // Job 421 scene 29's picture (147.12-149.28, round 16), as the check would name what it was first read
+  // as: the passenger's seat turned about 90° toward the gap while every other row faced forward (a
+  // second look found her seat facing forward and her turned at the waist; the check is now told how to
+  // tell). Named as a seat turned, the first broken draw's own reroll is told how fixed seats face and
+  // how a person sits in one — no draw added.
+  it("a seat turned against its rows is redrawn told how fixed seats face, in the reroll's own turn", async () => {
+    const { NAMED_FAULT_START, SEAT_FACING_FIX, SEATED_PERSON_FIX, NATURAL_POSE_FIX } = await import("./longformVideo");
+    const [a, b] = await Promise.all([pngOf("#e91"), pngOf("#e92")]);
+    const offer = () =>
+      ({
+        index: 29,
+        scriptText: "and phrase it as an offer.",
+        showSubject: "a flight attendant holding out the snack basket to a passenger seen from the side",
+        visualPrompt: "A flight attendant in an aircraft cabin holding out the woven snack basket to a seated passenger.",
+        keyThing: "snack basket",
+        listCut: true,
+        humanPresent: true,
+        otherPerson: "a flight attendant and a passenger",
+        otherPeople: 2,
+        stillImage: true,
+      }) as any;
+    const what = "seat turned: her seat sideways, its row forward";
+    checkSays({ broken: true, what });
+    const genImage = drawsOf(a, b);
+    const out = await generateValidatedStill(offer(), 4, undefined, genImage);
+    expect(genImage).toHaveBeenCalledTimes(2);
+    const [p1, p2] = genImage.mock.calls.map(c => c[0].prompt as string);
+    expect(p1).not.toContain(SEAT_FACING_FIX);
+    expect(p2.startsWith(p1)).toBe(true);
+    const added = p2.slice(p1.length);
+    expect(added).toContain(`${NAMED_FAULT_START} ${what}.`);
+    expect(added).toContain(`${SEAT_FACING_FIX} ${SEATED_PERSON_FIX}`);
+    // Not named as a pose, so the person's pose rule stays out: the furniture was what turned.
+    expect(added).not.toContain(NATURAL_POSE_FIX);
+    expect(out.buffer.equals(b)).toBe(true);
+  });
+
+  it("a row turned round with nobody in the picture is told how fixed seats face, and nothing of a person", async () => {
+    const { SEAT_FACING_FIX, SEATED_PERSON_FIX, NATURAL_POSE_FIX } = await import("./longformVideo");
+    const [a, b] = await Promise.all([pngOf("#e93"), pngOf("#e94")]);
+    const rows = {
+      index: 3,
+      scriptText: "By the time the beverage cart had come and gone,",
+      showSubject: "an empty row of three seats near the front of the cabin",
+      visualPrompt: "An empty row of three blue upholstered seats near the front of the cabin, the rows behind it.",
+      stillImage: true,
+    } as any;
+    checkSays({ broken: true, what: "seat turned: row ahead faces the row behind" });
+    const genImage = drawsOf(a, b);
+    await generateValidatedStill(rows, 4, undefined, genImage);
+    expect(genImage).toHaveBeenCalledTimes(2);
+    const p2 = genImage.mock.calls[1][0].prompt as string;
+    expect(p2).toContain(SEAT_FACING_FIX);
+    expect(p2).not.toContain(SEATED_PERSON_FIX);
+    expect(p2).not.toContain(NATURAL_POSE_FIX);
+  });
+
   it("who is asked, and whose words lose a smile: someone else in the picture, never a host take or the QR backdrop", async () => {
     const { othersFaceAsked, faceNeverShown } = await import("./longformVideo");
     expect(othersFaceAsked(passenger(), false, false)).toBe(true);

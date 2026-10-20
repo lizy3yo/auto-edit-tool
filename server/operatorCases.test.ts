@@ -10229,8 +10229,16 @@ describe("round 15: the natural pose of what a person does; the camera, never th
   });
 
   it("the first pose fault is redrawn told the natural pose and where the camera goes; the second still gets the at-rest draw", async () => {
-    const { faultRedrawFor, namedFaultClause, namedFaultRedraw, NAMED_FAULT_START, NATURAL_POSE_FIX, SPLIT_STRIKE_CLAUSE } =
-      await import("./longformVideo");
+    const {
+      faultRedrawFor,
+      namedFaultClause,
+      namedFaultRedraw,
+      NAMED_FAULT_START,
+      NATURAL_POSE_FIX,
+      SEAT_FACING_FIX,
+      SEATED_PERSON_FIX,
+      SPLIT_STRIKE_CLAUSE,
+    } = await import("./longformVideo");
     type R = "at rest" | "soft print" | "named fault";
     const none = new Set<R>();
     const first = { broken: 0, writing: 0 };
@@ -10251,12 +10259,21 @@ describe("round 15: the natural pose of what a person does; the camera, never th
     ]) {
       expect(namedFaultClause(what, words2, true), what).toContain(NATURAL_POSE_FIX);
       expect(faultRedrawFor({}, { broken: true, what }, first, none, true, true), what).toBe("named fault");
-      // Nobody drawn in it: no pose to fix — its plain reroll, as before.
-      expect(namedFaultClause(what, words2, false), what).toBeUndefined();
+      // Nobody drawn in it: no pose to fix — its plain reroll, as before. A row turned round is the
+      // seats' own fault (round 16), so with nobody in it that one is told how fixed seats face, and
+      // nothing of a person.
+      const empty = namedFaultClause(what, words2, false);
+      if (/\brow ahead\b/.test(what)) {
+        expect(empty, what).toContain(SEAT_FACING_FIX);
+        expect(empty, what).not.toContain(NATURAL_POSE_FIX);
+        expect(empty, what).not.toContain(SEATED_PERSON_FIX);
+      } else expect(empty, what).toBeUndefined();
     }
+    // Sitting backwards is a person against their seat: round 16 adds how fixed seats face and how a
+    // person sits in one, after the pose's own rule.
     const out = namedFaultRedraw("P.", "unnatural pose: two people sitting backwards in their seats", words2, true);
     expect(out).toBe(
-      `P. ${NAMED_FAULT_START} unnatural pose: two people sitting backwards in their seats. This time draw it the way it really is. ${NATURAL_POSE_FIX}`
+      `P. ${NAMED_FAULT_START} unnatural pose: two people sitting backwards in their seats. This time draw it the way it really is. ${NATURAL_POSE_FIX} ${SEAT_FACING_FIX} ${SEATED_PERSON_FIX}`
     );
     expect(NATURAL_POSE_FIX).toMatch(/sitting the way their own seat faces and held up by it/);
     expect(NATURAL_POSE_FIX).toMatch(/Keep any face out by moving the CAMERA/);
@@ -10669,5 +10686,92 @@ describe("round 16: the room is never placed behind or ahead of a seated or work
       stillImage: true,
     });
     expect(personPlacedWords(leaving, leaving.showSubject!)).toBe(leaving.showSubject);
+  });
+});
+
+// ─── Round 16: the still check sees which way a seat faces (job 421 #29, #2) ────────────────────
+
+describe("job 421 #29 / #2: a seat turned against its rows is named by the check and redrawn told how fixed seats face", () => {
+  // Helena Hart's practice film on the round-15 code. #2 (5.80-11.95, "one of them was sitting in an
+  // empty row closer to the front"): the empty row drawn front-on beside a woman whose own seat faced
+  // away, two rows knee to knee (job 417 #8 again) — flagged missing and detail only. #29 (147.12-149.28,
+  // "and phrase it as an offer.") was read as her seat turned about 90° to face the gap, her thighs at the
+  // camera; a second look found it right — her seat faces forward, the padded side of its seat back was
+  // taken for a cushion, and she turns at the waist. Round 15's pose line asks about the BODY; these are
+  // the furniture, and the line now says how to tell: what hides what.
+  const offer = () =>
+    ({
+      index: 29,
+      scriptText: "and phrase it as an offer.",
+      showSubject: "a flight attendant holding out the snack basket to a passenger seen from the side",
+      visualPrompt: "A flight attendant in an aircraft cabin holding out the woven snack basket to a seated passenger.",
+      keyThing: "snack basket",
+      listCut: true,
+      humanPresent: true,
+      otherPerson: "a flight attendant and a passenger",
+      otherPeople: 2,
+      stillImage: true,
+    }) as StoryboardScene;
+  const row = () =>
+    ({
+      index: 2,
+      scriptText:
+        "By the time the beverage cart had come and gone, one of them was sitting in an empty row closer to the front, holding",
+      showSubject:
+        "a woman passenger sitting alone in a set of three blue upholstered airline seats near the front of the cabin, tray tables stowed, the beverage cart passing in the aisle beside her",
+      visualPrompt:
+        "Empty row of three blue upholstered airline seats near the front of the cabin, tray tables stowed, a metal service cart with small wheels visible in the aisle beside the row.",
+      keyThing: "empty row",
+      humanPresent: true,
+      otherPerson: "a woman passenger",
+      stillImage: true,
+    }) as StoryboardScene;
+  const words = (s: StoryboardScene) => `${s.showSubject} ${s.visualPrompt}`;
+
+  it("the check is now asked which way each seat faces against the seats around it, and says \"seat turned:\"", () => {
+    const q2 = STILL_DEFECT_SYSTEM.slice(STILL_DEFECT_SYSTEM.indexOf("QUESTION 2"), STILL_DEFECT_SYSTEM.indexOf("QUESTION 3"));
+    expect(q2).toMatch(/- fixed seats facing a way such seats never face/);
+    expect(q2).toMatch(/a seat turned sideways or round while its row faces forward/); // #29 as first read
+    expect(q2).toMatch(/so two rows face each other knee to knee/); // #2, 417 #8
+    expect(q2).toMatch(/a body, arm or leg passing through its seat, seat back or armrest/); // 399 #2
+    // #29 as it really is: a seat back hiding part of her stands behind her, its padded side is no
+    // cushion, and a turn at the waist toward the gap is right — never a broken verdict.
+    expect(q2).toMatch(/Tell which way a seat faces by what hides what/);
+    expect(q2).toMatch(/the padded side of a seat back seen at an angle is no cushion/);
+    expect(q2).toMatch(/someone in it who turns their head and shoulders or leans toward the gap beside their seat is right/);
+    expect(q2).not.toMatch(/knees toward the camera/);
+    expect(STILL_DEFECT_SYSTEM).toMatch(/starts "seat turned:" and says which one and which way/);
+  });
+
+  it("#29 and #2: the first broken draw's own reroll names the fault and how fixed seats face; the first draw is as it was", async () => {
+    const { faultRedrawFor, namedFaultRedraw, NAMED_FAULT_START, SEAT_FACING_FIX, SEATED_PERSON_FIX } = await import(
+      "./longformVideo"
+    );
+    for (const [s, what] of [
+      [offer(), "seat turned: her seat sideways, its row forward"],
+      [row(), "seat turned: row ahead faces the row behind"],
+    ] as const) {
+      const prompt = buildStillPrompt(s);
+      expect(prompt).not.toContain(SEAT_FACING_FIX);
+      expect(faultRedrawFor(s, { broken: true, what }, { broken: 0, writing: 0 }, new Set(), true, true)).toBe("named fault");
+      expect(namedFaultRedraw(prompt, what, words(s), true)).toBe(
+        `${prompt} ${NAMED_FAULT_START} ${what}. This time draw it the way it really is. ${SEAT_FACING_FIX} ${SEATED_PERSON_FIX}`
+      );
+    }
+  });
+
+  it("clean: seats built to face each other are right, and their pictures are never told the seat rule", async () => {
+    const { namedFaultClause, SEAT_FACING_FIX } = await import("./longformVideo");
+    expect(STILL_DEFECT_SYSTEM).toMatch(/a booth, chairs round a table, a train's pairs of facing seats, a bay of four, chairs along the walls of a room facing its middle/);
+    const booth = pic(5, "They met for coffee every Thursday.", "two friends talking across a diner booth table, seen over one shoulder", {
+      humanPresent: true,
+      otherPerson: "two friends",
+      otherPeople: 2,
+      stillImage: true,
+    });
+    expect(buildStillPrompt(booth)).not.toContain(SEAT_FACING_FIX);
+    expect(namedFaultClause("cup floating above the booth table", words(booth), true) ?? "").not.toContain(SEAT_FACING_FIX);
+    // A seat's own fault with no way to face in it keeps its plain reroll (job 410 #2).
+    expect(namedFaultClause("plane seat back merging into the window", words(row()), true)).toBeUndefined();
   });
 });
