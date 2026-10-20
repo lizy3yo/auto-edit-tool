@@ -12542,10 +12542,11 @@ describe("someone else's face is asked about in the one check, and drawn again f
     expect(out.buffer.equals(c)).toBe(true);
   });
 
-  // Job 421 scene 29 (147.12-149.28, round 16): the passenger's seat turned about 90° toward the gap
-  // between the rows while every other row faced forward, and the check, asked only about bodies, said
-  // "near copy". Named now as a seat turned, the first broken draw's own reroll is told how fixed seats
-  // face and how a person sits in one — no draw added.
+  // Job 421 scene 29's picture (147.12-149.28, round 16), as the check would name what it was first read
+  // as: the passenger's seat turned about 90° toward the gap while every other row faced forward (a
+  // second look found her seat facing forward and her turned at the waist; the check is now told how to
+  // tell). Named as a seat turned, the first broken draw's own reroll is told how fixed seats face and
+  // how a person sits in one — no draw added.
   it("a seat turned against its rows is redrawn told how fixed seats face, in the reroll's own turn", async () => {
     const { NAMED_FAULT_START, SEAT_FACING_FIX, SEATED_PERSON_FIX, NATURAL_POSE_FIX } = await import("./longformVideo");
     const [a, b] = await Promise.all([pngOf("#e91"), pngOf("#e92")]);

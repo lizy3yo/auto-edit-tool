@@ -10533,12 +10533,13 @@ describe("job 418 #2: the log restorer the line names is in the picture the labe
 // ─── Round 16: the still check sees which way a seat faces (job 421 #29, #2) ────────────────────
 
 describe("job 421 #29 / #2: a seat turned against its rows is named by the check and redrawn told how fixed seats face", () => {
-  // Helena Hart's practice film on the round-15 code. #29 (147.12-149.28, "and phrase it as an offer."):
-  // the passenger's seat back and seat turned about 90° to face the gap between the rows, her thighs at
-  // the camera, while every other row showed its back — checked "near copy" twice, never "broken". #2
-  // (5.80-11.95, "one of them was sitting in an empty row closer to the front"): the empty row drawn
-  // front-on beside a woman whose own seat faced away, two rows knee to knee (job 417 #8 again) —
-  // flagged missing and detail only. Round 15's pose line asks about the BODY; these were the furniture.
+  // Helena Hart's practice film on the round-15 code. #2 (5.80-11.95, "one of them was sitting in an
+  // empty row closer to the front"): the empty row drawn front-on beside a woman whose own seat faced
+  // away, two rows knee to knee (job 417 #8 again) — flagged missing and detail only. #29 (147.12-149.28,
+  // "and phrase it as an offer.") was read as her seat turned about 90° to face the gap, her thighs at the
+  // camera; a second look found it right — her seat faces forward, the padded side of its seat back was
+  // taken for a cushion, and she turns at the waist. Round 15's pose line asks about the BODY; these are
+  // the furniture, and the line now says how to tell: what hides what.
   const offer = () =>
     ({
       index: 29,
@@ -10571,9 +10572,15 @@ describe("job 421 #29 / #2: a seat turned against its rows is named by the check
   it("the check is now asked which way each seat faces against the seats around it, and says \"seat turned:\"", () => {
     const q2 = STILL_DEFECT_SYSTEM.slice(STILL_DEFECT_SYSTEM.indexOf("QUESTION 2"), STILL_DEFECT_SYSTEM.indexOf("QUESTION 3"));
     expect(q2).toMatch(/- fixed seats facing a way such seats never face/);
-    expect(q2).toMatch(/a seat turned sideways or round while its row faces forward/); // #29
+    expect(q2).toMatch(/a seat turned sideways or round while its row faces forward/); // #29 as first read
     expect(q2).toMatch(/so two rows face each other knee to knee/); // #2, 417 #8
     expect(q2).toMatch(/a body, arm or leg passing through its seat, seat back or armrest/); // 399 #2
+    // #29 as it really is: a seat back hiding part of her stands behind her, its padded side is no
+    // cushion, and a turn at the waist toward the gap is right — never a broken verdict.
+    expect(q2).toMatch(/Tell which way a seat faces by what hides what/);
+    expect(q2).toMatch(/the padded side of a seat back seen at an angle is no cushion/);
+    expect(q2).toMatch(/someone in it who turns their head and shoulders or leans toward the gap beside their seat is right/);
+    expect(q2).not.toMatch(/knees toward the camera/);
     expect(STILL_DEFECT_SYSTEM).toMatch(/starts "seat turned:" and says which one and which way/);
   });
 

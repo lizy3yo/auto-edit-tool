@@ -1,14 +1,16 @@
 /**
  * THE STILL CHECK SEES WHICH WAY A SEAT FACES (round 16, 2026-10-20, the targeted check of job 421,
  * Helena Hart's practice film on the round-15 code). Round 15's pose line in the check's broken question
- * asks about the BODY, and three faults about the FURNITURE passed it with no "broken":
- * - scene 29 ("and phrase it as an offer."): the passenger's seat back and seat turned about 90° to face
- *   the gap between the rows, her thighs at the camera, while every other row showed its back — the
- *   check said only "near copy";
+ * asks about the BODY, and faults about the FURNITURE passed it with no "broken":
  * - scene 2 ("one of them was sitting in an empty row closer to the front"): the empty row drawn
  *   front-on, cushions and seatbelts toward the camera, beside a woman whose own seat faced away — two
  *   rows knee to knee, job 417 scene 8's fault again — flagged only missing and detail;
- * - job 399 scene 2: a woman's torso drawn in front of the seat back it sat against.
+ * - job 399 scene 2: a woman's torso drawn in front of the seat back it sat against;
+ * - scene 29 ("and phrase it as an offer.") was read as the passenger's seat turned about 90° to face
+ *   the gap between the rows, her thighs at the camera. A second look found it RIGHT: her seat faces
+ *   forward, the camera behind and beside it saw the padded side of its seat back (taken for a
+ *   cushion), her seat back's headrest crossed her hair, and she turned at the waist — the framing and
+ *   pose the redraws ask for. So the line also says how to tell: what hides what.
  * The check now has a line of its own for fixed seats facing a way such seats never face, judged by
  * whether the seats around agree (a booth, a table's chairs, a train's facing pairs and a room's walls
  * of chairs are BUILT to face each other and are right), and starts such a fault "seat turned:". The
@@ -122,8 +124,19 @@ describe("round 16: the still check sees which way a seat faces (job 421 scenes 
     // How it is seen: which side of each seat the camera sees, against the seats around it.
     expect(line).toMatch(/see which side of each seat the camera sees — its back, or its cushion and the front of its seat back/);
     expect(line).toMatch(/one seat or one row facing another way from the rows beside, ahead of and behind it is turned/);
-    // The three faults: 421 #29, 421 #2 and 417 #8, 417 #2, 399 #2.
-    expect(line).toMatch(/a seat turned sideways or round while its row faces forward \(the person in it sitting with their knees toward the camera while every other seat shows its back\)/);
+    // The faults: a seat turned to the gap (what 421 #29 was first read as), 421 #2 and 417 #8, 417 #2,
+    // 399 #2.
+    expect(line).toMatch(/a seat turned sideways or round while its row faces forward; a row showing/);
+    // 421 #29, looked at again: "her thighs at the camera" was how a RIGHT picture was misread — a seat
+    // facing forward seen from behind and beside, the padded side of its seat back taken for a cushion,
+    // her turned at the waist. So the line no longer offers the knees as the sign, and says how to tell:
+    // what hides what, and a person turned at the waist in a seat facing its row's way is right.
+    expect(line).not.toMatch(/knees toward the camera/);
+    expect(line).toMatch(
+      /Tell which way a seat faces by what hides what: a seat back that hides part of the person in it \(its headrest across their hair, its side in front of their shoulder\) is behind them, so that seat faces away from the camera/
+    );
+    expect(line).toMatch(/the padded side of a seat back seen at an angle is no cushion/);
+    expect(line).toMatch(/someone in it who turns their head and shoulders or leans toward the gap beside their seat is right/);
     expect(line).toMatch(/a row showing its cushions beside or ahead of seats that show their backs, so two rows face each other knee to knee/);
     expect(line).toMatch(/a person facing their own seat back/);
     expect(line).toMatch(/a body, arm or leg passing through its seat, seat back or armrest/);
@@ -152,7 +165,9 @@ describe("round 16: the still check sees which way a seat faces (job 421 scenes 
     expect(v).toMatchObject({ broken: true, what: "seat turned: her seat sideways, its row forward" });
   });
 
-  it("421 #29: the seat turned to the gap is redrawn told how fixed seats face and how she sits, in the reroll's own turn", () => {
+  // A seat turned to the gap while its rows face forward — what 421 #29 was first read as. When the
+  // check names it, the reroll is told how seats face and how a person sits in one.
+  it("a seat turned to the gap (421 #29 as first read) is redrawn told how fixed seats face and how she sits, in the reroll's own turn", () => {
     const words = wordsOf(offer421());
     for (const what of [
       "seat turned: her seat sideways, its row forward",
@@ -261,6 +276,19 @@ describe("round 16: the still check sees which way a seat faces (job 421 scenes 
       "row of jars facing the wall",
       "crop rows running sideways",
       "head turned round toward the row behind",
+      // Things lined up IN a row are no seats.
+      "jars in a row facing the wall",
+      "bottles lined up in a neat row facing the camera",
+      // A bare "bench" is the workbench: a tool's fault on it is never told how rows of seats face.
+      "chisel resting on the bench facing the wall",
+      "plane on the bench turned the wrong way",
+      "bench facing the wall",
+      // Loose furniture the check is told may face any way the room puts it.
+      "sofa facing the wall",
+      "armchair turned toward the window",
+      // 421 #29 as the second look found it: a seat facing its row's way, the person turned at the waist.
+      "woman turned at the waist toward the aisle, her seat facing forward",
+      "passenger leaning into the aisle",
     ]) {
       for (const atWork of [true, false]) {
         const clause = namedFaultClause(what, "", atWork) ?? "";
@@ -268,6 +296,14 @@ describe("round 16: the still check sees which way a seat faces (job 421 scenes 
         expect(clause, what).not.toContain(SEATED_PERSON_FIX);
       }
     }
+    // …while a bench named as a seat, a pew and a row of seats still are seats.
+    for (const what of [
+      "pew turned round to face the others",
+      "park bench turned round to face the wall",
+      "in a row of seats facing each other",
+      "woman in the row ahead facing her",
+    ])
+      expect(namedFaultClause(what, "", false), what).toContain(SEAT_FACING_FIX);
   });
 
   it("the redraw stays inside the old budget: the named fault once, then the at-rest draw", () => {

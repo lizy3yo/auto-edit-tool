@@ -308,9 +308,9 @@ export const UNHELD_TOOL_CLAUSE =
  * a panel's froe on a bare wire hook, its handle out over nothing, broken on all three draws): told
  * how a tool nobody holds is put down (`UNHELD_TOOL_CLAUSE`, `UNHELD_POSE` in `namedFaultClause`).
  *
- * …AND SO IS A SEAT TURNED AGAINST ITS ROWS (round 16, 2026-10-20, job 421 scene 29: one seat turned
- * about 90° while every other row faced forward; scene 2: the row ahead drawn front-on, two rows knee
- * to knee; job 399 scene 2: a torso through its seat back — now named by the check): told that every
+ * …AND SO IS A SEAT TURNED AGAINST ITS ROWS (round 16, 2026-10-20, job 421 scene 2: the row ahead
+ * drawn front-on, two rows knee to knee, job 417 scene 8 again; job 399 scene 2: a torso through its
+ * seat back; a seat turned to the gap while its rows face forward — now named by the check): told that every
  * fixed seat faces the way its rows face (`SEAT_FACING_FIX`, `SEAT_TURNED`) in ANY picture, since a row
  * turned round is as wrong with nobody in it, and with someone in it how they sit in their seat
  * (`SEATED_PERSON_FIX`, `SEATED_WRONG`).
@@ -377,10 +377,10 @@ export const NATURAL_POSE_FIX =
   "twisting the body away from what it is doing.";
 /**
  * The redraw's rule for a SEAT TURNED AGAINST ITS ROWS (round 16, 2026-10-20, job 421, the round-15
- * film): scene 29's seat turned about 90° toward the gap between the rows, her knees at the camera,
- * while every other row faced forward — a side view bought by turning the seat, not the camera; scene
- * 2's row ahead drawn front-on beside a woman whose own seat faced away, two rows knee to knee (job 417
- * scene 8 again); job 399 scene 2's torso drawn through its seat back. It speaks of the furniture and
+ * film): scene 2's row ahead drawn front-on beside a woman whose own seat faced away, two rows knee to
+ * knee (job 417 scene 8 again); a seat turned sideways to the gap while its rows face forward, a side
+ * view bought by turning the seat, not the camera (what scene 29 was first read as); job 399 scene 2's
+ * torso drawn through its seat back. It speaks of the furniture and
  * the camera only, so it rides a picture with nobody in it too and never asks for a person there; a
  * picture with someone in it also takes `SEATED_PERSON_FIX`. Seats BUILT in facing pairs are kept as
  * built, so a booth the check misread is not turned into a row. It names no place and no kind of seat:
@@ -393,9 +393,10 @@ export const SEAT_FACING_FIX =
   "facing pairs are left as built. Show a seat from another side by moving the CAMERA, never by " +
   "turning the seat or the row.";
 /**
- * …and the person in such a seat (round 16): scene 29's passenger turned with her seat to face the one
- * handing her something, where a seated person turns only the head and shoulders; job 399 scene 2's
- * torso in front of the seat back it sat against. Only in a picture with someone drawn in it.
+ * …and the person in such a seat (round 16): a passenger turned WITH her seat to face the one handing
+ * her something, where a seated person turns only the head and shoulders — job 421 scene 29, looked at
+ * again, is that done right: her seat faces forward and she turns at the waist; job 399 scene 2's torso
+ * in front of the seat back it sat against. Only in a picture with someone drawn in it.
  */
 export const SEATED_PERSON_FIX =
   "Each person sits on their own seat's cushion with its back behind them, never through it, knees " +
@@ -457,10 +458,20 @@ const POSE_FAULT = new RegExp(
  * beside it, and a body or a limb through a seat, a seat back or an armrest (`SEATED_WRONG`, job 417
  * scene 2, job 399 scene 2). Never a seat's own fault with no way to face in it — "plane seat back
  * merging into the window" (job 410 scene 2) and "second tray table folded up on seatback, unattached"
- * (the render logs) keep their plain reroll — nor a workbench, a bench vise, a seat belt or a row of
- * things that are no seats ("row of jars facing the wall").
+ * (the render logs) keep their plain reroll — nor a workbench, a bench vise, a seat belt, a sofa or
+ * an armchair (loose, so the check is told it may face any way the room puts it), or things set in a
+ * row that are no seats ("row of jars facing the wall", "jars in a row facing the wall").
  */
-const FIXED_SEAT = String.raw`(?:seat[\s-]*backs?|seatbacks?|seats?(?![\s-]*belts?)|chairs?|armchairs?|recliners?|pews?|sofas?|couch(?:es)?|benches?(?!\s+(?:vi[sc]es?|hooks?|tops?|grinders?|dogs?|stops?|planes?|saws?|press(?:es)?|clamps?|power|supply))|rows?(?!\s+of\b)|rows?\s+of\s+(?:\w+\s+){0,2}(?:seats|chairs|benches|pews))`;
+/**
+ * A bench that is a SEAT, named as one. Never a bare "bench": in a workshop that is the workbench, and a
+ * tool's fault there ("chisel resting on the bench facing the wall") would have been told how rows of
+ * seats face. (The first version's `benches?` matched only "benche(s)", so its list of bench tools was
+ * never reached and "bench" was, by accident, never a seat.)
+ */
+const SEAT_BENCH = String.raw`(?:park|garden|picnic|church|station|platform)\s+bench(?:es)?`;
+/** A bare "row", never things lined up "in a row" ("jars in a row facing the wall"). */
+const SEAT_ROW = String.raw`(?<!\bin\s+(?:a\s+(?:\w+\s+)?)?)rows?(?!\s+of\b)`;
+const FIXED_SEAT = String.raw`(?:seat[\s-]*backs?|seatbacks?|seats?(?![\s-]*belts?)|chairs?|pews?|${SEAT_BENCH}|${SEAT_ROW}|rows?\s+of\s+(?:\w+\s+){0,2}(?:seats|chairs|benches|pews))`;
 /** Words between a seat and what it does — never the start of a clause about the person in it. */
 const SEAT_BETWEEN = String.raw`(?:(?!(?:with|and|while|but|her|his|their|head|body|torso|face|neck|shoulders?)\b)[\w'-]+\s+){0,2}`;
 /** How far it is turned: "about 90 degrees", "fully round", "almost sideways". */
@@ -495,7 +506,7 @@ const SEATED_WRONG = new RegExp(
     String.raw`\b(?:legs|knees|thighs|feet)\s+(?:\w+\s+){0,2}(?:across|over|along)\s+(?:the|their|his|her|its)\s+(?:own\s+)?seats?\b`,
     String.raw`\b(?:legs|knees|thighs)\s+(?:point(?:s|ing)?|facing|faces?|turned)\s+(?:\w+\s+)?(?:at|toward|towards|into|to)\s+the\s+(?:aisle|walkway|gangway|camera|wall|window)\b`,
     // A body through its seat.
-    String.raw`\b${SEAT_BODY}\s+(?:\w+\s+){0,3}(?:through|(?:merged|merging|fused)\s+(?:with|into)|inside)\s+(?:(?:the|their|his|her|a|its)\s+)?(?:own\s+)?(?:seat[\s-]*backs?|seatbacks?|seats?|armrests?|chairs?|pews?|sofas?|couch(?:es)?|benches?)\b`,
+    String.raw`\b${SEAT_BODY}\s+(?:\w+\s+){0,3}(?:through|(?:merged|merging|fused)\s+(?:with|into)|inside)\s+(?:(?:the|their|his|her|a|its)\s+)?(?:own\s+)?(?:seat[\s-]*backs?|seatbacks?|seats?|armrests?|chairs?|pews?|sofas?|couch(?:es)?|${SEAT_BENCH})\b`,
     String.raw`\b(?:seat[\s-]*backs?|seatbacks?|seats?|armrests?)\s+(?:\w+\s+)?(?:passing|running|cutting|going|growing)\s+(?:right\s+)?through\s+(?:her|him|them|(?:the|her|his|their)\s+${SEAT_BODY})\b`,
   ].join("|"),
   "i"

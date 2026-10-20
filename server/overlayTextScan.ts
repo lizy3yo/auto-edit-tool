@@ -186,23 +186,31 @@ export const STILL_DEFECT_SYSTEM =
   "one row of seats (a car, a bench, a pew, a row of fixed seats) who face the way the row faces " +
   "while they talk, and seats built to face each other (a booth, a bay of four)\n" +
   // Round 16 (2026-10-20, job 421, the round-15 film's targeted check): the line above asks about the
-  // BODY, and three faults about the FURNITURE passed it with no "broken" — scene 29's seat turned about
-  // 90° to face the gap between the rows while every other row faced forward (her thighs at the camera),
-  // scene 2's row ahead drawn front-on beside a woman whose own seat faced away (two rows knee to knee,
-  // job 417 scene 8's fault again), and job 399 scene 2's torso drawn through its seat back. Which way a
-  // seat faces shows in which side of it the camera sees, and a turned one is told from seats BUILT to
-  // face each other by the seats around it: in rows that all face one way the odd one out is wrong,
-  // while a booth, a table's chairs, a train's facing pairs or a room's walls of chairs agree with what
-  // is around them. Each seat looks right on its own, which is how all three passed as "mild
-  // strangeness". Named in words the redraw reads (`SEAT_TURNED`, `SEATED_WRONG`, `SEAT_FACING_FIX`).
+  // BODY, and faults about the FURNITURE passed it with no "broken" — scene 2's row ahead drawn front-on
+  // beside a woman whose own seat faced away (two rows knee to knee, job 417 scene 8's fault again), and
+  // job 399 scene 2's torso drawn through its seat back. Which way a seat faces shows in which side of it
+  // the camera sees, and a turned one is told from seats BUILT to face each other by the seats around
+  // it: in rows that all face one way the odd one out is wrong, while a booth, a table's chairs, a
+  // train's facing pairs or a room's walls of chairs agree with what is around them. Each seat looks
+  // right on its own, which is how they passed as "mild strangeness". WHAT HIDES WHAT settles it: scene
+  // 29 was first read as a seat turned 90° to the gap between the rows, her thighs at the camera, and a
+  // second look found its seat facing forward — the camera behind and beside it saw the padded SIDE of
+  // its seat back, taken for a cushion, and her turned at the waist toward the gap, the very framing and
+  // pose the redraws ask for (`NATURAL_POSE_FIX`, `SEATED_PERSON_FIX`); her seat back's headrest
+  // crossed her hair, so it stood between her and the camera. A broken verdict there would redraw a
+  // right picture and, on a second one, ship it with nobody in it (`faultRedrawFor`'s "at rest").
+  // Named in words the redraw reads (`SEAT_TURNED`, `SEATED_WRONG`, `SEAT_FACING_FIX`).
   "- fixed seats facing a way such seats never face. In rows of fixed seats that all face one way, " +
   "see which side of each seat the camera sees — its back, or its cushion and the front of its seat " +
   "back — and compare it with the seats around it: one seat or one row facing another way from the " +
   "rows beside, ahead of and behind it is turned. That is a seat turned sideways or round while its " +
-  "row faces forward (the person in it sitting with their knees toward the camera while every other " +
-  "seat shows its back); a row showing its cushions beside or ahead of seats that show their backs, so " +
+  "row faces forward; a row showing its cushions beside or ahead of seats that show their backs, so " +
   "two rows face each other knee to knee; a person facing their own seat back; a body, arm or leg " +
-  "passing through its seat, seat back or armrest. Seats BUILT to face each other agree with what is " +
+  "passing through its seat, seat back or armrest. Tell which way a seat faces by what hides what: a " +
+  "seat back that hides part of the person in it (its headrest across their hair, its side in front of " +
+  "their shoulder) is behind them, so that seat faces away from the camera — the padded side of a seat " +
+  "back seen at an angle is no cushion — and someone in it who turns their head and shoulders or leans " +
+  "toward the gap beside their seat is right. Seats BUILT to face each other agree with what is " +
   "around them and are right: a booth, chairs round a table, a train's pairs of facing seats, a bay of " +
   "four, chairs along the walls of a room facing its middle; so are rows that all face the camera, and " +
   "a loose chair or sofa turned any way the room puts it. A seat turned against its rows is no mild " +
