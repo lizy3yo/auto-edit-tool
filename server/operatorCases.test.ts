@@ -10316,8 +10316,10 @@ describe("round 15: the natural pose of what a person does; the camera, never th
     const { NATURAL_POSE_CLAUSE, faultRedrawFor, namedFaultRedraw, NATURAL_POSE_FIX } = await import("./longformVideo");
     const s = seats417();
     const prompt = buildStillPrompt(s);
-    // The description still says what it said; the clause beside it decides how the people sit.
-    expect(prompt).toContain("narrow aisle visible behind them");
+    // The description keeps its aisle; since round 16 the camera's place in it never reaches the
+    // picture maker (`personPlacedWords`), and the clause beside it decides how the people sit.
+    expect(prompt).toContain("narrow aisle visible.");
+    expect(prompt).not.toContain("narrow aisle visible behind them");
     expect(prompt.split(NATURAL_POSE_CLAUSE)).toHaveLength(2);
     expect(prompt.indexOf(otherPersonClause("two passengers", 2))).toBeLessThan(prompt.indexOf(NATURAL_POSE_CLAUSE));
     // It passed the check with no flag; asked now, the check names the pose and the reroll is told.
@@ -10565,5 +10567,107 @@ describe("job 421 #2: the woman sitting in the empty row is drawn by how the row
     const { lookWithoutState } = await import("./pictureMemory");
     for (const look of ["a glass-fronted cabinet, dark oak frame", "an open-top crate of rough pine slats", "a blue upholstered airline seat, reclining back, fold-down tray table, armrests on both sides"])
       expect(lookWithoutState(look, "thing")).toBe(look);
+  });
+});
+
+// ─── Round 16: the picture writers never place the room behind a person (jobs 417 and 421) ─────────
+
+/**
+ * A PERSON IS PLACED BY WHAT THEY DO, NEVER BY THE CAMERA (2026-10-20, round 16). The operator's case
+ * is job 417 scene 2 — two passengers sitting BACKWARDS in forward-facing seats — and round 15 told
+ * the picture maker the camera, never the body, keeps a face out. The practice film on that code (job
+ * 421) still drew a conversation as two backs at a counter: the WRITERS placed the camera relative to
+ * the room in the picture's own words ("narrow aisle visible behind them", "an empty seat row visible
+ * ahead", "a passenger seen from behind … speaking to a flight attendant by the counter"), and those
+ * words beat the pose clauses. The writers are told so in one wording (`PEOPLE_PLACED_RULE`) and the
+ * words are taken out right before the prompt (`personPlacedWords`). Replayed over the stored
+ * storyboards of jobs 100-421: 11 of 1,650 pictures of someone whose face the camera keeps out change
+ * (film 410 scene 3's cart "rolling down the aisle behind her" is where the cart is, and keeps it).
+ */
+describe("round 16: the room is never placed behind or ahead of a seated or working person (jobs 417 #2/#8, 421 #28)", () => {
+  const seats417 = () =>
+    pic(2, "the same flight, and sat in the same row.", "two passengers seated together in an airline seat row", {
+      visualPrompt:
+        "Two passengers seated side by side in an airline seat row, blue upholstered seats with headrests, narrow aisle visible behind them.",
+      keyThing: "seat row",
+      humanPresent: true,
+      otherPerson: "two passengers",
+      otherPeople: 2,
+      stillImage: true,
+    });
+  const glance417 = () =>
+    pic(8, "He figures she must know somebody on the crew.", "a man passenger in his seat glancing toward a woman passenger seated in an empty row up front", {
+      visualPrompt: "A passenger seated in row fourteen glancing forward toward an empty seat row visible ahead in the cabin.",
+      keyThing: "seat row",
+      humanPresent: true,
+      otherPerson: "a man passenger",
+      stillImage: true,
+    });
+  const galley421 = () =>
+    pic(28, "then catch a flight attendant as they pass, or step back to the galley,", "a passenger seen from behind standing at the galley speaking to a flight attendant by the counter", {
+      visualPrompt: "Inside an aircraft galley, a pair of bare hands seen from behind at the counter speaking with a flight attendant.",
+      keyThing: "galley",
+      listCut: true,
+      humanPresent: true,
+      otherPerson: "a passenger and a flight attendant",
+      otherPeople: 2,
+      stillImage: true,
+    });
+
+  it("417 #2 (the operator's case): the aisle stays in the picture, 'behind them' never reaches the picture maker", async () => {
+    const { NATURAL_POSE_CLAUSE, FACING_EACH_OTHER_CLAUSE } = await import("./longformVideo");
+    const prompt = buildStillPrompt(seats417());
+    expect(prompt).not.toMatch(/visible behind them/);
+    expect(prompt).toContain(
+      "Two passengers seated side by side in an airline seat row, blue upholstered seats with headrests, narrow aisle visible."
+    );
+    // Round 15's clauses still say how the camera hides the faces, now with nothing against them.
+    expect(prompt.split(NATURAL_POSE_CLAUSE)).toHaveLength(2);
+    expect(prompt).toContain(FACING_EACH_OTHER_CLAUSE);
+  });
+
+  it("417 #8: the empty row is where he glances, never 'visible ahead'", () => {
+    const prompt = buildStillPrompt(glance417());
+    expect(prompt).not.toMatch(/visible ahead/);
+    expect(prompt).toContain("A passenger seated in row fourteen glancing forward toward an empty seat row visible in the cabin.");
+  });
+
+  it("421 #28: two people talking are no longer 'seen from behind' in their own words, and the picture rules turn them to each other", async () => {
+    const { FACING_EACH_OTHER_CLAUSE } = await import("./longformVideo");
+    const prompt = buildStillPrompt(galley421());
+    expect(prompt).not.toMatch(/passenger seen from behind standing/);
+    expect(prompt).not.toMatch(/bare hands seen from behind/);
+    expect(prompt).toContain("THE PICTURE MUST SHOW: a passenger standing at the galley speaking to a flight attendant by the counter.");
+    expect(prompt).toContain("Inside an aircraft galley, a pair of bare hands at the counter speaking with a flight attendant.");
+    expect(prompt).toContain(FACING_EACH_OTHER_CLAUSE);
+    expect(prompt).toContain(otherPersonClause("a passenger and a flight attendant", 2));
+  });
+
+  it("the writers are told so — the shot list, the line check, the same-topic groups and the prompt writer", async () => {
+    const { PEOPLE_PLACED_RULE } = await import("./peoplePlaced");
+    const { SHOT_LIST_SYSTEM, FIT_SYSTEM, CONTEXT_SYSTEM } = await import("./shotList");
+    const { STILL_BROLL_ENHANCER_SYSTEM } = await import("./longformVideo");
+    for (const system of [SHOT_LIST_SYSTEM, FIT_SYSTEM, CONTEXT_SYSTEM, STILL_BROLL_ENHANCER_SYSTEM])
+      expect(system).toContain(PEOPLE_PLACED_RULE);
+    expect(FIT_SYSTEM).not.toMatch(/write them into show, seen from behind/);
+  });
+
+  it("clean pictures keep their words: 417 #7 from the aisle, a person-free aisle stretching ahead, one person walking away", async () => {
+    const { personPlacedWords } = await import("./longformVideo");
+    const cup = pic(7, "The other was still in row fourteen with a few inches of soda over ice.", "a man passenger in a seat row holding a plastic cup with a few inches of soda over ice", {
+      visualPrompt: "A passenger seated in row fourteen holding a clear plastic cup about three-quarters full with soda and ice cubes.",
+      humanPresent: true,
+      otherPerson: "a man passenger",
+      stillImage: true,
+    });
+    expect(buildStillPrompt(cup)).toContain(cup.visualPrompt!);
+    const aisle = pic(5, "By then the cabin had gone quiet.", "an empty cabin aisle, the aisle stretching ahead toward the galley", { stillImage: true });
+    expect(buildStillPrompt(aisle)).toContain("an empty cabin aisle, the aisle stretching ahead toward the galley");
+    const leaving = pic(30, "and off she went.", "a woman passenger seen from behind walking away down the aisle", {
+      humanPresent: true,
+      otherPerson: "a woman passenger",
+      stillImage: true,
+    });
+    expect(personPlacedWords(leaving, leaving.showSubject!)).toBe(leaving.showSubject);
   });
 });

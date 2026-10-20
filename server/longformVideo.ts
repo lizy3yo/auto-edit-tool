@@ -123,6 +123,7 @@ import {
   SEEN_FROM_OUTSIDE_CLAUSE,
   withoutCutaway,
 } from "./cutOpen";
+import { PEOPLE_PLACED_RULE, withoutRoomPlacement } from "./peoplePlaced";
 import { padSentenceEnds } from "./sentencePauses";
 import {
   assignScreenSetups,
@@ -6214,6 +6215,10 @@ export const STILL_BROLL_ENHANCER_SYSTEM =
   // Job 403 scene 16: "Cutaway view of the white porcelain S-shaped trapway channel behind a toilet
   // bowl" — the prompt writer kept the cutaway it was handed, and the fixture was drawn sawn open.
   `- ${NOTHING_CUT_OPEN_RULE} Never write the words cutaway, cross-section, x-ray or see-through.\n` +
+  // Job 421 scene 28 (round 16): "a passenger seen from behind standing at the galley speaking to a
+  // flight attendant" came back "a pair of bare hands seen from behind at the counter speaking with a
+  // flight attendant" — the camera kept, and two people drawn talking side by side to a wall.
+  `- ${PEOPLE_PLACED_RULE}\n` +
   "- SAY IT, SHOW IT: when a MUST SHOW line is given, the frame's hero subject is exactly that " +
   "thing, named plainly first in your prompt and framed CLOSE — taking up much of the frame, the " +
   "first thing the eye lands on, though casually framed like a real phone photo rather than dead " +
@@ -7262,6 +7267,29 @@ export function faceNeverShown(scene: StoryboardScene): boolean {
 }
 
 /**
+ * A picture of someone whose face the CAMERA keeps out (`NATURAL_POSE_CAMERA_CLAUSE`): someone else,
+ * or the host at work. Never the host's own face shown (a step or a look on it) nor a chin line framed
+ * from the lips (`hostLipsCut`): their camera faces the host, and the room behind is really behind
+ * them. Nor anonymous hands, with nothing above the forearms in the shot. Pure.
+ */
+export function placedByCamera(scene: StoryboardScene): boolean {
+  if (!scene.humanPresent || scene.hostPresent) return false;
+  return !!scene.otherPerson || (!!scene.brollHostLook && !scene.hostFaceShown && !hostLipsCut(scene));
+}
+
+/**
+ * A person picture's words with the camera's place taken out (`withoutRoomPlacement`), right before
+ * the prompt and the check that holds the frame to them: job 417 scene 2's "narrow aisle visible
+ * behind them" sat two passengers backwards in their seats, and job 421 scene 28's "a passenger seen
+ * from behind … speaking to a flight attendant" stood them side by side talking to a wall. The writers
+ * are told so (`PEOPLE_PLACED_RULE`); this holds a film described before that, a writer that slips,
+ * and a description typed into a redo. Every other picture's words come back as they were. Pure.
+ */
+export function personPlacedWords(scene: StoryboardScene, text: string): string {
+  return placedByCamera(scene) ? withoutRoomPlacement(text, peopleInShot(scene) >= 2) : text;
+}
+
+/**
  * Whether the still check asks a picture if a face shows (`OTHER_FACE_QUESTION`): a picture of
  * someone else while it still has them in it — never once it is drawn with nobody in it, never a
  * split's square panel or the picture behind the QR card (no one in either). The host's pictures are
@@ -7824,7 +7852,10 @@ export function buildStillPrompt(
   // A person whose face is never drawn is never described with one (`faceNeverShown`): job 410
   // scene 8's "smiling politely up at a flight attendant" drew the face beside the clause hiding it.
   const unfaced = (t: string) => (!aggressive && faceNeverShown(scene) ? expressionAsBody(t) : t);
-  const facing = (t: string) => (lipsCut ? facingTheCamera(unfaced(t)) : unfaced(t));
+  // …and never placed by the camera (`personPlacedWords`): job 417 scene 2's "narrow aisle visible
+  // behind them" turned two seated passengers round to face their own seat backs.
+  const placed = (t: string) => (!aggressive ? personPlacedWords(scene, t) : t);
+  const facing = (t: string) => (lipsCut ? facingTheCamera(unfaced(t)) : placed(unfaced(t)));
   // The framing clause repeats the subject's own words, so a cut view is taken out of them too (job
   // 403 scene 16: "a close shot where cutaway close-up of the white porcelain S-shaped channel").
   const shown = scene.showSubject ? facing(withoutCutaway(scene.showSubject)) : undefined;
@@ -8298,7 +8329,8 @@ export function softPrintRedraw(prompt: string): string {
  */
 function writtenPictureWords(s: StoryboardScene, visualOverride?: string) {
   const lipsCut = hostLipsCut(s);
-  const facing = (t: string) => (lipsCut ? facingTheCamera(t) : t);
+  // A person picture's words lose the camera's place here too (`personPlacedWords`), so they are found.
+  const facing = (t: string) => (lipsCut ? facingTheCamera(t) : personPlacedWords(s, t));
   const shown = s.showSubject ? facing(withoutCutaway(s.showSubject)) : undefined;
   const visual = facing(softenVisualPrompt(visualOverride ?? s.visualPrompt));
   return { head: `${visualOverride ? "" : subjectLead(shown, visual)}${visual}`, shown, stored: s.showSubject };
@@ -11663,7 +11695,8 @@ export function buildClipChain(
   const lipsCut = !scene.hostPresent && hostLipsCut(scene);
   // …and no face words for a person whose face is never drawn (`faceNeverShown`).
   const unfaced = (t: string) => (!scene.hostPresent && faceNeverShown(scene) ? expressionAsBody(t) : t);
-  const facing = (t: string) => (lipsCut ? facingTheCamera(unfaced(t)) : unfaced(t));
+  // …and no camera's place in a person picture's words (`personPlacedWords`, job 417 scene 2).
+  const facing = (t: string) => (lipsCut ? facingTheCamera(unfaced(t)) : personPlacedWords(scene, unfaced(t)));
   const clipNoFigures =
     !scene.hostPresent && scene.humanPresent && scene.otherPerson
       ? otherPeopleSuffix(peopleInShot(scene))
@@ -12369,11 +12402,15 @@ async function drawValidatedStill(
         buffer,
         // Held to what the picture maker was asked for: job 403 scene 16's "cutaway close-up of the
         // white porcelain S-shaped channel" asked QUESTION 4 for the very cut QUESTION 2 calls broken.
-        // Nor is a face its prompt never asked for (`expressionAsBody`) held against it.
+        // Nor is a face its prompt never asked for (`expressionAsBody`) held against it, nor a camera's
+        // place it never asked for (`personPlacedWords`, job 421 scene 28's "seen from behind").
         scene.showSubject
-          ? faceNeverShown(scene)
-            ? expressionAsBody(withoutCutaway(scene.showSubject))
-            : withoutCutaway(scene.showSubject)
+          ? personPlacedWords(
+              scene,
+              faceNeverShown(scene)
+                ? expressionAsBody(withoutCutaway(scene.showSubject))
+                : withoutCutaway(scene.showSubject)
+            )
           : undefined,
         scene.cta ? undefined : scene.scriptText ?? scene.narration,
         scene.pictureText,
