@@ -1802,6 +1802,201 @@ export function hostWordsAsViewer(text: string, viewer: RecurringPerson): string
   );
 }
 
+// ─── The host's own story ────────────────────────────────────────────────────────────────
+
+/**
+ * The line without what someone SAYS in it: a quoted span is a voice inside the narration — job
+ * 417 scene 20's "So when the cart reaches your row, speak up. "Could I keep the rest of the can,
+ * please?"" is the VIEWER's "I", never the host's. A quote opened in the beat before (a closing
+ * mark with no opening one) is cut from the start, one running on past the beat to the end. Pure.
+ */
+function withoutQuotedSpeech(line: string): string {
+  return line
+    .replace(/“[^“”]*(?:”|$)/g, " ")
+    .replace(/^[^“”]*”/, " ")
+    .replace(/"[^"]*(?:"|$)/g, " ");
+}
+
+/**
+ * The host saying how they see or say something — "I think", "I'll say it plain", "I'd argue", "I
+ * know" — whose doer is whatever follows, never the host by itself: job 137 scene 114's "…no, I'll
+ * say it plain, the hemmed dish towels…" is about the towels.
+ */
+const SPEECH_FRAME =
+  /\b(?:I|[Ww]e)(?:['’](?:d|ll|m))?\s+(?:(?:do|did|would|will|really|honestly|just|still|also|must|can|could|should|have\s+to)\s+)?(?:think|thought|believe|guess|suppose|reckon|mean|meant|bet|promise|swear|admit|say|said|argue|hope|wish|know|doubt|suspect|imagine|expect|tell)\b/g;
+/** "I" (capital only: never a letter in a list) or "we", in any contraction, as the one doing it. */
+const NARRATOR_I = /\bI(?:['’](?:m|ve|ll|d))?\b/;
+const NARRATOR_WE = /\b[Ww]e(?:['’](?:re|ve|ll|d))?\b/;
+/** "My hands shook", "…and my knees ached": the host's own body, at the head of a clause. */
+const NARRATOR_BODY =
+  /(?:^|[,;:.!?—–(]\s*|\b(?:and|but|so|then|when|while|until|as|till)\s+)[Mm]y\s+(?:own\s+)?(?:[a-z-]+\s+)?(?:hands?|fingers?|feet|legs?|knees?|back|arms?|shoulders?|eyes|head|neck|stomach|ears?|face)\b/;
+/** "you" in any form: a line that names the viewer is left to the viewer's rules. */
+const NAMES_YOU = /\b(?:you|your|yours|yourself|yourselves|y['’]all)\b/i;
+/** Another person by a pronoun or a no-name word — "he", "she", "they" (even of things: no guess), "someone". */
+const NAMES_THIRD =
+  /\b(?:he|she|him|her|his|hers|they|them|their|theirs|himself|herself|themselves|someone|somebody|anyone|anybody|everyone|everybody|nobody|no-one)\b|\bno one\b/i;
+/**
+ * What the host says they ARE or WERE in the line — "when I was just a passenger", "I've been a
+ * nurse", "back then, as a new driver", "I worked as a nurse" — a role that is the host's own there,
+ * never someone else. Only an "as" that opens a clause or follows a word for working counts: "I saw
+ * him as a friend" is about him.
+ */
+const NARRATOR_IS =
+  /(?:\b(?:I|[Ww]e)(?:['’](?:m|re)|\s+am|\s+are|\s+was|\s+were|['’]ve\s+been|\s+have\s+been|\s+had\s+been|\s+used\s+to\s+be|\s+became)|(?:^|[,;(—–]\s*|\b(?:worked|work|served|serve|started|began|years|days)\s+)[Aa]s)\s+(?:(?:just|only|still|once|already|never|always)\s+)?(?:an?|the|one)\s+((?:[a-z-]+\s+){0,2}[a-z-]+)/g;
+/** Relatives: in a "we" line they are the one the host is with, never the host. */
+const RELATIVES = new Set(
+  ("mother father mom mum dad mama parent grandparent grandmother grandfather grandma grandpa grandchild " +
+    "grandkid grandson granddaughter husband wife spouse son daughter sister brother sibling aunt uncle " +
+    "cousin niece nephew boyfriend girlfriend baby infant toddler child kid teen teenager girl boy").split(" ")
+);
+
+/** A line the host tells of themself: whether it is told as "we" (the host and others) rather than "I". */
+export type NarratorLine = { we: boolean };
+
+/**
+ * A line told in the FIRST PERSON about what the host did, had or was — "I", "we" or "my hands"
+ * doing it — that names NOBODY ELSE (2026-10-20, job 417 scene 19). The mirror of `storyPersonLine`
+ * (a story's "he"/"she" is never the host): "I figured that out much too late, after more flights
+ * than I care to count spent nursing a thimble of ginger ale" is the host's own past, and the shot
+ * list wrote it as "a woman passenger" — so it was drawn as someone else, with the look of the woman
+ * the film's opening story had followed. Undefined when the line names anyone else at all: "you" (the
+ * viewer's rules decide), "he", "she", "they" (even of things — "They sell for $16, and I sold every
+ * one" is the buyer's side as much as the host's), "someone", a person word ("folks who like to burn
+ * incense", "my neighbour"), or a capitalised name; when its only "I" is in what someone SAYS (a quote)
+ * or frames what follows ("I think…", "I'll say it plain…"); or when it has no "I" doing anything ("It
+ * took me twenty hours"). A role the host gives themself in the line ("when I was just a passenger")
+ * is theirs, not someone else (`NARRATOR_IS`). Pure.
+ */
+export function narratorOwnLine(line: string | undefined, hostName?: string): NarratorLine | undefined {
+  const said = withHostNamed(withoutQuotedSpeech(line ?? ""), hostName);
+  if (!said.trim()) return undefined;
+  // The role the host gives themself, up to its person word, is the host: "I was just a passenger
+  // next to a man" still names the man.
+  const rest = said.replace(NARRATOR_IS, (m: string, phrase: string) => {
+    const words = phrase.split(/\s+/);
+    const at = words.findIndex(w => {
+      const kind = PERSON_NOUN.get(w.toLowerCase())?.kind;
+      return kind === "role" || kind === "generic";
+    });
+    return at < 0 ? m : m.replace(phrase, words.slice(at + 1).join(" ") || " ");
+  });
+  if (NAMES_YOU.test(rest) || NAMES_THIRD.test(rest)) return undefined;
+  const tokens = tokensOf(rest);
+  for (let k = 0; k < tokens.length; k++) {
+    const t = tokens[k];
+    if (!isWord(t)) continue;
+    const e = PERSON_NOUN.get(bare(t));
+    // "the host", "an owner" are the host; "a delivery driver" is someone, a bare "driver" the tool.
+    if (e && e.kind !== "self" && (!COMPOUNDS[e.lemma] || (isWord(tokens[k - 1]) && COMPOUNDS[e.lemma].test(bare(tokens[k - 1]!)))))
+      return undefined;
+    // A capitalised word inside a clause is a name — of a person, or a place no rule can tell from one.
+    const opensClause = k === 0 || /^[.!?:;—–(“"]$/.test(tokens[k - 1]);
+    if (/^[A-Z]/.test(t) && !opensClause && !/^I(?:['’](?:m|ve|ll|d))?$/.test(t)) return undefined;
+  }
+  const doing = rest.replace(SPEECH_FRAME, " ");
+  if (NARRATOR_I.test(doing) || NARRATOR_BODY.test(doing)) return { we: false };
+  if (NARRATOR_WE.test(doing)) return { we: true };
+  return undefined;
+}
+
+/** A word before "of" that frames the person who leads a description ("a close view of a passenger …"). */
+const FRAMING_OF = /^\W*(?:(?:an?|the)\s+)?(?:[a-z-]+\s+){0,3}?(?:view|shot|close-?up|closeup|glimpse|silhouette|angle)\s+of\s+$/i;
+
+/** Where a person noun's phrase sits in a description, by character offset. */
+type PersonSpan = { start: number; end: number; lead: boolean };
+
+/**
+ * Every place a description names the person `noun` ("passenger"): the noun phrase with its
+ * determiner and describing words ("a woman passenger", "an older passenger's"), and whether it
+ * LEADS the description — opens it, or opens it after a framing "a close view of" — so the person is
+ * the one doing what it shows, never someone it is done with or to ("hands exchanging a bag WITH a
+ * buyer", job 147 scene 326). Pure.
+ */
+function personSpans(text: string, noun: string): PersonSpan[] {
+  const last = noun.split(" ").pop() ?? noun;
+  const toks = Array.from(text.matchAll(/[A-Za-z]+(?:[-'’][A-Za-z]+)*(?:['’]s?)?|[^\sA-Za-z]/g));
+  const spans: PersonSpan[] = [];
+  for (let h = 0; h < toks.length; h++) {
+    if (!isWord(toks[h][0]) || PERSON_NOUN.get(bare(toks[h][0]))?.lemma !== last) continue;
+    let start = h;
+    for (let mods = 0; start > 0; ) {
+      const prev = toks[start - 1][0];
+      if (!isWord(prev)) break;
+      const p = prev.toLowerCase();
+      if (DETERMINERS.has(p) || NUMBERS.has(p)) {
+        start--;
+        break;
+      }
+      const personWord = PERSON_NOUN.has(p) || FEMALE.has(p) || MALE.has(p);
+      if (!personWord && (mods >= 2 || FOLLOW.has(p) || p === "of" || p === "or" || /ing$/.test(p) || /['’]s?$/.test(prev) || NOT_A_MODIFIER.test(p) || p.length < 2)) break;
+      start--;
+      if (!personWord) mods++;
+    }
+    const from = toks[start].index ?? 0;
+    const to = (toks[h].index ?? 0) + toks[h][0].length;
+    const before = text.slice(0, from);
+    spans.push({ start: from, end: to, lead: !before.trim() || FRAMING_OF.test(before) });
+  }
+  return spans;
+}
+
+/**
+ * The words naming the person `noun` turned into "the host" ("A woman passenger holding a small
+ * plastic cup" → "The host holding a small plastic cup"; "a passenger's hands" → "the host's
+ * hands"), so every later reader of the picture — its prompt, the check that holds the frame to its
+ * words, `showsSomeoneElse` — sees the host. Pure.
+ */
+export function personAsHost(text: string, noun: string): string {
+  let out = text;
+  for (const span of personSpans(text, noun).reverse()) {
+    const own = /['’]s?$/.test(text.slice(span.start, span.end)) ? "'s" : "";
+    const word = span.start === 0 && /^[A-Z]/.test(text) ? "The host" : "the host";
+    out = `${out.slice(0, span.start)}${word}${own}${out.slice(span.end)}`;
+  }
+  return out;
+}
+
+/**
+ * Whether a picture's ONE someone-else is the HOST telling their own story (2026-10-20, job 417
+ * scene 19, `narratorOwnLine`): the sentence it is part of is the host's "I" (or "my hands") doing
+ * it, naming nobody else, and the picture names one person who LEADS its description ("woman
+ * passenger holding small plastic cup with little ginger ale") or none (only the planner did, over
+ * "hands holding a cup"). That person is the host — drawn from the host's look and photo, from
+ * behind or the side — never a role's stranger, and never a recurring person who shares the role:
+ * the story's savvy woman passenger, who got the whole can, was drawn nursing the host's thimble of
+ * ginger ale a minute later. Left as it was: a picture of two or more people, one with the host among
+ * them, a person the words do it WITH or TO ("…with a buyer"), a name ("Seneca"), a description that
+ * names someone other than the planner's person, a person the line itself names. On a "we" line also
+ * a relative and a person of the other sex: they are the one the host is with. Replayed over the 355
+ * local storyboards (24,056 pictures): this one picture changes. Pure.
+ */
+export function narratorPictured(
+  scenes: StoryboardScene[],
+  i: number,
+  cast: PictureCast | undefined,
+  opts: { look?: string; hostName?: string } = {}
+): { noun?: string } | undefined {
+  const s = scenes[i];
+  if (!s || !cast || cast.host || cast.count !== 1) return undefined;
+  const line = narratorOwnLine(sentenceAround(scenes, i), opts.hostName);
+  if (!line) return undefined;
+  const text = withHostNamed(s.showSubject ?? s.visualPrompt ?? "", opts.hostName);
+  const desc = namedPeople(text);
+  const planner = s.otherPerson ? namedPeople(s.otherPerson) : undefined;
+  // A planner's someone with no person word is a name ("Seneca", "Grandpa Joe"): someone, by name.
+  if (s.otherPerson && (!planner || planner.people.length !== 1 || planner.count !== 1)) return undefined;
+  const one = desc ?? planner;
+  if (!one || one.people.length !== 1 || one.count !== 1 || one.people[0].kind === "self") return undefined;
+  const person = one.people[0];
+  if (desc && planner && planner.people[0].noun !== person.noun) return undefined;
+  if (desc && !personSpans(text, person.noun).some(p => p.lead)) return undefined;
+  if (line.we) {
+    const hostSex = sexOfLook(opts.look);
+    if (RELATIVES.has(person.noun) || (hostSex && person.sex && person.sex !== hostSex)) return undefined;
+  }
+  return { noun: desc ? person.noun : undefined };
+}
+
 /**
  * Mark the pictures that show someone doing the work as the HOST (see the file comment), and the
  * ones that show SOMEONE ELSE as that person (`otherPerson`, `otherPeople`) — never the host photo.
@@ -1880,10 +2075,23 @@ export function markHostBroll(
     // SOMEONE ELSE in the picture: named by the planner, or by the picture's own words — a role, a
     // sex the host does not have, two or more people (`someoneElse`) — with EVERYONE the words name
     // in it, and the host among them when one is (`castOfPicture`, job 399 scenes 8 and 14).
-    const other =
+    let other =
       eligible && person
         ? castOfPicture(text, s.otherPerson, { look, hostName: params.hostName, selfRoles, hostLed: on })
         : undefined;
+    // …unless the line is the host telling their own story ("I … spent nursing a thimble of ginger
+    // ale", job 417 scene 19): that one person is the host, and the words now say so
+    // (`narratorPictured`).
+    const narrator = on ? narratorPictured(scenes, i, other, { look, hostName: params.hostName }) : undefined;
+    if (narrator) {
+      if (narrator.noun) {
+        if (s.showSubject) s.showSubject = personAsHost(s.showSubject, narrator.noun);
+        if (s.visualPrompt) s.visualPrompt = personAsHost(s.visualPrompt, narrator.noun);
+      }
+      s.otherPerson = undefined;
+      s.otherPeople = undefined;
+      other = undefined;
+    }
     if (other) {
       // A line about SOMEONE ELSE (a customer, a neighbour): that person is drawn, from behind,
       // without the host's look or photo — Dale's "a buyer three states away, hunting for a board

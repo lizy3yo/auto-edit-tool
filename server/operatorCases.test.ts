@@ -9604,3 +9604,59 @@ describe("round 14: a graphic is read from when its words show, and sits clear o
     expect(choose("MythStamp", { w: 534, h: 254 }, ["robins"])).toBe("top right → top right");
   });
 });
+
+describe("round 15: the host's own 'I' is the host (job 417 scene 19)", () => {
+  // The host telling her own past was drawn as "a woman passenger" — with the look of the story's
+  // woman who got the whole can, so the story's winner was shown nursing the small drink.
+  const HELENA =
+    "A slender woman in her forties with fair skin and brown hair pinned back, wearing a white blouse, navy striped neck scarf, and a navy blazer with a gold pin";
+  const STORY_WOMAN = {
+    name: "woman passenger",
+    look: "an older woman, slender build, grey hair in a bob, wearing a beige cardigan and floral blouse",
+  };
+  const ginger = () =>
+    ({
+      index: 19,
+      narration: "n",
+      scriptText: "I figured that out much too late, after more flights than I care to count spent nursing a thimble of ginger ale.",
+      showSubject: "woman passenger holding small plastic cup with little ginger ale",
+      visualPrompt: "A woman passenger holding a small plastic cup with a little ginger ale, seated in an airline seat.",
+      otherPerson: "a woman passenger",
+      humanPresent: true,
+    }) as StoryboardScene;
+
+  it("417 (1:13): 'I … spent nursing a thimble of ginger ale' is the host from her photo, not the story's woman", () => {
+    const scenes = [ginger()];
+    markHostBroll(scenes, { hostLook: HELENA, hostName: "Helena Hart", recurringPeople: [STORY_WOMAN] }, "https://x/host.png");
+    expect(scenes[0].otherPerson).toBeUndefined();
+    expect(scenes[0].otherPersonLooks).toBeUndefined();
+    expect(scenes[0].brollHostRef).toBe("https://x/host.png");
+    expect(scenes[0].showSubject).toBe("the host holding small plastic cup with little ginger ale");
+    const prompt = buildStillPrompt(scenes[0]);
+    expect(prompt).toContain("navy blazer with a gold pin");
+    expect(prompt).not.toContain("beige cardigan");
+  });
+
+  it("the story's own 'he'/'she', and a line where the host sells to someone, keep their someone else", () => {
+    const story = {
+      ...ginger(),
+      index: 8,
+      scriptText: "He figures she must know somebody on the crew.",
+      showSubject: "a woman passenger seated by the window",
+      visualPrompt: "a woman passenger seated by the window",
+    } as StoryboardScene;
+    const sold = {
+      ...ginger(),
+      index: 326,
+      scriptText: "and I sold every last one I brought to the roadside table",
+      showSubject: "hands exchanging a feed sack tote bag with a buyer at the market table",
+      visualPrompt: "hands exchanging a feed sack tote bag with a buyer at the market table",
+      otherPerson: "a buyer",
+    } as StoryboardScene;
+    markHostBroll([story], { hostLook: HELENA, hostName: "Helena Hart", recurringPeople: [STORY_WOMAN] }, "https://x/host.png");
+    markHostBroll([sold], { hostLook: HELENA }, "https://x/host.png");
+    expect(story.otherPerson).toBe("a woman passenger");
+    expect(story.otherPersonLooks).toEqual([STORY_WOMAN]);
+    expect(sold.otherPerson).toBe("a buyer");
+  });
+});
