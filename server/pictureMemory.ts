@@ -706,7 +706,10 @@ export function requiredThingsFor(s: StoryboardScene): string[] {
   // Never one its own words say is NOT there: job 416 scene 2, "empty backyard lawn …, no robins
   // visible", was held to the robin and its first check said "missing".
   const others = (s.otherKeyThings ?? []).filter(t => !saysAbsent(pictureWords(s), t));
-  return [own && beforeFinished(s) ? `${own} ${UNFINISHED_THING}` : own, ...others].filter(
+  // Asked for by what it is, never by a state it was named for (`stateFreeName`): job 421 scene 2's
+  // woman sitting in the "empty row" was asked whether the EMPTY row was in the frame.
+  const ask = stateFreeName(own);
+  return [ask && beforeFinished(s) ? `${ask} ${UNFINISHED_THING}` : ask, ...others.map(t => stateFreeName(t))].filter(
     (t): t is string => !!t
   );
 }
@@ -1014,7 +1017,8 @@ export function keyThingLookFor(
     : makes && thing.main && s.buildStage !== "done"
       ? "noStage"
       : "full";
-  return pictureLook(thing.look, mode) || undefined;
+  // Never a state it was in when the props list was written (`lookWithoutState`, job 421 scene 2).
+  return pictureLook(lookWithoutState(thing.look, thing.name), mode) || undefined;
 }
 
 /**
@@ -1040,7 +1044,7 @@ export function otherThingLookFor(
         : s.buildStage !== "done"
           ? "noStage"
           : "full";
-  return pictureLook(thing.look, mode) || undefined;
+  return pictureLook(lookWithoutState(thing.look, thing.name), mode) || undefined;
 }
 
 /**
@@ -1088,7 +1092,8 @@ export function otherThingLooksClause(scene: StoryboardScene): string {
   const placed = new Set((scene.placeLooks ?? []).map(p => p.name));
   const named = (scene.otherThingLooks ?? []).filter(t => !namedKindIs(scene, t.name) && !placed.has(t.name));
   if (!named.length) return "";
-  const list = named.map(t => `the ${t.name}: ${t.look}`).join("; ");
+  // Called by what it is, never a state it was named for (`stateFreeName`).
+  const list = named.map(t => `the ${stateFreeName(t.name)}: ${t.look}`).join("; ");
   return named.length > 1
     ? ` HOW THE OTHER THINGS IN IT LOOK in every picture of this video — ${list}. Draw those same ones, where this picture's own words put them.`
     : ` HOW THE OTHER THING IN IT LOOKS in every picture of this video — ${list}. Draw that same one, where this picture's own words put it.`;
@@ -1138,13 +1143,19 @@ export function anotherOfItsKindClause(scene: StoryboardScene): string {
     .join("");
 }
 
-/** The line for its OWN key thing's look (`keyThingLook`), as it always was. */
+/**
+ * The line for its OWN key thing's look (`keyThingLook`), as it always was — the thing called by what
+ * it is (`stateFreeName`): job 421 scene 2's woman sitting in the "empty row" was told "HOW THE EMPTY
+ * ROW LOOKS …, no passengers seated". The look itself is cut where it is made (`keyThingLookFor`, run
+ * again before every render), and printed as it is stored: a staged redraw finds it there to swap.
+ */
 function ownThingLookClause(scene: StoryboardScene): string {
   if (scene.namedLook || !scene.keyThingLook || !scene.keyThing) return "";
+  const name = stateFreeName(scene.keyThing).toUpperCase();
   const own = " — where it is, which part of it shows and how far along it is are as this picture's own words say.";
   return beforeFinished(scene)
-    ? ` THE ${scene.keyThing.toUpperCase()}'S COLOURS AND MATERIALS, the same in every picture of this video: ${scene.keyThingLook}${own}`
-    : ` HOW THE ${scene.keyThing.toUpperCase()} LOOKS in every picture of this video: ${scene.keyThingLook}. Draw this same one${own}`;
+    ? ` THE ${name}'S COLOURS AND MATERIALS, the same in every picture of this video: ${scene.keyThingLook}${own}`
+    : ` HOW THE ${name} LOOKS in every picture of this video: ${scene.keyThingLook}. Draw this same one${own}`;
 }
 
 /**
@@ -2206,9 +2217,12 @@ export function isLightName(name: string | undefined): boolean {
 /**
  * The props list as the shot list, the line check and the prompt writer read it: every line's look
  * without its light, weather or hour (`lookWithoutLight`) — the home setting's too (job 411's
- * "backyard: …, late fall to winter light", read beside a line about spring). A line whose thing IS
- * the weather or the light ("snow: a thin even layer of white snow …") keeps its look, and so do the
- * people's lines. Unchanged when there is nothing to take out. Pure.
+ * "backyard: …, late fall to winter light", read beside a line about spring) — and, since round 16,
+ * without a passing state (`lookWithoutState`: job 421's "empty row: …, tray tables stowed, no
+ * passengers seated" under a woman sitting in it). The list is stored through it too, so the key
+ * things read off it are cut the same way. A line whose thing IS the weather or the light ("snow: a
+ * thin even layer of white snow …") keeps its look, and so do the people's lines. Unchanged when there
+ * is nothing to take out. Pure.
  */
 export function sheetWithoutLight(sheet: string | undefined): string {
   if (!sheet?.trim()) return sheet ?? "";
@@ -2217,13 +2231,331 @@ export function sheetWithoutLight(sheet: string | undefined): string {
     .map(line => {
       const at = line.indexOf(":");
       if (at < 0 || isPersonLine(line) || isViewerLine(line)) return line;
-      const name = labelName(line.slice(0, at).replace(/^[-*•\d.)\s]+/, ""));
+      const label = line.slice(0, at).replace(/^[-*•\d.)\s]+/, "");
+      const name = labelName(label);
       if (isWeatherName(name) || isLightName(name)) return line;
       const look = line.slice(at + 1).trim();
-      const cut = lookWithoutLight(look);
-      return cut === look ? line : `${line.slice(0, at + 1)} ${cut}`;
+      // The whole name, "of …" and all: what a "coffee can of scraps" holds is what it is.
+      const cut = lookWithoutState(lookWithoutLight(look), label.replace(/^(?:MAIN|HOME)\b[\s:-]*/i, ""));
+      return cut === look ? line : `${line.slice(0, at + 1)}${cut ? ` ${cut}` : ""}`;
     })
     .join("\n");
+}
+
+/*
+ * A WRITTEN LOOK CARRIES NO PASSING STATE (round 16; the practice film 421 scene 2, job 417 scene 17).
+ * Under "one of them was sitting in an empty row closer to the front" the shot list asked for a woman
+ * sitting alone in a set of three seats, and the picture was sent the row's look from the props list —
+ * "a set of three blue upholstered airline seats near the front of the cabin, tray tables stowed, no
+ * passengers seated" — as HOW THE EMPTY ROW LOOKS in every picture, and was held to that look by the
+ * check: the frame drew the empty row front-on beside her, two rows facing each other, was flagged
+ * missing twice and shipped. Job 417's cup was written "filled partway with ice cubes", and the picture
+ * of the soda being poured into it, then job 421's of a drink handed over, both drew a cup of ice. The
+ * props list writes a thing as it was when the script first named it, and the look goes to every
+ * picture of it. So a look says how the thing is BUILT, never a state it is in for a moment: empty or
+ * full, who sits in it, what it holds, open or shut, lit or burning, clean or dirty, wet or dry, stowed
+ * or set out — nor that anything is NOT there. Each picture's own words say those. Cut wherever a look
+ * reaches a prompt or the check: the props list as the writers read it and as it is stored
+ * (`sheetWithoutLight`), and every look a picture is drawn by and checked against (`keyThingLookFor`,
+ * `otherThingLookFor`, `placeLooksFor` — run again before every render, so a storyboard stored before
+ * is cut too). A thing NAMED for a state keeps its name — pictures are filed and matched by it — but
+ * is called by what it is in the prompt and the check (`stateFreeName`: "empty row" → "row"). What
+ * stays is how the thing is built: an open-top crate, open shelves, a glass-fronted cabinet, a
+ * fold-down tray table, a reclining back, a wooden crate open at the top, a sealed alarm with no
+ * battery door (a missing PART is how it is made), a lit screen (round 14 keeps a thing's own light);
+ * what a thing holds when its NAME says so ("coffee can of scraps", "fabric scrap bin", "water
+ * bottle": there the contents are what it is); and what a PLACE holds ("a narrow aisle lined with low
+ * wooden shelves holding neat rows of greeting cards", job 409): that is how it is furnished — though
+ * who is in it, and whether its doors are open, are each picture's own.
+ */
+/** Who sits, stands or rides in something: said to be absent, a moment of the story ("no passengers seated"). */
+const OCCUPANTS =
+  "passengers?|people|persons?|one|body|anyone|anybody|someone|customers?|guests?|shoppers?|diners?|riders?|" +
+  "occupants?|visitors?|patients?|students?|children|kids?|travell?ers?|crowds?|figures?|humans?|staff|" +
+  "workers?|spectators?|patrons?|residents?|tenants?|pets?|animals?|cars?|vehicles?|traffic|boats?";
+/**
+ * What a container holds or a surface carries, said to be absent ("nothing in it", "no dishes"). Never
+ * clutter or debris: a tidy frame is the frame rule's (`CLEAN_FRAME_RULE`) and the props call is told
+ * "always tidy" — "clear of clutter" is how every picture is drawn, not one moment of the story.
+ */
+const HELD_THINGS =
+  "contents|items?|things|objects?|food|drinks?|liquids?|water|ice|cargo|luggage|bags?|load|papers?|dishes";
+/**
+ * A clause saying something is NOT there: "no passengers seated", "with nobody in it", "empty of
+ * people". Never a part the thing is made without ("no visible battery door", "no lid"): that is how it
+ * is built.
+ */
+const ABSENCE = new RegExp(
+  `^(?:(?:and|with|but)\\s+)?(?:(?:no|without(?:\\s+any)?)\\s+(?:[a-z'-]+\\s+){0,2}?(?:${OCCUPANTS}|${HELD_THINGS})(?![\\w-])|` +
+    `(?:nobody|no-one|nothing)\\b|(?:empty|bare|devoid)\\s+of\\b|(?:clear|free)\\s+of\\s+(?:[a-z'-]+\\s+)?(?:${OCCUPANTS}|${HELD_THINGS})(?![\\w-]))`,
+  "i"
+);
+/** Opening, closing at an end or a side is how a thing is built ("open at the top", "closed at one end"). */
+const BUILT_OPEN = "(?!\\s+(?:on|at|to)\\s+(?:the\\s+|one\\s+|both\\s+|its\\s+|all\\s+)?(?:tops?|fronts?|sides?|ends?|backs?|bottoms?|sky|air)\\b)";
+/** A state said of the thing itself: "empty", "closed tight", "clean and dry", "unopened or partly poured". */
+const STATE =
+  "empty|emptied|unoccupied|vacant|occupied|deserted|half[- ]full|half[- ]empty|" +
+  `(?:open|opened|closed|shut)${BUILT_OPEN}|ajar|unopened|unlit|` +
+  "(?:switched|turned|powered)\\s+(?:on|off)|clean|cleaned|spotless|streak-free|dirty|grimy|unwashed|wet|damp|" +
+  "soaked|soaking|dripping|dry|stowed|put\\s+away|packed\\s+away|tucked\\s+away|stored\\s+away|" +
+  "folded\\s+(?:away|up|down|flat|shut)|set\\s+out|laid\\s+out|" +
+  "(?:partly|partially|half|halfway)[\\s-](?:poured|drunk|eaten|used|filled|emptied|melted|opened|closed|unpacked|unwrapped|drained)|" +
+  "burning|smouldering|smoldering|smoking|steaming|boiling|simmering|bubbling|melting|flickering|extinguished|" +
+  "(?:wiped|swept|scrubbed|rinsed|washed)\\s+clean|freshly\\s+(?:cleaned|washed|wiped|swept)";
+/** Words a state is said after: "sitting open", "most often shown closed", "when open", "kept spotless". */
+const STATE_LEAD =
+  "and|or|but|then|later|often|usually|mostly|most|always|still|now|sometimes|when|while|once|just|left|kept|" +
+  "sitting|sits|standing|stands|lying|lies|resting|rests|held|propped|hanging|swung|pulled|pushed|shown|seen|" +
+  "wide|[a-z]+ly";
+/**
+ * What may follow a state: where or when — never the noun it describes, so "open shelves", "clean
+ * joinery", "dry-brushed" and "a smoking jacket" are no state. A joining word ("and", "or") is
+ * followed by another state or where it sits (`STATE_MORE`, read in `stateOnly`): "clean and dry",
+ * "folded flat and leaning against a wall" — never by a look, so "clean and simple" and "open and airy"
+ * stay.
+ */
+const STATE_AFTER =
+  "except|when|while|until|with|on|in|at|near|beside|beneath|below|under|against|by|to|for|from|after|" +
+  "before|within|inside|over|across|most|throughout|all|slowly|gently|softly|steadily|away";
+// A word that only finishes the state ("closed tight", "open wide") is followed by the same as a state:
+// "open wide panel door" (job 195's doorway) is a door, never a state to cut.
+const STATE_END = `(?:\\s+(?:tight|tightly|shut|wide|now|again))?(?:\\s*$|\\s+(?:and|or|then|but)\\s+(?<more>.*)$|\\s+(?:${STATE_AFTER})\\b)`;
+const STATE_CLAUSE = new RegExp(`^(?:(?:${STATE_LEAD})\\s+)*(?:${STATE})${STATE_END}`, "i");
+/** What a joining word after a state may lead to besides another state: where the thing sits, or when. */
+const STATE_MORE = new RegExp(`^(?:(?:usually|often|always|then|later|now)\\s+)*(?:${STORING}|leaning|when|while|until|except)\\b`, "i");
+/** A part that opens, folds, stows or fastens: "tray tables stowed", "jaws slightly open", "seat belts fastened". */
+const MOVING_PARTS =
+  "jaws?|lids?|doors?|flaps?|covers?|caps?|zippers?|zips?|drawers?|hatch(?:es)?|gates?|windows?|blinds|" +
+  "shades?|curtains|shutters|tray\\s+tables?|trays?|compartments?|mouths?|beaks?|eyes|pages?|seat\\s*backs?|" +
+  "backs?|armrests?|footrests?|leaves|valves?|taps?|bins?|lockers?|hoods?|trunks?|tailgates?|latch(?:es)?|" +
+  "clasps?|buckles?|seat\\s*belts?|belts?|straps?|screens?|legs?|wheels?|brakes?|lamps?|lights?|tvs?|" +
+  "televisions?|monitors?";
+const PART_STATE_WORDS =
+  "open|opened|closed|shut|ajar|stowed|folded(?:\\s+(?:up|down|away|flat|in))?|unfolded|raised|lowered|up|" +
+  "down|extended|retracted|drawn|unzipped|zipped(?:\\s+(?:shut|closed|up))?|unlatched|unlocked|locked|" +
+  "reclined|upright|fastened|unfastened|buckled|unbuckled|off|dark|removed|lifted";
+// Describing words come between a determiner and the part ("both front doors locked", "a single
+// nightstand lamp off"), never a noun of the thing's own: "near the front with tray tables stowed" is
+// cut at "with", not at "front".
+const PART_STATE = new RegExp(
+  `^(?:(?:and|with)\\s+)?(?:(?:its|the|his|her|their|both|all|two|four|a|an)\\s+` +
+    `(?:(?!(?:with|near|at|in|on|by|of|and|beside|under)\\b)[a-z'-]+\\s+){0,2})?(?:${MOVING_PARTS})\\s+` +
+    `(?:(?:often|usually|always|still|sometimes|mostly|wide|all|half|[a-z]+ly)\\s+)?(?:${PART_STATE_WORDS})` +
+    STATE_END,
+  "i"
+);
+/** Water on it for a moment: "condensation on the metal", "beaded with moisture". */
+const WET_SURFACE =
+  /^(?:(?:and|with|some|light|a\s+film\s+of|a\s+few|beads?\s+of|drops?\s+of)\s+)*(?:condensation|(?:water\s+)?droplets|moisture)(?![\w-])|^(?:beaded|misted|fogged)\s+(?:with|over|up)\b/i;
+/**
+ * What it holds: "filled partway with ice cubes", "stocked with cans and cups", "holding small foil
+ * bags". `held` is what is held, for `namesItsContents`. Never "carrying": "a short carrying handle",
+ * "as if carrying outside air" (jobs 410, 373).
+ */
+const CONTENTS = new RegExp(
+  "^(?:(?:and|its|half|partly|partially|partway|halfway|nearly|almost|mostly|completely|always|usually|often|kept|well)\\s+)*" +
+    "(?:(?:half-)?(?:filled|full|packed|stuffed|stocked|loaded|crammed|brimming|heaped|piled)" +
+    "(?:\\s+(?:partway|halfway|about|roughly|nearly|almost|just|neatly|tightly|high|up|full|right|to\\s+the\\s+brim))*" +
+    "\\s+(?:with|of)|holding|holds|containing|contains)\\s+(?<held>.+)$",
+  "i"
+);
+/** Things that open and shut, after which "open" or "closed" is a state ("an open laptop", "a closed folder"). */
+const OPENS =
+  "doors?|gates?|lids?|box(?:es)?|toolbox(?:es)?|lunchbox(?:es)?|mailbox(?:es)?|tins?|cans?|jars?|bottles?|" +
+  "cartons?|packets?|packages?|parcels?|envelopes?|laptops?|books?|notebooks?|binders?|folders?|drawers?|" +
+  "windows?|suitcases?|briefcases?|bags?|purses?|wallets?|hatch(?:es)?|compartments?|flaps?|umbrellas?|" +
+  "mouths?|beaks?|trunks?|fridges?|refrigerators?|ovens?|dishwashers?|lockers?|chests?|tents?|valves?|taps?|" +
+  "faucets?|zippers?|jaws|blinds|curtains|shutters|stepladders?|ladders?";
+/** Things that burn, after which "lit" is a state ("a lit candle"); a lit screen is the thing's own light. */
+const BURNS =
+  "candles?|wicks?|match(?:es)?|incense|cigarettes?|cigars?|lanterns?|lamps?|fires?|fireplaces?|stoves?|" +
+  "burners?|torch(?:es)?|grills?|charcoal|tea\\s*lights?|tealights?|sparklers?|logs?|coals?|embers?";
+/**
+ * A state said as a describing word before its noun: "an empty row", "an unopened can", "a damp cloth",
+ * "a small sealed foil-lined bag" (job 417's snack bags, opened in the pictures that hand them out).
+ * Never one that is part of what the thing is: an empty or vacant lot, a wet bar, saw, suit or wipe, a
+ * dirty-blonde or dirty-white colour, "open shelves", "a lit screen", "a sealed 10-year alarm unit".
+ */
+const NOT_STATE_NEXT = "lots?|plots?|land|bars?|saws?|suits?|wipes?|rooms?|vac|vacuum|erase|cells?|sanding|paper|look|stone|mop|nurse|sand|of|and|or|but|in|on|at|with";
+const STATE_WORD = new RegExp(
+  "\\b(?:(?:empty|emptied|unoccupied|vacant|occupied|deserted|half-full|half-empty|unopened|unlit|stowed|" +
+    "unwashed|spotless|wet|damp|soaked|soggy|dripping|steaming|smouldering|smoldering)" +
+    `(?=\\s+(?!(?:${NOT_STATE_NEXT})\\b)[a-z])` +
+    `|(?:dirty|grimy)(?=\\s+(?!(?:${NOT_STATE_NEXT}|blonde?|white|yellow|gr[ae]y|brown|pink|beige)\\b)[a-z])` +
+    `|(?:open|opened|closed|shut|sealed|unsealed)(?=\\s+(?:[a-z-]+\\s+)?(?:${OPENS})\\b)|lit(?=\\s+(?:[a-z-]+\\s+)?(?:${BURNS})\\b))`,
+  "gi"
+);
+/**
+ * How full it is, when what it holds stays because its name says so: a "soda cup … filled about
+ * halfway with soda" (job 410) is a cup of soda, never half of one in every picture.
+ */
+const HOW_FULL =
+  /\b(?:(?:about|roughly|nearly|almost|just)\s+)?(?:partway|halfway|half|partly|partially)[\s-](?=(?:filled|packed|stuffed|stocked|loaded)\b)|(?<=\b(?:filled|full|packed|stuffed|stocked|loaded))\s+(?:(?:about|roughly|nearly|almost|just)\s+)?(?:partway|halfway|to\s+the\s+brim)(?=\s+(?:with|of)\b)/gi;
+/** What a state cut leaves dangling: "a box with (its lid open)", "the shelves sit (empty)". */
+const STATE_DANGLING =
+  /(?:\s+(?:and|or|but|with|its|the|that|which|when|while|is|are|was|were|be|being|stays?|remains?|sits?|stands?|lies|rests?|left|kept|usually|often|always|still|mostly|most|shown|seen|looks?|appears?))+$/i;
+/** For a NAME only: "full" before its noun is a state too ("full basket"), never a full set or full-size. */
+const FULL_WORD = /\bfull(?=\s+(?!(?:sets?|size|length|grain|body|moon|house|bloom|sun|swing|scale|time|range|of)\b)[a-z])/gi;
+
+/** Whether two words are one, singular or plural ("battery" / "batteries", "scrap" / "scraps"). */
+function sameStem(a: string, b: string): boolean {
+  const one = (w: string) => w.replace(/ies$/, "y").replace(/(?:ches|shes|sses|xes)$/, m => m.slice(0, -2)).replace(/s$/, "");
+  return a === b || one(a) === one(b);
+}
+
+/**
+ * Whether a key thing's NAME says what it holds: "of" in the name ("coffee can of burnt scraps",
+ * "basket of coasters"), or a word of the name before its last naming what is held ("fabric scrap bin"
+ * holding fabric scraps, "water bottle" filled with water, "battery bag" holding batteries). A "plastic
+ * cup" names no ice and a "snack basket" no pretzel bags: what they hold changes from picture to
+ * picture. Pure.
+ */
+function namesItsContents(name: string | undefined, held: string): boolean {
+  const n = (name ?? "").toLowerCase().replace(/\([^)]*\)/g, " ");
+  if (/\bof\s+[a-z]/.test(n)) return true;
+  const words = n.match(/[a-z]{3,}/g) ?? [];
+  const before = words.slice(0, -1).filter(w => !NOT_A_NAME_WORD.has(w) && w !== "main");
+  const heldWords = held.toLowerCase().match(/[a-z]{3,}/g) ?? [];
+  return before.some(w => heldWords.some(h => sameStem(w, h)));
+}
+
+/** Whether `rest` — a clause, or its last words — only says a passing state (see above). */
+function stateOnly(rest: string, name: string | undefined): boolean {
+  if (ABSENCE.test(rest) || WET_SURFACE.test(rest)) return true;
+  for (const re of [STATE_CLAUSE, PART_STATE]) {
+    const m = re.exec(rest);
+    if (!m) continue;
+    // "clean and dry", "unopened or partly poured", "folded flat and leaning…": the joined words are a
+    // state or where it sits as well; "clean and simple" is a look.
+    const more = m.groups?.more;
+    if (more === undefined || stateOnly(more, name) || STATE_MORE.test(more)) return true;
+  }
+  const held = CONTENTS.exec(rest)?.groups?.held;
+  return !!held && holdsForAMoment(name, held);
+}
+
+/**
+ * Something a thing is put in or on, whose contents come and go: a cup, a can, a basket, a cart, a
+ * table, a shelf. A door "filled with a fine crisscross lattice" (job 188's shoji door), a pillow
+ * filled with down or a lamp's base full of oil are how those are made.
+ */
+const HOLDS_THINGS =
+  /\b(?:cups?|glass(?:es)?|mugs?|tumblers?|cans?|tins?|jars?|bottles?|bowls?|baskets?|bins?|box(?:es)?|bags?|sacks?|barrels?|buckets?|pails?|trays?|carts?|trolleys?|drawers?|crates?|chests?|totes?|pouch(?:es)?|cases?|pots?|pans?|kettles?|jugs?|pitchers?|vases?|shel(?:f|ves)|shelving|racks?|tables?|counters?|countertops?|desks?|(?:work)?bench(?:es)?|cabinets?|cupboards?|pockets?|purses?|wallets?|envelopes?|folders?|cartons?|packages?|packets?|dish(?:es)?|plates?|platters?|trunks?|suitcases?|backpacks?|fridges?|refrigerators?|coolers?|kits?|wagons?|wheelbarrows?)\b/i;
+
+/**
+ * Whether what `held` names is held for a moment by key thing `name` (see above): a container or
+ * surface by its name, whose name does not say what it holds (`namesItsContents`) and which is no
+ * place — a place's shelves of greeting cards are how it is furnished. Without a name, always. Pure.
+ */
+function holdsForAMoment(name: string | undefined, held: string): boolean {
+  if (!name) return true;
+  return HOLDS_THINGS.test(name) && !namesItsContents(name, held) && !isPlaceName(labelName(name));
+}
+
+/** A describing word taken out, the article before it fitted to the word now after it ("an empty glass" → "a glass"). */
+function withoutStateWords(text: string, words: RegExp): string {
+  const x = text.replace(words, "\u0001");
+  if (x === text) return text;
+  return x
+    .replace(/\b([Aa])n?\s+\u0001\s*(?=([A-Za-z]))/g, (_m, a: string, next: string) => `${a}${/[aeiou]/i.test(next) ? "n" : ""} `)
+    .replace(/\s*\u0001\s*/g, " ")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}
+
+/**
+ * A written look without any passing state it was written in (see above): job 421's "a set of three
+ * blue upholstered airline seats near the front of the cabin, tray tables stowed, no passengers seated"
+ * → "a set of three blue upholstered airline seats near the front of the cabin"; job 417's "a clear
+ * plastic cup, about 200 ml, filled partway with ice cubes" → "a clear plastic cup, about 200 ml". A
+ * clause that only says a state goes, a state said at the end of a clause is cut from it ("a can
+ * filled with ice", "a box with its lid open"), and so is a state said as one describing word ("an
+ * empty row", "an open laptop", "a lit candle"). `name` is the key thing's name: what it holds stays
+ * when the name says so (`namesItsContents`). Byte for byte unchanged when there is none; empty when
+ * the look was only a state ("closed"). Pure.
+ */
+export function lookWithoutState(look: string, name?: string): string {
+  if (!look?.trim()) return look;
+  const parts = look.split(/(\s*[,;]\s*|\s+[—–]\s+)/);
+  const clauses = parts.filter((_, i) => i % 2 === 0).map(c => c.replace(/[.\s]+$/, "").trim());
+  let changed = false;
+  const kept: { text: string; sep: string }[] = [];
+  for (let c = 0; c < clauses.length; c++) {
+    const at = c;
+    const sep = at > 0 ? parts[2 * at - 1] : "";
+    const raw = parts[2 * at].replace(/[.\s]+$/, "");
+    const clause = clauses[at];
+    // The earliest word from which the rest is only a state: the whole clause, else its end — never
+    // right after a word that makes it a cause or a comparison ("a rim blackened from burning").
+    let cut = stateOnly(clause, name) ? 0 : -1;
+    if (cut < 0) {
+      for (const m of Array.from(clause.matchAll(/\s+/g))) {
+        if (AFTER_CAUSE.test(clause.slice(0, m.index!))) continue;
+        if (stateOnly(clause.slice(m.index! + m[0].length), name)) {
+          cut = m.index!;
+          break;
+        }
+      }
+    }
+    // What it holds may run on as a list after a comma: "holding a hand sander, clamps, and a square"
+    // (job 328) — those clauses are what it holds too, up to the one that ends the list.
+    if (cut >= 0 && CONTENTS.test(clause.slice(cut).trim())) c = heldListEnd(clauses, at);
+    let x = cut < 0 ? clause : clause.slice(0, cut);
+    // What the cut leaves dangling: "a box with (its lid open)", "calm and (empty of people)".
+    if (cut > 0) x = x.replace(STATE_DANGLING, "");
+    // What is left of a later clause after its state is only that state's subject ("fire (burning
+    // inside)", "furniture piece (set out for pickup)", "tied (closed)"): the clause was the state. A
+    // look joined to the state stays: "polished (and dry)", "calm (and empty of people)".
+    if (cut > 0 && at > 0 && x.split(/\s+/).length <= 2 && !/^\s*(?:and|or|but)\b/i.test(clause.slice(cut))) x = "";
+    // Whether the clause opened on a state said as a describing word ("damp nose that leads …").
+    const led = !!x && x.replace(STATE_WORD, "\u0001").startsWith("\u0001");
+    x = x && withoutStateWords(x, STATE_WORD).replace(HOW_FULL, " ").replace(/\s{2,}/g, " ").trim();
+    if (x === clause) {
+      kept.push({ text: raw, sep });
+      continue;
+    }
+    changed = true;
+    // A describing word after a comma that was a state leaves its noun to the describing word before
+    // it: "and a dark, damp nose that leads" (job 373) → "and a dark nose that leads", never "a dark,
+    // nose" — but "bedding, closed door" (job 376) keeps its comma: "bedding" is no describing word.
+    const before = kept[kept.length - 1]?.text.trim() ?? "";
+    const joins = led && /,/.test(sep) && /^(?:(?:and|or|with)\s+)?(?:a|an|the|its|his|her|their)\s+[a-z-]+$/i.test(before);
+    if (/[a-z]{3,}/i.test(x)) kept.push({ text: x, sep: joins ? " " : sep });
+  }
+  if (!changed) return look;
+  if (!kept.length) return "";
+  const out = kept.map((k, i) => (i === 0 ? k.text.trim() : `${k.sep}${k.text}`)).join("");
+  return /\.\s*$/.test(look) ? `${out}.` : out;
+}
+
+/** Words after which a state is a cause or a comparison, never the thing's state ("blackened from burning"). */
+const AFTER_CAUSE = /\b(?:from|by|of|after|before|for|to|than|like|as|if|into|onto|about)$/i;
+
+/**
+ * The last clause of what a thing holds, read from clause `at` that starts saying it: a held list runs
+ * on past commas to the clause that opens on "and" or "or" ("…, clamps, and a square"), through short
+ * clauses only. `at` itself when it ends there. Pure.
+ */
+function heldListEnd(clauses: string[], at: number): number {
+  for (let k = at + 1; k < clauses.length && k <= at + 4; k++) {
+    if (clauses[k].split(/\s+/).length > 5) return at;
+    if (/^(?:and|or)\s/i.test(clauses[k])) return k;
+  }
+  return at;
+}
+
+/**
+ * What a key thing NAMED for a state is called in a prompt or the check: its name without the state
+ * ("empty row" → "row", "full basket" → "basket", "open laptop" → "laptop", "lit candle" → "candle").
+ * Its name itself is kept everywhere else: pictures are filed and matched by it. Unchanged when it
+ * names no state, or when nothing would be left. Pure.
+ */
+export function stateFreeName(name: string): string;
+export function stateFreeName(name: string | undefined): string | undefined;
+export function stateFreeName(name: string | undefined): string | undefined {
+  if (!name?.trim()) return name;
+  const x = withoutStateWords(withoutStateWords(name, STATE_WORD), FULL_WORD);
+  return /[a-z]{3,}/i.test(x) ? x : name;
 }
 
 /** At most this many things standing in a place are named with it. */
@@ -2263,7 +2595,9 @@ export function placeLooksFor(
   // card", the name of the video's OTHER card, whose look must never come along.
   const text = pictureWords(s);
   const out: PlaceLook[] = setIn.flatMap(p => {
-    const look = placeLook(p.look);
+    // Who and what is in it is each picture's own words' too ("open and empty except for the
+    // furniture piece", job 288's driveway): `lookWithoutState`.
+    const look = placeLook(lookWithoutState(p.look, p.name));
     return look ? [{ name: p.name, look }] : [];
   });
   let n = 0;
@@ -2296,7 +2630,13 @@ export function placeLooksFor(
 export function placeLookClause(scene: StoryboardScene): string {
   const looks = scene.placeLooks ?? [];
   if (!looks.length) return "";
-  const list = looks.map(p => (p.in ? `the ${p.name} in the ${p.in}: ${p.look}` : `the ${p.name}: ${p.look}`)).join("; ");
+  // Each called by what it is, never a state it was named for (`stateFreeName`).
+  const list = looks
+    .map(p => {
+      const [name, where] = [stateFreeName(p.name), stateFreeName(p.in)];
+      return where ? `the ${name} in the ${where}: ${p.look}` : `the ${name}: ${p.look}`;
+    })
+    .join("; ");
   return (
     ` WHERE THIS PICTURE IS SET, the same place in every picture of this video set there — ${list}. ` +
     "This says only how that place looks: how much of it is in view and from where, and its season, " +
@@ -2469,8 +2809,11 @@ export function copiedLater(s: StoryboardScene): boolean {
  */
 export function lookToHold(s: StoryboardScene): { thing: string; look: string } | undefined {
   const own = ownKeyThing(s);
+  // Its look carries no state (`keyThingLookFor`), and the check asks for the thing by what it is: job
+  // 421 scene 2's woman sitting in the "empty row" was held to "must also look like this: …, no
+  // passengers seated" and flagged missing twice.
   return own && s.keyThingLook && !s.namedLook && copied.has(s)
-    ? { thing: own, look: s.keyThingLook }
+    ? { thing: stateFreeName(own), look: s.keyThingLook }
     : undefined;
 }
 

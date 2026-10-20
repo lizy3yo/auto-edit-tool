@@ -115,7 +115,8 @@ describe("the props list as the writers read it (sheetWithoutLight)", () => {
     const out = sheetWithoutLight(SHEET_412).split("\n");
     const was = SHEET_412.split("\n");
     expect(out[0]).toBe("bedroom: a quiet bedroom, an unmade bed as the central feature, calm and tidy surroundings");
-    expect(out[5]).toBe("wild landscape: an open wilderness, scattered brush and distant hills, calm and empty of people");
+    // Nor, since round 16, who is in it ("empty of people", `lookWithoutState`).
+    expect(out[5]).toBe("wild landscape: an open wilderness, scattered brush and distant hills, calm");
     for (const i of [1, 2, 3, 4, 6]) expect(out[i]).toBe(was[i]);
     // The key things parsed from it keep their names, the MAIN one included.
     expect(parseKeyThings(sheetWithoutLight(SHEET_412)).map(k => k.name)).toEqual(parseKeyThings(SHEET_412).map(k => k.name));
@@ -151,7 +152,8 @@ describe("every look a picture is drawn by (pictureLook, keyThingLookFor)", () =
     ];
     const pew = { index: 3, narration: "n", scriptText: "n", showSubject: "the church pew", keyThing: "church pew" } as StoryboardScene;
     const table = { index: 4, narration: "n", scriptText: "n", showSubject: "the kitchen table", keyThing: "kitchen table" } as StoryboardScene;
-    expect(keyThingLookFor(pew, things, false)).toBe("a long polished wooden bench, empty");
+    // "empty" goes too since round 16: whether anyone sits on it is each picture's own (`lookWithoutState`).
+    expect(keyThingLookFor(pew, things, false)).toBe("a long polished wooden bench");
     expect(keyThingLookFor(table, things, false)).toBe("a round wooden table with a smooth pale finish, two plain wooden chairs");
     const clause = keyThingLookClause({ ...table, keyThingLook: keyThingLookFor(table, things, false) });
     expect(clause).toContain("HOW THE KITCHEN TABLE LOOKS in every picture of this video: a round wooden table");

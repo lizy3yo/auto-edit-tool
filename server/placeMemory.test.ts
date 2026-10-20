@@ -412,9 +412,8 @@ describe("412: the wilderness lends no picture; the bedroom keeps one look, list
     expect(s.othersOfKind).toEqual([{ name: "cat", said: "a wild cat" }]);
     expect(s.keyThingLook).toBeUndefined();
     expect(memoryClause(s)).toBe("");
-    expect(s.placeLooks).toEqual([
-      { name: "wild landscape", look: "an open wilderness, scattered brush and distant hills, calm and empty of people" },
-    ]);
+    // Who is in it is each picture's own too (round 16, `lookWithoutState`): "empty of people" goes.
+    expect(s.placeLooks).toEqual([{ name: "wild landscape", look: "an open wilderness, scattered brush and distant hills, calm" }]);
     expect(placeLookClause(s)).not.toMatch(/golden|dawn/);
   });
 

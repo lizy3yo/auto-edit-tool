@@ -8158,7 +8158,8 @@ describe("the season and the light are each picture's own (round 14, job 411 sce
     ].join("\n");
     const read = sheetWithoutLight(sheet);
     expect(read).not.toMatch(/golden|dawn|blue-grey light/);
-    expect(read).toContain("wild landscape: an open wilderness, scattered brush and distant hills, calm and empty of people");
+    // Who is in it goes too since round 16 ("empty of people", `lookWithoutState`).
+    expect(read.split("\n")).toContain("wild landscape: an open wilderness, scattered brush and distant hills, calm");
     expect(read).toContain("MAIN cat: a domestic shorthair cat, soft grey-and-white coat, medium build, a long tail held low, pale green eyes");
     const alarm = "round white plastic disc like the main alarm but slightly thicker, with a small blinking indicator light on its face";
     expect(lookWithoutLight(alarm)).toBe(alarm);
@@ -10510,5 +10511,59 @@ describe("job 418 #2: the log restorer the line names is in the picture the labe
       expect(s.humanPresent, showSubject).toBeUndefined();
       expect(s.brollHostRef, showSubject).toBeUndefined();
     }
+  });
+});
+
+// ─── Round 16: a written look carries no state (job 421 #2, job 417 #17) ─────────────────────────
+
+describe("job 421 #2: the woman sitting in the empty row is drawn by how the row is built, never by its emptiness", () => {
+  // Helena Hart's practice film on the round-15 code (5.80-11.95 s): under "one of them was sitting in
+  // an empty row closer to the front" the shot list asked for her sitting alone in a set of three seats,
+  // and the picture was told "HOW THE EMPTY ROW LOOKS …, tray tables stowed, no passengers seated" and
+  // checked against it: the bare row came back front-on beside her (two rows facing each other), flagged
+  // missing twice. The operator's case before it (job 417) had two passengers turned backwards in their
+  // seats; the look of a seat must never fight the picture's own words about who sits in it.
+  const ROW: KeyThing = {
+    name: "empty row",
+    look: "a set of three blue upholstered airline seats near the front of the cabin, tray tables stowed, no passengers seated",
+  };
+  const CUP: KeyThing = { name: "plastic cup", look: "a clear plastic cup about 10 cm tall, filled partway with ice cubes, used for pouring soda or juice" };
+  const scene = () =>
+    ({
+      index: 2,
+      narration: "n",
+      scriptText: "By the time the beverage cart had come and gone, one of them was sitting in an empty row closer to the front, holding",
+      showSubject:
+        "a woman passenger sitting alone in a set of three blue upholstered airline seats near the front of the cabin, tray tables stowed, the beverage cart passing in the aisle beside her",
+      visualPrompt:
+        "Empty row of three blue upholstered airline seats near the front of the cabin, tray tables stowed, a metal service cart with small wheels visible in the aisle beside the row.",
+      keyThing: "empty row",
+      stillImage: true,
+    }) as StoryboardScene;
+
+  it("the row's look is how it is built, its name in the prompt is the row, and the check asks for the row", () => {
+    const look = keyThingLookFor(scene(), [ROW], false);
+    expect(look).toBe("a set of three blue upholstered airline seats near the front of the cabin");
+    const prompt = buildStillPrompt({ ...scene(), keyThingLook: look });
+    expect(prompt).toContain(`HOW THE ROW LOOKS in every picture of this video: ${look}.`);
+    expect(prompt).not.toMatch(/no passengers seated|HOW THE EMPTY ROW/);
+    expect(prompt).toContain("a woman passenger sitting alone");
+    expect(requiredThingsFor(scene())).toEqual(["row"]);
+  });
+
+  it("job 417 #17: the cup the soda is poured into is no cup of ice by its look", () => {
+    const pour = {
+      ...scene(),
+      index: 17,
+      showSubject: "a flight attendant setting a half-poured soda can back on the beverage cart beside a plastic cup of ice",
+      keyThing: "plastic cup",
+    } as StoryboardScene;
+    expect(keyThingLookFor(pour, [CUP], false)).toBe("a clear plastic cup about 10 cm tall");
+  });
+
+  it("a look that is built that way keeps it", async () => {
+    const { lookWithoutState } = await import("./pictureMemory");
+    for (const look of ["a glass-fronted cabinet, dark oak frame", "an open-top crate of rough pine slats", "a blue upholstered airline seat, reclining back, fold-down tray table, armrests on both sides"])
+      expect(lookWithoutState(look, "thing")).toBe(look);
   });
 });
