@@ -29,6 +29,7 @@ import type { SilenceInterval } from "./videoAssembly";
 import { endsSpelledNumber, numberBreakPause, retimeSpokenNumbers } from "./narrationAlignment";
 import { SHOWS_PERSON, showsSomeoneElse } from "./hostLook";
 import { namesHostBefore } from "./hostIntro";
+import { isAbbreviationStop, splitsInitials } from "../shared/sentenceEnds";
 import {
   demoteHostToStill,
   promoteCutawayToHost,
@@ -54,6 +55,7 @@ import {
   MOTION_MIN_SEC,
   MOVING_PICTURE_MAX_SEC,
   contactToolWork,
+  pushedThingMoves,
   SHOT_MIN_SEC,
   splitPicture,
   settleVideoKind,
@@ -247,7 +249,8 @@ export function checkPlan(
       afterCover && len(prev) + sentenceTailSec(s) > COVER_SENTENCE_MAX_SEC - 0.5;
     const badStart =
       !startsSentence(scenes, i) && (afterCover ? !coverFull : !edge(prev) && !leadTooLong);
-    const badEnd = !endsSentence(textOf(s)) && !edge(next) && !capped && !handsOff;
+    const badEnd =
+      !endsSentence(textOf(s), next && textOf(next)) && !edge(next) && !capped && !handsOff;
     if (badStart || badEnd) {
       midTakes++;
       findings.push({
@@ -573,14 +576,22 @@ function snapToPause(
   return best;
 }
 
-/** A word that ends a sentence — the same test `endsSentence` makes on a whole scene. */
-const ENDS_SENTENCE_WORD = /[.!?…]["'”’)\]]*$/;
+/**
+ * A word that ends a sentence — the same test `endsSentence` makes on a whole scene: never an
+ * initial or a short form ("U." of "U. S.", job 417; "Dr."), whose full stop belongs to the word.
+ * `next` and `prev` are the words either side of it, when known.
+ */
+const endsSentenceWord = (w: string | undefined, next?: string, prev?: string) =>
+  /[.!?…]["'”’)\]]*$/.test(w ?? "") && !isAbbreviationStop(w, next, prev);
+/** The first word of `w` that ends a sentence, or -1. */
+const sentenceEndIndex = (w: string[]) =>
+  w.findIndex((x, k) => endsSentenceWord(x, w[k + 1], w[k - 1]));
 
 /** Word offsets inside `t` where a new sentence begins (never 0). */
 function sentenceStarts(t: string): number[] {
   const w = wordsOf(t);
   const out: number[] = [];
-  for (let k = 1; k < w.length; k++) if (ENDS_SENTENCE_WORD.test(w[k - 1])) out.push(k);
+  for (let k = 1; k < w.length; k++) if (endsSentenceWord(w[k - 1], w[k], w[k - 2])) out.push(k);
   return out;
 }
 
@@ -590,9 +601,12 @@ export type TimedWord = { start: number; end: number; word?: string };
 /** A word as the script and the transcript can both spell it: lower case, letters and digits. */
 const bare = (w: string | undefined) =>
   (w ?? "").toLowerCase().replace(/[^a-z0-9\u00c0-\u024f]+/g, "");
-/** The kind of break a word ends on: a sentence, a clause, or none. */
+/**
+ * The kind of break a word ends on: a sentence, a clause, or none — "U.", "U.S." and "Dr." end on a
+ * full stop and break nothing (a take stopping on one stops inside a spoken word or a name).
+ */
 const endMark = (w: string | undefined) =>
-  /[.!?…]["'”’)\]]*$/.test(w ?? "") ? "." : /[,;:—–]["'”’)\]]*$/.test(w ?? "") ? "," : "";
+  endsSentenceWord(w) ? "." : /[,;:—–]["'”’)\]]*$/.test(w ?? "") ? "," : "";
 /**
  * How far the transcript's word count may drift from the script's around a cut: a number the
  * script spells out is one heard word ("a hundred and one" ⇄ "101"), and a dash is none. On job
@@ -763,7 +777,7 @@ function sentenceLeadSec(scenes: StoryboardScene[], i: number): number {
       const n = wordsOf(textOf(p)).length;
       return lead + (len(p) * (n - starts[starts.length - 1])) / Math.max(1, n);
     }
-    if (endsSentence(textOf(p)) && k < i - 1) return lead;
+    if (endsSentence(textOf(p), textOf(scenes[k + 1])) && k < i - 1) return lead;
     lead += len(p);
     if (startsSentence(scenes, k)) return lead;
   }
@@ -780,7 +794,7 @@ function sentenceRestSec(scenes: StoryboardScene[], i: number): number {
   for (let k = i + 1; k < scenes.length; k++) {
     const p = scenes[k];
     const w = wordsOf(textOf(p));
-    const end = w.findIndex(x => ENDS_SENTENCE_WORD.test(x));
+    const end = sentenceEndIndex(w);
     if (end >= 0) return rest + (len(p) * (end + 1)) / Math.max(1, w.length);
     rest += len(p);
   }
@@ -951,14 +965,17 @@ function opensDescribingClause(a: string[]): boolean {
  * it (job 414: "…looking for anything | a store sold,"). Job 400 (1:31) stopped "…that the
  * arithmetic | was never your problem." — subject | verb, no break. Words alone decide, never the
  * picture's description: job 400's opening "…in the greeting card | aisle of a pharmacy" split a
- * compound noun, and its picture said "aisle". Pure.
+ * compound noun, and its picture said "aisle". Never between the letters of one spoken word spelt
+ * as initials (job 417: "…On a lot of U. | S. airlines" read as a sentence end, then as a name). Pure.
  */
 export function breakBetween(before: string, after: string, opts: { list?: boolean } = {}): boolean {
   const b = wordsOf(before);
   const a = wordsOf(after);
   if (!b.length || !a.length) return true;
   const last = b[b.length - 1];
-  if (endMark(last) || /^[-—–]+$/.test(last)) return true;
+  if (splitsInitials(`${last} ${a[0]}`, last.length + 1)) return false;
+  if (endsSentenceWord(last, a[0], b[b.length - 2]) || endMark(last) || /^[-—–]+$/.test(last))
+    return true;
   if (opts.list) return true;
   const first = a[0];
   if (/^[-—–]/.test(first)) return true;
@@ -1142,7 +1159,7 @@ function finishSentenceAfterHost(
     const pTo = p?.narrationEndSec;
     if (!plainPicture(p) || p.listCut || !sameRegister(p, host) || pFrom == null || pTo == null) break;
     const w = wordsOf(textOf(p));
-    const end = w.findIndex(x => ENDS_SENTENCE_WORD.test(x)) + 1; // words through the sentence end
+    const end = sentenceEndIndex(w) + 1; // words through the sentence end
     if (end <= 0) {
       add += len(p); // the sentence runs on past this whole picture
       continue;
@@ -1158,7 +1175,7 @@ function finishSentenceAfterHost(
     const minLeft = Math.max(SHOT_MIN_SEC, p.minHoldSec ?? 0, hostAfter ? PICTURE_RUN_MIN_SEC : 0);
     if (!whole && pTo - cutAt < minLeft) {
       // What is left would blink past (or freeze to its floor): all of it, when it ends a sentence.
-      if (!endsSentence(textOf(p))) break;
+      if (!endsSentence(textOf(p), scenes[k + 1] && textOf(scenes[k + 1]))) break;
       whole = true;
       cutAt = pTo;
     }
@@ -1352,7 +1369,7 @@ function cleanHostCandidate(scenes: StoryboardScene[], k: number): boolean {
   if (prev?.hostPresent || next?.hostPresent) return false;
   const inClean = startsSentence(scenes, k);
   const outClean =
-    endsSentence(textOf(s)) ||
+    endsSentence(textOf(s), next && textOf(next)) ||
     (!!s.wordCut && !!next?.wordCut && !next.hostPresent && naturalBreak(s, next));
   return inClean && outClean;
 }
@@ -1524,10 +1541,12 @@ function hostGlimpse(
       for (let to = from + 1; to <= n; to++) {
         const breakHere =
           to < n
-            ? /[,;:—–.!?…]["'”’)\]]*$/.test(words[to - 1])
+            ? /[,;:—–.!?…]["'”’)\]]*$/.test(words[to - 1]) &&
+              // A glimpse never stops on "U." of "U. S." (job 417), inside the spoken word.
+              !isAbbreviationStop(words[to - 1], words[to], words[to - 2])
             : !!next &&
               !next.hostPresent &&
-              (endsSentence(textOf(s)) || (!!next.wordCut && naturalBreak(s, next)));
+              (endsSentence(textOf(s), textOf(next)) || (!!next.wordCut && naturalBreak(s, next)));
         if (!breakHere) continue;
         const tTo = timeAt(to);
         const head = tTo - tFrom;
@@ -1702,7 +1721,8 @@ export function settleMotion(scenes: StoryboardScene[]): number {
   let changed = 0;
   for (const s of scenes) {
     if (s.hostPresent) {
-      if (s.splitMotion && s.splitSelfMoving !== true) {
+      // A person-free panel of a cart or a door on its way would show it gliding by itself.
+      if (s.splitMotion && (s.splitSelfMoving !== true || pushedThingMoves(s.splitVisual))) {
         s.splitMotion = undefined;
         changed++;
       }

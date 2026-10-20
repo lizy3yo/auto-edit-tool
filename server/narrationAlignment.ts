@@ -20,6 +20,7 @@
  * scene's share of the total word count. Pure (no IO) — unit-tested.
  */
 import type { StoryboardScene } from "../shared/types";
+import { endsOnAbbreviation } from "../shared/sentenceEnds";
 import type { WhisperWord } from "./_core/voiceTranscription";
 import type { SilenceInterval } from "./videoAssembly";
 
@@ -93,8 +94,12 @@ const PREV_SOUND_SEC = 0.03;
 const NUMBER_ONSET_SLACK_SEC = 0.02;
 /** A word written with a digit — a time the transcriber guessed rather than aligned. */
 const SPOKEN_NUMBER = /\d/;
-/** A script word that ends a sentence — the same test `endsSentence` makes on a whole scene. */
-const ENDS_SENTENCE = /[.!?…]["'”’)\]]*$/;
+/**
+ * A scene's text that ends a sentence — the same test `endsSentence` makes on a whole scene: never
+ * on an initial or a short form ("…On a lot of U.", job 417), whose full stop belongs to the word.
+ */
+const endsSentenceText = (t: string, next?: string) =>
+  /[.!?…]["'”’)\]]*$/.test(t) && !endsOnAbbreviation(t, next);
 /**
  * The furthest a cut at a sentence break beside a number may move from where the words put it.
  * The window it is chosen in is two words wide, so this only guards a transcript whose words there
@@ -489,7 +494,8 @@ function numberBreakCuts(
   const out: (number | null)[] = new Array(boundaries.length).fill(null);
   for (let s = 1; s < scenes.length; s++) {
     if (!plan.meets?.[s]) continue;
-    if (!ENDS_SENTENCE.test((scenes[s - 1].scriptText ?? scenes[s - 1].narration ?? "").trim())) continue;
+    const said = (scenes[s - 1].scriptText ?? scenes[s - 1].narration ?? "").trim();
+    if (!endsSentenceText(said, scenes[s].scriptText ?? scenes[s].narration)) continue;
     const next = plan.next?.[s] ?? -1;
     if (next < 1) continue;
     const pause = numberBreakPause(words, next, silences);

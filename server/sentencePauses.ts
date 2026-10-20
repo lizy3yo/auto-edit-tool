@@ -37,6 +37,7 @@
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { isAbbreviationStop } from "../shared/sentenceEnds";
 import { execFfmpeg } from "./ffmpegSpawn";
 import { transcribeWordsFromBuffer, type WhisperWord } from "./_core/voiceTranscription";
 
@@ -51,8 +52,16 @@ export const PAUSE_SEC = () => Number(process.env.SENTENCE_PAUSE_SEC ?? 0.5);
 /** A sentence end already followed by this much quiet is left alone. */
 export const MIN_GAP_SEC = 0.25;
 
-/** Abbreviations whose full stop does not end a sentence. */
-const NOT_A_SENTENCE_END = /^(?:Mr|Mrs|Ms|Dr|St|Jr|Sr|Mt|vs|etc|e\.g|i\.e|No|Fig|approx)\.$/i;
+/**
+ * A word whose "." / "?" / "!" ends a sentence — never an initial or a short form
+ * (`isAbbreviationStop`): job 417's "U.S." was heard as one word ending on a full stop, and a pause
+ * put after it would split "U.S. | airlines" in the voice; spelt "U. S." in the script, "U." ended
+ * a sentence there too. A bare number's full stop ("3.") is a step, not a sentence end.
+ */
+const endsSentenceWord = (word: string, next?: string, prev?: string) => {
+  const t = word.trim().replace(/["'”’)\]]+$/, "");
+  return /[.?!]$/.test(t) && !isAbbreviationStop(t, next, prev) && !/^\d+\.$/.test(t);
+};
 
 /** Kept clear of a word's tail and the next word's head when a gap is quieted. */
 export const EDGE_SEC = 0.04;
@@ -132,10 +141,7 @@ const tokenOf = (x: string) => x.toLowerCase().replace(/[’‘]/g, "'").replace
 export function scriptSentenceEnds(words: Pick<WhisperWord, "word">[], script: string): Set<number> {
   const raw = script.split(/\s+/).filter(Boolean);
   const toks = raw.map(tokenOf);
-  const ends = raw.map(x => {
-    const t = x.replace(/["'”’)\]]+$/, "");
-    return /[.?!]$/.test(t) && !NOT_A_SENTENCE_END.test(t) && !/^\d+\.$/.test(t);
-  });
+  const ends = raw.map((x, k) => endsSentenceWord(x, raw[k + 1], raw[k - 1]));
   const out = new Set<number>();
   let j = 0;
   words.forEach((w, i) => {
@@ -182,8 +188,7 @@ export function planSentencePauses(
   const speechDb = levels ? speechLevelDb(levels) : 0;
   const out: SentencePause[] = [];
   for (let i = 0; i < words.length - 1; i++) {
-    const w = words[i].word.trim().replace(/["'”’)\]]+$/, "");
-    const heardEnd = /[.?!]$/.test(w) && !NOT_A_SENTENCE_END.test(w) && !/^\d+\.$/.test(w);
+    const heardEnd = endsSentenceWord(words[i].word, words[i + 1].word, words[i - 1]?.word);
     if (!heardEnd && !scriptEnds?.has(i)) continue;
     const gap = words[i + 1].start - words[i].end;
     const mid = +(words[i].end + Math.max(0, gap) / 2).toFixed(3);

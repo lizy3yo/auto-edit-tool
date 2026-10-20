@@ -20,6 +20,7 @@
  * assets, split screens and the cold open (the hook stays on camera).
  */
 import type { BuildStage, KeyThing, RecurringPerson, StoryboardScene } from "@shared/types";
+import { abbreviationBreakAt, endsOnAbbreviation, splitsInitials } from "@shared/sentenceEnds";
 import { invokeClaude } from "./claude";
 import { NOTHING_CUT_OPEN_RULE } from "./cutOpen";
 import { safeParseJSON } from "./jsonRepair";
@@ -288,7 +289,9 @@ const LIST_ITEM_START =
  */
 export function spokenListItems(text: string | undefined): string[] | null {
   const t = (text ?? "").trim().replace(/[.!?…]["'”’)\]]*$/, "");
-  if (!t || /[.!?…]\s/.test(t)) return null; // one sentence only
+  // One sentence only — an initial's or a short form's full stop ("U. S.", "Dr.") ends none.
+  if (!t || Array.from(t.matchAll(/[.!?…]\s/g)).some(m => !abbreviationBreakAt(t, m.index! + m[0].length)))
+    return null;
   const items = t
     .split(/\s*[,;]\s*/)
     .flatMap(p => p.split(/\s+(?:and|or)\s+(?=(?:a|an|the|some|your|my|his|her|their|our)\b)/i))
@@ -388,6 +391,120 @@ export const contactToolWork = (show: string): boolean =>
   CONTACT_TOOL_WORK.test(show.replace(/\bcutting (?:boards?|mats?|tables?)\b/gi, "board"));
 
 /**
+ * A thing that rolls or travels only when a person pushes, pulls, carries or rides it. A golf
+ * cart, a motorbike, a station wagon and a horse-drawn cart move under power of their own (or an
+ * animal's) and are left to the judge.
+ */
+const WHEELED_THING = String.raw`(?:(?<!\b(?:golf|go|horse|horse-drawn|ox|donkey|pony|mine)[\s-])carts?|troll(?:ey|ie)s?(?![\s-]?(?:cars?|bus(?:es)?)\b)|wheelchairs?|strollers?|prams?|pushchairs?|baby (?:buggy|buggies|carriages?)|wheelbarrows?|(?:bi|tri)cycles?|(?<!\b(?:dirt|motor|pit|quad|e|electric)[\s-])bikes?|skateboards?|kick scooters?|sleds?|sledges?|toboggans?|(?<!\b(?:station|covered)\s)wagons?|hand trucks?|dollies|luggage|suitcases?|baggage|carry-ons?)`;
+/**
+ * A door, gate or drawer — it swings or slides only when someone moves it (2026-10-01, the
+ * operator: "a door needs hand so it should not move"). An automatic, revolving, garage, lift or
+ * train door has a motor and is left to the judge.
+ */
+const SWUNG_THING = String.raw`(?:(?<!\b(?:automatic|revolving|elevator|lift|garage|train|subway|bus)\s)(?:doors?|gates?)|drawers?)`;
+/** Words saying a wheeled thing is on its way — said AFTER it ("a cart being pushed", "…, rolling"). */
+const ON_ITS_WAY = new RegExp(
+  String.raw`\b(?:roll(?:s|ing)?(?![\s-](?:pins?|hills?|fields?|countryside|meadows?)\b)|rolled(?![\s-]up\b)|pushed|pulled|wheeled|dragged|towed|hauled|carried|ridden|pedall?ed|trundl(?:es|ing|ed)|glid(?:es|ing|ed)|coast(?:s|ing)|careen(?:s|ing|ed)|mov(?:es|ing)(?![\s-](?:box(?:es)?|vans?|trucks?|day|parts?|blankets?)\b)|on the move|in motion|underway|making its way|working its way|on its way|(?:head(?:s|ing)|go(?:es|ing)|com(?:es|ing)|travell?(?:s|ing)|rac(?:es|ing)|speed(?:s|ing)|zoom(?:s|ing)|whizz(?:es|ing)|cruis(?:es|ing)|rattl(?:es|ing)|clatter(?:s|ing))\s+(?:down|up|along|toward|towards|across|through|past|by|round|around|into|out|back|over|off|away|forward|in))\b`,
+  "gi"
+);
+/**
+ * Words saying a door, gate or drawer is swinging or sliding — only these: a door "pulled away"
+ * from its frame or with "a rolled towel" under it is not on its way anywhere.
+ */
+const SWINGING = new RegExp(
+  String.raw`\b(?:(?:swing(?:s|ing)?|swung|slid(?:e|es|ing)?|slam(?:s|ming|med)?|creak(?:s|ing)?|pushed|pulled|kicked|flung)\s+(?:open|shut|closed|out)|(?:open|clos)(?:es|ing)\s+(?:by itself|on its own|slowly))\b`,
+  "gi"
+);
+/** Someone doing the moving, said BEFORE it ("pushing the cart", "wheeling her suitcase"). */
+const MOVING_IT = new RegExp(
+  String.raw`\b(?:push(?:es|ing|ed)?|pull(?:s|ing|ed)?|wheel(?:s|ing|ed)?|drag(?:s|ging|ged)?|tow(?:s|ing|ed)?|haul(?:s|ing|ed)?|rid(?:e|es|ing)|rode|pedall?(?:s|ing|ed)?|roll(?:s|ing|ed)?|steer(?:s|ing|ed)?|trundl(?:e|es|ing|ed))\s+(?:the|a|an|her|his|their|its|your|my|our|one|another|that|this)\s+(?:(?!(?:of|on|in|at|with|by|from|near|beside|under|behind|and|or)\b)[\w-]+\s+){0,3}(?:${WHEELED_THING}|${SWUNG_THING})\b`,
+  "i"
+);
+/**
+ * What really moves on its own — an engine, an animal, water, fire, smoke, steam, weather. Named
+ * right before the motion words, it is what those words are about ("a shopping cart by the stream,
+ * water moving over the stones"); named as the agent ("pulled by a horse", "towed behind a tractor")
+ * or the mover ("a tractor pulling a wagon"), it is the one moving. Named as WHERE the thing is ("in
+ * an airplane cabin", "the aisle of a plane", "on the train platform") it moves nothing — and a
+ * pushed thing is most often drawn inside one: job 417's cart panel says "in an airline cabin", and
+ * the same panel worded "airplane cabin" read as the plane moving and escaped.
+ */
+const SELF_MOVER = String.raw`\b(?:traffic|cars?|trucks?|lorr(?:y|ies)|bus(?:es)?|vans?|tractors?|trains?|trams?|(?:air|aero)?planes?|airliners?|jets?|helicopters?|boats?|ships?|ferr(?:y|ies)|motorcycles?|motorbikes?|water|waves?|tides?|rivers?|streams?|creeks?|current|rain|raindrops|snow(?:flakes)?|sleet|hail|wind|breeze|gusts?|smoke|steam|fog|mist|clouds?|flames?|fire|sparks?|embers?|leaves|grass|branches|birds?|dogs?|cats?|horses?|ponies|donkeys?|oxen|cows?|cattle|sheep|lambs?|goats?|pigs?|chickens?|hens?|ducks?|geese|deer|fish|squirrels?|bees?|butterfl(?:y|ies)|animals?)\b`;
+const SELF_MOVER_G = new RegExp(SELF_MOVER, "gi");
+const BY_A_SELF_MOVER = new RegExp(String.raw`^\W*(?:by|behind)\s+(?:[\w-]+\s+){0,3}?${SELF_MOVER}`, "i");
+/** Words naming a place the self-mover is — "in an …", "of the …", "aboard a …", "on the …". */
+const AS_A_PLACE =
+  /\b(?:in|inside|on|onto|aboard|of|within|into|at|across|along|through|under|beneath|below|above|over|beside|near|outside|around|off)\s+(?:(?:a|an|the|its|their|his|her|our|my|your|this|that)\s+)?(?:[\w-]+\s+){0,2}$/i;
+/** All that may stand between a mover and its own motion words: a comma, or up to three words. */
+const RIGHT_BEFORE = /^\s*,?\s*(?:[\w'-]+\s+){0,3}$/;
+
+/**
+ * `before` (the words leading up to a motion word) names a thing that really moves on its own as
+ * the one doing it: not as a place ("in an airplane cabin, …, rolling"), and close enough to be
+ * the motion's subject ("water moving", "cars on the road speeding past", "a tractor pulling") —
+ * "rain on the glass, rolling slowly forward" is still the wheelchair rolling. Pure.
+ */
+function selfMoverDoes(before: string): boolean {
+  for (const m of Array.from(before.matchAll(SELF_MOVER_G))) {
+    if (AS_A_PLACE.test(before.slice(0, m.index))) continue;
+    if (RIGHT_BEFORE.test(before.slice(m.index! + m[0].length))) return true;
+  }
+  return false;
+}
+/** Something powered that carries the pushed thing along — the carrier is what moves. */
+const CARRIED_ALONG =
+  /\b(?:conveyors?|carousels?|escalators?|travelators?|moving (?:walkways?|sidewalks?|belts?)|baggage claim|(?:baggage|luggage) belts?)\b/i;
+const WHEELED_THING_G = new RegExp(String.raw`\b${WHEELED_THING}\b`, "gi");
+const SWUNG_THING_G = new RegExp(String.raw`\b${SWUNG_THING}\b`, "gi");
+
+/**
+ * The first of `motion`'s words in `after` that are about the thing just named: never an adjective
+ * of something else ("a rolled towel", "the moving van"), never the move of a thing that really
+ * moves on its own named right before it (`selfMoverDoes`), and never a move made BY one ("pulled
+ * by a horse"). Null when there is none. Pure.
+ */
+function itsOwnMove(after: string, motion: RegExp): RegExpMatchArray | null {
+  for (const move of Array.from(after.matchAll(motion))) {
+    const before = after.slice(0, move.index!);
+    if (selfMoverDoes(before)) return null;
+    if (/\b(?:a|an|the)\s+$/i.test(before)) continue;
+    if (BY_A_SELF_MOVER.test(after.slice(move.index! + move[0].length))) return null;
+    return move;
+  }
+  return null;
+}
+
+/**
+ * The words show a thing that moves only when someone pushes, pulls, carries or rides it — a cart
+ * or trolley, a wheelchair, a stroller, a wheelbarrow, a bicycle, luggage, a door — on its way:
+ * "rolling", "being pushed", "moving down the aisle", or someone "pushing the cart". Such a picture
+ * is NEVER a video of something moving by itself: the moving cutaway and the split panel show no one,
+ * so the thing would glide along on its own. Job 417 (2026-10-19): the self-moving judge said yes to
+ * "a stainless-steel airline beverage cart being pushed past a woman passenger…" and to a split
+ * panel's "Beverage cart positioned midway down the narrow aisle … rolling toward the rear." — a
+ * real render plays that panel as a cart rolling down the aisle with nobody pushing it; job 402
+ * had made "beverage cart with soda can on it wheeled down cabin aisle" a video. The model's
+ * judgement (`SELF_MOVING_SYSTEM`) says so first; this is its backup, as `contactToolWork` is for
+ * a tool biting in. A thing merely standing there ("a parked stroller", "a rolling suitcase by the
+ * door"), or carried by something powered (a conveyor, a carousel), or moved by an engine, an
+ * animal, water or the wind is left to the judge. Pure.
+ */
+export function pushedThingMoves(show: string | undefined): boolean {
+  for (const sentence of (show ?? "").split(/(?<=[.!?])\s+/)) {
+    if (CARRIED_ALONG.test(sentence)) continue;
+    const doer = MOVING_IT.exec(sentence);
+    if (doer && !selfMoverDoes(sentence.slice(0, doer.index))) return true;
+    for (const [things, motion] of [
+      [WHEELED_THING_G, ON_ITS_WAY],
+      [SWUNG_THING_G, SWINGING],
+    ] as const)
+      for (const m of Array.from(sentence.matchAll(things)))
+        if (itsOwnMove(sentence.slice(m.index! + m[0].length), motion)) return true;
+  }
+  return false;
+}
+
+/**
  * What kind of VIDEO a shot of `show` may be — the one rule every path that makes a moving shot
  * goes through (the shot list, the context groups, the storyboard parser, the plan gate's top-up
  * and fixes, and the dispatcher right before a clip is paid for). A video is only ever of something
@@ -412,7 +529,10 @@ export function videoKind(
     // A person anywhere in the words (`showsPerson`: "an older couple walking"); the raw person
     // words too, so a pronoun read as an animal's never turns a picture into a video.
     SHOWS_PERSON.test(show) ||
-    showsPerson(show)
+    showsPerson(show) ||
+    // A cart, a stroller or a door on its way: someone is moving it, whatever the judge said
+    // (job 417's "beverage cart being pushed past…").
+    pushedThingMoves(show)
   )
     return "none";
   return opts.selfMoving === false ? "none" : "object";
@@ -651,7 +771,12 @@ export function applyShotPlan(
         hostEnd = nextAt;
         shotsLeft = shotsLeft.slice(1);
       }
-      if (hostEnd < HOST_HANDOFF_MIN_WORDS || hostEnd >= spans.length) {
+      // Never between the letters of one spoken word spelt with spaces ("U. | S.", job 417).
+      if (
+        hostEnd < HOST_HANDOFF_MIN_WORDS ||
+        hostEnd >= spans.length ||
+        splitsInitials(text, spans[hostEnd].start)
+      ) {
         out.push(s);
         continue;
       }
@@ -678,7 +803,7 @@ export function applyShotPlan(
           continue;
         }
         const at = findPhraseAt(spans, shot.from, cursor + 1);
-        if (at < 0) continue;
+        if (at < 0 || splitsInitials(text, spans[at].start)) continue;
         pieces.push({ at, host: false, shot });
         cursor = at;
       }
@@ -689,7 +814,7 @@ export function applyShotPlan(
           return;
         }
         const at = findPhraseAt(spans, shot.from, cursor + 1);
-        if (at < 0) return;
+        if (at < 0 || splitsInitials(text, spans[at].start)) return;
         pieces.push({ at, host: false, shot });
         cursor = at;
       });
@@ -1749,7 +1874,9 @@ export const SHOT_LIST_SYSTEM =
   "work.\n" +
   "6a. SOMEONE ELSE. When a line is about ANOTHER person doing something — a customer, a buyer, " +
   "a neighbour, a relative, a stranger, a person of the story the line calls \"he\" or \"she\" " +
-  "(rule 1f); never the host, and never \"you\" (the viewer's work is " +
+  "(rule 1f); never the host — nor the host's own \"I\" or \"we\": what the host did, had or was " +
+  "is the host, even in a part they played then (a guest, a customer, a patient), though the " +
+  "child they once were is a child — and never \"you\" (the viewer's work is " +
   "shown as the host's) unless THE VIEWER is given below — the picture may show THAT person, the " +
   "same way: from behind or from the side, the face never shown. Write them into show, and set " +
   "other to who they are in 2-6 plain words from the line (\"a woman customer\", \"an older " +
@@ -3764,10 +3891,16 @@ export function ownTypedPanel(s: StoryboardScene, typed: string, things: KeyThin
   return true;
 }
 
-/** A line that ends a sentence (so the next picture starts a new one). */
-const endsSentence = (t: string | undefined) => /[.!?]["')\]]?\s*$/.test((t ?? "").trim());
+/**
+ * A line that ends a sentence (so the next picture starts a new one) — never on an initial or a
+ * short form, whose full stop belongs to the word ("…On a lot of U." | "S. airlines", job 417).
+ * `next` is the line after it, when known.
+ */
+const endsSentence = (t: string | undefined, next?: string) =>
+  /[.!?]["')\]]?\s*$/.test((t ?? "").trim()) && !endsOnAbbreviation(t, next);
 /** A sentence's end at the end of a trimmed text, a closing quote or bracket of any kind allowed. */
-const SENTENCE_END = /[.!?]["'’”)\]]*$/;
+const sentenceEnded = (t: string, next?: string) =>
+  /[.!?]["'’”)\]]*$/.test(t) && !endsOnAbbreviation(t, next);
 
 /**
  * ONE IDEA, ONE PICTURE (2026-10-02, the operator: whether two pictures of one sentence become one
@@ -3802,7 +3935,7 @@ export function applyPictureJoins(
       fitCandidate(s) &&
       !prev.listCut &&
       !s.listCut &&
-      !endsSentence(prev.scriptText) &&
+      !endsSentence(prev.scriptText, s.scriptText) &&
       lens[k] + sec(s) <= maxAt(prev);
     if (!ok) {
       remap.set(id, out.length);
@@ -3844,10 +3977,13 @@ export function applyPictureJoins(
 
 /**
  * The token at `at` starts a new sentence: the words before it end on ".", "!" or "?" (a closing
- * quote or bracket allowed) and a space — "$1.50" is one price, not two sentences. Pure.
+ * quote or bracket allowed) and a space — "$1.50" is one price, not two sentences, and an initial's
+ * or a short form's full stop ends none ("U. S. airlines", "St. Louis", `abbreviationBreakAt`). Pure.
  */
 function startsSentenceAt(text: string, spans: TokenSpan[], at: number): boolean {
-  return at > 0 && /[.!?]["'’”)\]]*\s/.test(text.slice(spans[at - 1].end, spans[at].start));
+  if (at <= 0) return false;
+  const gap = /[.!?]["'’”)\]]*\s/.exec(text.slice(spans[at - 1].end, spans[at].start));
+  return !!gap && !abbreviationBreakAt(text, spans[at - 1].end + gap.index + gap[0].length);
 }
 
 /**
@@ -3911,7 +4047,7 @@ export function applyPictureSplits(
     let cursor = 0;
     for (const cut of cuts) {
       const at = findPhraseAt(spans, cut.from, cursor + 1);
-      if (at < 0) continue;
+      if (at < 0 || splitsInitials(text, spans[at].start)) continue;
       // A joined picture is one sentence made one picture on purpose ("Sell your furniture | on
       // Facebook Marketplace"): it is cut again only where a new sentence starts.
       if (s.joinedLine && !startsSentenceAt(text, spans, at)) continue;
@@ -3946,7 +4082,7 @@ export function applyPictureSplits(
         !!prev &&
         fitCandidate(prev) &&
         !!(prev.scriptText ?? "").trim() &&
-        !SENTENCE_END.test((prev.scriptText ?? "").trim()) &&
+        !sentenceEnded((prev.scriptText ?? "").trim(), text) &&
         startsSentenceAt(text, spans, bounds[1]) &&
         // Only the end of that sentence: no sentence of its own starts inside the lead.
         !spans.slice(1, bounds[1]).some((_, j) => startsSentenceAt(text, spans, j + 1)) &&
@@ -4077,7 +4213,7 @@ export async function fitPicturesToLines(
       const said = (s.scriptText ?? "").trim().replace(/\s+/g, " ");
       const prev = scenes[i - 1];
       const sameSentence =
-        !!prev && fitCandidate(prev) && !prev.listCut && !s.listCut && !endsSentence(prev.scriptText);
+        !!prev && fitCandidate(prev) && !prev.listCut && !s.listCut && !endsSentence(prev.scriptText, s.scriptText);
       const secs = s.audioDuration ? ` (${s.audioDuration.toFixed(1)} s)` : "";
       if (s.hostPresent || !fitCandidate(s) || i < from) {
         lines.push(`HOST/OTHER: "${said}"`);
@@ -4386,9 +4522,6 @@ export function oneThingPanels(
 
 // ─── Does each split panel show what its line is about? ─────────────────────────────────
 
-/** A full stop that belongs to a short title or name, not to a sentence end ("Mr.", "St.", "e.g."). */
-const ABBREVIATION_END = /(?:\b(?:Mr|Mrs|Ms|Dr|St|Mt|Ft|Jr|Sr|Prof|Rev|No|vs)|\b[A-Za-z]\.[A-Za-z])\.["'”’)\]]*$/;
-
 /**
  * THE LINE'S LAST WORDS LEAD INTO THE NEXT ONE (2026-10-20, job 414 scene 4). A split panel sits
  * beside its host take for the whole line, and a host take may stop mid-sentence where the shot list
@@ -4412,11 +4545,16 @@ export function leadIntoNext(
 ): { words: string; sec?: number } | undefined {
   const text = (line ?? "").replace(/\s+/g, " ").trim();
   if (!text || /[.!?,;:—–-]["'”’)\]]*$/.test(text)) return undefined;
-  // The LAST sentence end followed by more words (greedy). A title's or a place name's full stop
-  // ends no sentence: "…drove all the way to St. Louis to buy" is one sentence, cut mid-clause.
-  const m = /^(.*[.!?]["'”’)\]]*)\s+(\S.*)$/.exec(text);
-  if (!m || ABBREVIATION_END.test(m[1])) return undefined;
-  const words = m[2].trim();
+  // The LAST sentence end followed by more words. A title's, a place name's or an initial's full stop
+  // ends no sentence (`abbreviationBreakAt`) and is passed over for the real end before it: "…drove
+  // all the way to St. Louis to buy" is one sentence, cut mid-clause, and "…hung on wooden pins. But
+  // on the U. S. side hung" leads on from "pins." — stopping at "S." it found no lead at all.
+  const ends = Array.from(text.matchAll(/[.!?]["'”’)\]]*\s+(?=\S)/g)).filter(
+    e => !abbreviationBreakAt(text, e.index! + e[0].length)
+  );
+  const last = ends[ends.length - 1];
+  if (!last) return undefined;
+  const words = text.slice(last.index! + last[0].length).trim();
   const all = text.split(" ").length;
   const n = words.split(" ").length;
   if (n < 2 || n * 3 > all) return undefined;
@@ -4752,12 +4890,16 @@ const SELF_MOVING_MODEL = () =>
 const SELF_MOVING_SYSTEM = `You read the pictures planned for a video, one per line, and decide for
 each whether something in it MOVES BY ITSELF in the moment it shows — movement a camera would catch
 over a few seconds with no person causing it: a flame, smoke, steam, flowing or falling water, rain
-or snow falling, leaves or grass in the wind, traffic going past.
+or snow falling, leaves or grass in the wind, a car, bus, train or plane going past under its own
+power.
 
 Say NO when a person would have to move it (a door, a gate, a drawer, a lid, a tool, a pot being
 stirred, a page turned), when something that can move is shown still (a parked car, a closed tap, an
 unlit stove, a calm pond, a device that only detects or displays), and when nothing moves at all.
-When unsure, NO.
+Anything that moves only when someone pushes, pulls, carries or rides it — a cart or trolley, a
+wheelchair, a stroller, a wheelbarrow, a bicycle, a shopping cart, luggage — is NO whatever the words
+say ("rolling", "being pushed", "moving along"): the video shows nobody, so it would glide along by
+itself. When unsure, NO.
 
 Answer with JSON only: {"moving":[the ids that move by themselves]}`;
 
@@ -4776,14 +4918,19 @@ function selfMovingCandidates(scenes: StoryboardScene[]): { id: number; text: st
   return out;
 }
 
-/** Put the answer on the pictures that were asked about (the others keep theirs). Pure. */
+/**
+ * Put the answer on the pictures that were asked about (the others keep theirs). A thing someone has
+ * to push on its way is never moving by itself, whatever the model answered (`pushedThingMoves`: job
+ * 417's split panel of a cart "rolling toward the rear" was judged yes, and a split panel is the one
+ * place nothing else stops it — `assignSplitMotion` trusts this flag). Pure.
+ */
 export function applySelfMoving(scenes: StoryboardScene[], asked: number[], moving: number[]): void {
   const yes = new Set(moving);
   for (const id of asked) {
     const s = scenes[id];
     if (!s) continue;
-    if (s.hostPresent) s.splitSelfMoving = yes.has(id);
-    else s.selfMoving = yes.has(id);
+    if (s.hostPresent) s.splitSelfMoving = yes.has(id) && !pushedThingMoves(s.splitVisual);
+    else s.selfMoving = yes.has(id) && !pushedThingMoves(s.showSubject ?? s.visualPrompt);
   }
 }
 
@@ -5107,12 +5254,11 @@ export function joinShortSplits(
     !s.assetImageUrl &&
     !s.cta &&
     !s.qrHero;
-  const endsSentence = (t: string | undefined) => /[.!?]["')\]]?\s*$/.test((t ?? "").trim());
   let changed = false;
   for (let i = 1; i < out.length; i++) {
     const a = out[i - 1];
     const b = out[i];
-    if (!joinable(a) || !joinable(b) || endsSentence(a.scriptText)) continue;
+    if (!joinable(a) || !joinable(b) || endsSentence(a.scriptText, b.scriptText)) continue;
     if (Math.min(len[i - 1], len[i]) >= SPLIT_PART_MIN_SEC) continue;
     const limit =
       movingPicture(a) || movingPicture(b) ? Math.min(maxAt(a), MOVING_PICTURE_MAX_SEC) : maxAt(a);
@@ -5143,8 +5289,6 @@ export function joinShortSplits(
 export const SENTENCE_START_MAX_WORDS = 4;
 /** …and the longest they may run: on the voice when the word timeline knows, else their share of the picture. */
 export const SENTENCE_START_MAX_SEC = 1.5;
-/** Short forms whose full stop ends no sentence ("Mr. Hale", "St. Louis", "saws, drills, etc. and"). */
-const SHORT_FORM = /^(?:mr|mrs|ms|dr|st|mt|ft|jr|sr|vs|etc|no|approx|lt|capt|gen|prof|rev|ave|rd|inc|co|ltd)$/;
 
 /**
  * A SENTENCE STARTS ON ITS OWN PICTURE (2026-10-20, job 414 scenes 28-29). The storyboard cuts the
@@ -5196,13 +5340,13 @@ export function carrySentenceStarts(
     // The shot list's own cut inside one beat.
     if (a.shotGroup !== undefined && a.shotGroup === b.shotGroup) continue;
     const text = (a.scriptText ?? "").trim();
-    if (!text || SENTENCE_END.test(text)) continue;
+    if (!text || sentenceEnded(text, b.scriptText)) continue;
     const spans = tokenSpans(text);
     let at = -1;
     // A title's or a place's short form ends on a full stop and is no sentence end: "…down to St.
-    // Louis" would hand "Louis" to the next picture.
+    // Louis" would hand "Louis" to the next picture (`startsSentenceAt` asks `abbreviationBreakAt`).
     for (let k = spans.length - 1; k > 0 && spans.length - k <= SENTENCE_START_MAX_WORDS; k--)
-      if (startsSentenceAt(text, spans, k) && !SHORT_FORM.test(spans[k - 1].tok)) {
+      if (startsSentenceAt(text, spans, k)) {
         at = k;
         break;
       }
@@ -5414,7 +5558,7 @@ export function parseContextGroups(
     let ended = false;
     ids.forEach((id, k) => {
       if (ended) return;
-      const opens = id > 0 ? endsSentence(saidOf?.(id - 1)) : /^\W*[A-Z0-9]/.test(saidOf?.(id) ?? "");
+      const opens = id > 0 ? endsSentence(saidOf?.(id - 1), saidOf?.(id)) : /^\W*[A-Z0-9]/.test(saidOf?.(id) ?? "");
       const move = saidOf && settingMove(saidOf(id), show, opens);
       if (move) {
         if (held || move.turn) ended = true;

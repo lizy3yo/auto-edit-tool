@@ -67,6 +67,7 @@ import {
   fitPicturesToLines,
   fitSplitPanelsToLines,
   judgeSelfMoving,
+  pushedThingMoves,
   keepPanelTools,
   oneThingPanels,
   ownTypedPicture,
@@ -690,6 +691,7 @@ import {
   namesSomeone,
   showsSomeoneElse,
   expressionAsBody,
+  viewerAsk,
 } from "./hostLook";
 import {
   assemblePerSceneFilm,
@@ -761,6 +763,7 @@ import {
   CTA_QR_RELEASE,
 } from "../shared/ctaMarkers";
 import { SCAN_INTENT } from "../shared/scanIntent";
+import { abbreviationBreakAt, endsOnAbbreviation, rejoinAbbreviations } from "../shared/sentenceEnds";
 import { ctaPlacementWarnings } from "../shared/scriptCheck";
 import {
   directionsBlockedBy,
@@ -1894,8 +1897,9 @@ export function splitScriptForNarration(
       segments.push(para);
       continue;
     }
-    // Paragraph too long for one TTS request — sub-split on sentence boundaries.
-    const sentences = para.split(/(?<=[.!?])\s+/);
+    // Paragraph too long for one TTS request — sub-split on sentence boundaries, never after an
+    // initial or a short form ("U. S.", "Dr."): two requests would read one word as two.
+    const sentences = rejoinAbbreviations(para.split(/(?<=[.!?])\s+/));
     let buf = "";
     for (const s of sentences) {
       if (!buf) buf = s;
@@ -1929,8 +1933,12 @@ export interface ScriptUnit {
  *
  * This is the alignment foundation: Claude groups these unit indices into scenes, and
  * each scene's verbatim narration is sliced back out of the original string by offset —
- * so the text Claude returns is never trusted, only its integer boundaries. Over-splitting
- * (e.g. on "Dr." or a decimal) is harmless: no text is lost and Claude regroups. Pure.
+ * so the text Claude returns is never trusted, only its integer boundaries.
+ *
+ * A unit never ends on an initial or a short form (`abbreviationBreakAt`): over-splitting is NOT
+ * harmless, because a unit edge is where the sentence packer closes a beat. Job 417's script spelt
+ * "U. S." with a space, "On a lot of U." became a unit, the beat closed on it, and the film cut
+ * inside the spoken "U.S." — the host's lip-synced take ending mid-word. Pure.
  */
 export function splitIntoUnits(script: string): ScriptUnit[] {
   if (!script) return [];
@@ -1942,6 +1950,7 @@ export function splitIntoUnits(script: string): ScriptUnit[] {
   let idx = 0;
   while ((m = boundary.exec(script)) !== null) {
     const end = m.index + m[0].length;
+    if (abbreviationBreakAt(script, end)) continue;
     const text = script.slice(last, end).trim();
     if (text) {
       units.push({ index: ++idx, text, start: last, end });
@@ -2727,7 +2736,8 @@ function checkInShaped(
   return (
     !showsSomeoneElse(s) &&
     startsSentence(scenes, i) &&
-    (endsSentence(s.scriptText ?? s.narration) || (!!s.wordCut && !s.listCut)) &&
+    (endsSentence(s.scriptText ?? s.narration, scenes[i + 1]?.scriptText ?? scenes[i + 1]?.narration) ||
+      (!!s.wordCut && !s.listCut)) &&
     sec >= (s.wordCut ? HOST_CHECKIN_MIN_SEC : HOST_MIN_HOLD_SEC) &&
     sec <= HOST_CHECKIN_PROMOTE_MAX_SEC
   );
@@ -3622,7 +3632,11 @@ export function assignSplitMotion(
   if (!pacing.splitScreen.motion.enabled || acc <= 0) return 0;
   const motionTarget = pacing.splitScreen.motion.share * acc;
   for (const s of spreadOrder(
-    scenes.filter(s => s.hostPresent && s.splitVisual && s.splitSelfMoving === true)
+    // Judged moving, and never a cart or a door on its way (`pushedThingMoves`): a panel judged
+    // before that backup — job 417's cart "rolling toward the rear" — would glide along by itself.
+    scenes.filter(
+      s => s.hostPresent && s.splitVisual && s.splitSelfMoving === true && !pushedThingMoves(s.splitVisual)
+    )
   )) {
     if (motionSeconds >= motionTarget) break;
     if (Math.abs(motionSeconds + dur(s) - motionTarget) < Math.abs(motionSeconds - motionTarget)) {
@@ -10953,6 +10967,8 @@ function markQrFromCtaTails(
       const m = /[.!?]["')\]]?\s+/g;
       let cut = -1;
       for (let hit = m.exec(text); hit; hit = m.exec(text)) {
+        // A title's "Dr." or "U. S." ends no sentence: the beat is never split inside it.
+        if (abbreviationBreakAt(text, hit.index + hit[0].length)) continue;
         if (namesBook(text.slice(0, hit.index + 1))) {
           cut = hit.index + hit[0].length;
           break;
@@ -13437,15 +13453,21 @@ export function markHostIntroductions(
 export const HOST_SENTENCE_MAX_SEC = 15;
 
 /** True when a scene's verbatim text finishes a sentence (terminal punctuation, then any quote or
- *  bracket). Pure. */
-export function endsSentence(text: string | undefined): boolean {
-  return /[.!?…]["'”’)\]]*$/.test((text ?? "").trim());
+ *  bracket) — never on an initial or a short form ("…On a lot of U.", job 417; "…Dr."), whose full
+ *  stop belongs to the word. `next` is the text that follows, when known ("No. 5"). Pure. */
+export function endsSentence(text: string | undefined, next?: string): boolean {
+  const t = (text ?? "").trim();
+  return /[.!?…]["'”’)\]]*$/.test(t) && !endsOnAbbreviation(t, next);
 }
 
 /** True when scene `i` begins a sentence — the film's first scene, or its predecessor ended one. */
 export function startsSentence(scenes: StoryboardScene[], i: number): boolean {
   return (
-    i <= 0 || endsSentence(scenes[i - 1].scriptText ?? scenes[i - 1].narration)
+    i <= 0 ||
+    endsSentence(
+      scenes[i - 1].scriptText ?? scenes[i - 1].narration,
+      scenes[i]?.scriptText ?? scenes[i]?.narration
+    )
   );
 }
 
@@ -13462,7 +13484,8 @@ export function introSentenceStart(text: string, hostName?: string): number {
   let start = 0;
   const ends = /[.!?…]["'”’)\]]*\s+/g;
   let m: RegExpExecArray | null;
-  while ((m = ends.exec(text)) && m.index < at) start = m.index + m[0].length;
+  while ((m = ends.exec(text)) && m.index < at)
+    if (!abbreviationBreakAt(text, m.index + m[0].length)) start = m.index + m[0].length;
   return start;
 }
 
@@ -13500,7 +13523,10 @@ export function moveHostLeadIns(
     let cut: number;
     if (introAt > 0) cut = introAt;
     else {
-      const end = text.match(/[.!?…]["'”’)\]]*\s+/);
+      // The first REAL sentence end: "U." of "U. S." ends nothing (job 417).
+      const end = Array.from(text.matchAll(/[.!?…]["'”’)\]]*\s+/g)).find(
+        e => !abbreviationBreakAt(text, e.index! + e[0].length)
+      );
       if (!end || end.index == null) continue;
       cut = end.index + end[0].length;
     }
@@ -13904,7 +13930,7 @@ export function completeHostSentences(
     // Back to the start of the sentence.
     while (out.length) {
       const prev = out[out.length - 1];
-      if (endsSentence(textOf(prev))) break;
+      if (endsSentence(textOf(prev), textOf(cur))) break;
       if (fixed(prev) || !sameBlock(prev, cur) || bothOpeners(prev, cur)) break;
       if (curSize + sz(prev) > maxSec) break;
       const keep = prev.hostOpener && prev.hostPresent ? prev : cur;
@@ -13915,7 +13941,7 @@ export function completeHostSentences(
       out.pop();
     }
     // On to its end.
-    while (i + 1 < scenes.length && !endsSentence(textOf(cur))) {
+    while (i + 1 < scenes.length && !endsSentence(textOf(cur), textOf(scenes[i + 1]))) {
       const next = scenes[i + 1];
       if (fixed(next) || !sameBlock(cur, next) || bothOpeners(cur, next)) break;
       if (curSize + sz(next) > maxSec) break;
@@ -18972,12 +18998,34 @@ async function runUnifiedPipeline(
     const facts = await collectShownFacts(spokenScript);
     if (facts.length)
       console.log(`[Longform ${jobId}] shown on things: ${facts.map(f => `${f.thing} (${f.words.join(", ")})`).join("; ")}`);
+    // "YOU" WITH NO LOOK (job 417): the shot list and the line check drew "you" as someone the
+    // host's work serves — a passenger — but the props list wrote no VIEWER line, so each picture of
+    // "you" was a new stranger. The one look is asked on this call, made for every film anyway
+    // (`viewerAsk`), and `markHostBroll` gives it to every picture of "you".
+    const askViewer = viewerAsk(scenes, params, hostFaces(params)[0]);
     const named = await describeNamedLooks(scenes, {
       keyThings: params.keyThings,
       subject: params.videoSubject,
       script: spokenScript,
       facts,
+      viewer: askViewer && {
+        ...askViewer,
+        hostLook: params.hostLook,
+        hostName: params.hostName,
+        people: params.recurringPeople,
+      },
     });
+    if (named.viewer) {
+      params.viewerPerson = named.viewer;
+      console.log(
+        `[Longform ${jobId}] "you" had no look: ${askViewer!.ids.length} picture(s) show "you" as ` +
+          `${named.viewer.name} — one look for every one (${named.viewer.look})`
+      );
+    } else if (askViewer)
+      console.log(
+        `[Longform ${jobId}] "you": ${askViewer.ids.length} picture(s) show "you" as someone else ` +
+          `(${askViewer.roles.join(", ")}) and no look was written — each is drawn on its own`
+      );
     // A BODY PART IS ALWAYS ON THE BODY: the last word on every description, after every writer.
     const onBody = keepBodyPartsOnBody(scenes);
     if (onBody > 0)
