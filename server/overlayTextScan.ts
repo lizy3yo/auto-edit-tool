@@ -121,9 +121,27 @@ export const STILL_DEFECT_SYSTEM =
   "wood's end grain: pushed into the SIDE of an upright piece, its edge resting on the wood but not " +
   "in it, its blade sticking out into the air with no wood under its edge, or lying ACROSS a split " +
   "already open (a split runs along the blade); a piece splitting apart with no blade in its " +
-  "split; a hand gripping a piece where it is splitting open. An axe chopping, felling or hewing " +
+  "split; a hand gripping a piece where it is splitting open. " +
+  // Round 14, job 414 scene 17: the froe flat on top of the bolt, both hands pressing down, no club —
+  // named so the check's words carry it to the redraw (`namedFaultClause`). A froe already in the wood
+  // and levered by its handle is right with no club in sight.
+  "A froe or wedge pressed down on top of the wood by the hands alone, its edge not in it and no " +
+  "club, mallet or sledge to strike it in, is this fault; a froe already sunk in the wood and levered " +
+  "by its handle needs no club in the frame. An axe chopping, felling or hewing " +
   "into the side of a log or trunk is right, and a tool hanging, lying or resting unused is " +
   "splitting nothing\n" +
+  // Round 14, job 414 scene 13: a drawknife laid along the board, its stroke across the narrow width.
+  "- a drawknife or spokeshave whose blade lies ALONG the length of the piece it is shaving, so its " +
+  "stroke would run sideways across the piece's narrow width instead of along its length\n" +
+  // Round 14, job 413 scene 29: the plug lead looping into the carburetor's fuel inlet. A loose cord
+  // or a stripped wire end is real, so only a line ending in the wrong part or merged is named — and
+  // lines meeting at a real fitting are right: a drain's branch joins its run at a tee (job 403's
+  // "PVC pipework with visible joints and bends").
+  "- a cable, wire, cord, hose or pipe that runs into a part it does not serve or into another " +
+  "part's fitting (an electrical lead plugged into a fuel or water fitting, a hose ending in a power " +
+  "socket), one line turning into a different one with no fitting between them (an electrical lead " +
+  "that becomes a fuel hose), or a line that fades into a surface or into another object; lines " +
+  "meeting at a real fitting (a pipe tee, a coupler, a plug in its socket) are right\n" +
   "- a phone, tablet or laptop built into, framed by or made of another object (a tablet whose " +
   "frame is a cutting board, a screen set inside a quilt or a shelf)\n" +
   "- a body part that looks CUT OFF: hair still shaped like a head or hairstyle with no head " +
@@ -153,7 +171,9 @@ export const STILL_DEFECT_SYSTEM =
   "When unsure, answer false.\n\n" +
   'Return ONLY this JSON, no prose: {"overlay":true|false,"broken":true|false,"writing":true|false,"what":"..."}\n' +
   'what: 3-8 words naming the worst defect and where it sits (e.g. "white caption bar across ' +
-  'the bottom", "cutting board floating above the table"); "" when both are false.';
+  'the bottom", "cutting board floating above the table"); a fault in a tool, cable, wire or hose ' +
+  'names it (e.g. "saw blade resting on top of the plank", "power cord running into the tap"); "" ' +
+  "when both are false.";
 
 export interface StillDefectVerdict {
   overlay: boolean;
@@ -161,6 +181,12 @@ export interface StillDefectVerdict {
   /** Readable writing IN the scene (a chalkboard sum, a price tag, a big label). Every b-roll
    *  prompt bans it (`NO_READABLE_TEXT`); a true verdict re-rolls the still like `overlay`. */
   writing: boolean;
+  /**
+   * The words the check read in the frame, as printed (`READ_WORDS_QUESTION`) — set only beside a
+   * `writing` verdict, and asked only of a picture with a line and no allowed words, so the caller
+   * can tell words its own line says from made-up writing (`writingTheLineSays`, job 413 scene 2).
+   */
+  read?: string;
   /**
    * The frame does not show the thing its line names (`scene.showSubject`) — "a stack of
    * sandpaper" drawn as a sanding block, or not there at all. Only asked when the caller passes
@@ -249,10 +275,12 @@ export function parseStillDefectVerdict(
   const person = parsed.data?.person === true;
   const face = parsed.data?.face === true;
   const what = parsed.data?.what;
+  const read = parsed.data?.read;
   return {
     overlay,
     broken,
     writing,
+    ...(writing && typeof read === "string" && read.trim() ? { read: read.trim().slice(0, 160) } : {}),
     missing,
     ...(detail ? { detail } : {}),
     ...(detail && typeof detailWhat === "string" && detailWhat.trim()
@@ -384,6 +412,31 @@ export const SOFT_PRINT_QUESTION =
   "SOFT on purpose in this picture: a blurred patch of print, or shallow carved lines too soft " +
   "to read, counts as that printing or engraving being shown. Never answer missing because its " +
   "words cannot be read. Answer missing only when there is no sign of it at all.";
+
+/**
+ * QUESTION 4 for a picture ALLOWED some words (`scene.pictureText`), whose other print is now asked
+ * soft around them (`ALLOWED_TEXT_REST_CLAUSE`, job 411 scene 17: "a field guide page … with its
+ * entry text" beside the one word the line says). That soft entry is the entry shown, as for a
+ * blurred-print picture (`SOFT_PRINT_QUESTION`); the allowed words themselves are judged by QUESTION
+ * 3, which still fails them missing or misspelt.
+ */
+export const SOFT_REST_QUESTION =
+  "\n\nQUESTION 4 NOTE — apart from the words this picture is allowed to show, any printing on the " +
+  "named thing (the rest of a page, a label, a box) is drawn SOFT on purpose: a blurred patch of " +
+  "print counts as that printing being shown. Never answer missing because the rest of its words " +
+  "cannot be read.";
+
+/**
+ * Asked beside QUESTION 3 of a picture with a line and no allowed words (2026-10-19, job 413 scene 2:
+ * the heading "LOAN" on loan papers under the line "A loan," was refused for writing three times).
+ * The check only REPORTS what it can read — every word, so a heading named alone cannot hide the
+ * paragraphs under it; whether those are words the picture's own line says is decided in code
+ * (`writingTheLineSays`), never by the model.
+ */
+export const READ_WORDS_QUESTION =
+  '\n\nREAD — when writing is true, also give "read": EVERY word, number or letter a viewer can ' +
+  "read in the frame, exactly as printed and in reading order — all of it, not only the largest " +
+  '(at most 12 words; end with "…" when there are more). "" when writing is false.';
 
 /**
  * QUESTION 4 widened for a picture about KEY THINGS: every one of them must really be there, and a
@@ -654,11 +707,14 @@ export function verdictShape(
   detail?: boolean,
   forbids?: boolean,
   noPerson?: boolean,
-  noFace?: boolean
+  noFace?: boolean,
+  /** The words the check reads, beside `writing` (`READ_WORDS_QUESTION`). */
+  read?: boolean
 ): string {
   return (
     '\n\nReturn ONLY this JSON, no prose: {"overlay":true|false,"broken":true|false,' +
     '"writing":true|false' +
+    (read ? ',"read":"..."' : "") +
     (expect ? ',"missing":true|false' : "") +
     (expect && detail ? ',"detail":true|false,"detail_what":"..."' : "") +
     (forbids ? ',"forbidden":true|false' : "") +
@@ -737,6 +793,10 @@ export async function scanStillDefects(
     // The state, action, number and position the description says — asked with `missing`, unless it
     // is turned off (`detailCheckOn`).
     const askDetail = !!expect && detailCheckOn();
+    // What it reads, so the caller can pass words the picture's own line says (job 413 scene 2). A
+    // picture allowed words is held to exactly those (`allowedTextQuestion`), and one with no line
+    // (the CTA) has no words of its own to pass.
+    const askRead = !!line?.trim() && !allowedText;
     // Spelling and a named pattern need the larger frame.
     const [w, h] = allowedText || exactLook ? [1280, 720] : [DEFECT_SCAN_WIDTH, DEFECT_SCAN_HEIGHT];
     const small = await sharp(buffer)
@@ -761,16 +821,17 @@ export async function scanStillDefects(
         (expect && exactLook ? exactLookQuestion(exactLook) : "") +
         (mustShow ? requiredThingsQuestion(mustShow, requiredLook) : "") +
         (expect && fromOutside ? INSIDE_PART_NOTE : "") +
-        (expect && softPrint ? SOFT_PRINT_QUESTION : "") +
+        (expect && softPrint ? SOFT_PRINT_QUESTION : expect && allowedText ? SOFT_REST_QUESTION : "") +
         (askDetail ? detailQuestion(expect!) : "") +
         (line ? placeQuestion(line, !!ruledOut) : "") +
         (allowedText ? allowedTextQuestion(allowedText) : "") +
+        (askRead ? READ_WORDS_QUESTION : "") +
         (ruledOut ? forbiddenQuestion(ruledOut) : "") +
         // Light the line or the picture's own description names is what was asked for, not staged.
         namedLightQuestion(namedLight(line, expect)) +
         (noPerson ? QR_BACKDROP_PERSON_QUESTION : "") +
         (noFace ? OTHER_FACE_QUESTION : "") +
-        verdictShape(expect, line, askDetail, !!ruledOut, noPerson, noFace),
+        verdictShape(expect, line, askDetail, !!ruledOut, noPerson, noFace, askRead),
       userMessage:
         "Is any text stamped over this frame, does it contain obviously impossible structure, " +
         "is there readable writing in the scene, and is it messy or branded?" +
@@ -809,6 +870,8 @@ export async function scanStillDefects(
       delete verdict.detailWhat;
     }
     if (!line) verdict.wrongPlace = false;
+    // …nor a "read" nobody asked for: on a picture allowed words, it must never excuse other writing.
+    if (!askRead) delete verdict.read;
     // A stray "forbidden" on a picture nothing was ruled out for is not an answer to anything.
     if (!ruledOut) delete verdict.forbidden;
     // …nor a "person" on a picture allowed one (a cutaway may show hands at work).

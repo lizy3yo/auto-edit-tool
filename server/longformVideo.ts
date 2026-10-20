@@ -28,6 +28,16 @@ import sharp from "sharp";
 import { invokeClaude } from "./claude";
 import { invokeGemini } from "./gemini";
 import {
+  cutawayPromptLane,
+  leftMotionLane,
+  notYetSaidAt,
+  ownWordsOf,
+  rewriteFallback,
+  rewriteFault,
+  saysNothingThere,
+  withoutAddedKeyThings,
+} from "./brollRewrite";
+import {
   applyShotPlan,
   deriveContinuitySheet,
   HOST_HANDOFF_MIN_SEC,
@@ -59,6 +69,7 @@ import {
   ownTypedPicture,
   ownTypedPanel,
   showsScreen,
+  tokenSpans,
 } from "./shotList";
 import {
   anotherOfItsKindClause,
@@ -241,19 +252,38 @@ export const THINGS_AT_REST_CLAUSE =
  * goes out with the prompt changed against it (`plainLookRedraw`, round 13), so a third draw buys
  * nothing more. Every other fault keeps the picture as before, and the job says so
  * (`notePictureFlaws`). Pure.
+ *
+ * THE FIRST BROKEN DRAW OF A TOOL OR A LINE IS TOLD WHAT WAS WRONG (round 14, "named fault"): the
+ * first broken frame was redrawn from the very same prompt, and a tool's position is what the prompt
+ * itself sets up — job 414 scene 17's froe lay flat on top of the bolt with no club on all four draws,
+ * the at-rest draw included, and the first one shipped. When the check's own words name a tool at work
+ * in a picture of someone at work, or a cable, wire, cord, hose or pipe in any picture
+ * (`namedFaultClause`), that reroll goes out with the fault named and the rule that fixes it
+ * (`namedFaultRedraw`). It takes the reroll's own turn — no extra draw — and the second broken still
+ * gets the at-rest draw.
  */
-export type FaultRedraw = "at rest" | "soft print";
+export type FaultRedraw = "at rest" | "soft print" | "named fault";
 export function faultRedrawFor(
   scene: Pick<StoryboardScene, "blurPrint" | "pictureText">,
-  defects: { broken?: boolean; writing?: boolean; overlay?: boolean; unchecked?: boolean },
+  defects: { broken?: boolean; writing?: boolean; overlay?: boolean; unchecked?: boolean; what?: string },
   /** Earlier draws of this picture the check named broken / readable writing. */
   seen: { broken: number; writing: number },
   tried: ReadonlySet<FaultRedraw>,
   /** The prompt is still the ordinary one — a content-policy rung must not be rebuilt over. */
-  ordinaryPrompt: boolean
+  ordinaryPrompt: boolean,
+  /** Someone is drawn at work in it (`humanPresent`, not drawn with nobody in it). */
+  atWork = false
 ): FaultRedraw | undefined {
   if (defects.unchecked) return undefined;
   if (defects.broken && seen.broken > 0 && ordinaryPrompt && !tried.has("at rest")) return "at rest";
+  if (
+    defects.broken &&
+    seen.broken === 0 &&
+    ordinaryPrompt &&
+    !tried.has("named fault") &&
+    namedFaultClause(defects.what, "", atWork)
+  )
+    return "named fault";
   if (
     defects.writing &&
     !defects.overlay &&
@@ -264,6 +294,113 @@ export function faultRedrawFor(
   )
     return "soft print";
   return undefined;
+}
+
+/** How the named-fault redraw's clause starts — found again so it is never added twice. */
+export const NAMED_FAULT_START = "THE LAST DRAW OF THIS PICTURE GOT THIS WRONG:";
+/**
+ * The redraw's rule for a tool at work whose fault names no tool of its own kind: the parts of
+ * `TOOL_POSITION_CLAUSE` and `TOOL_CONTACT_CLAUSE` a broken frame most often misses, in one sentence.
+ */
+export const TOOL_AT_WORK_FIX =
+  "Every tool is held by its handle in its normal grip and at its normal working angle; a tool that " +
+  "is working has its blade, bit or edge really in the material it works on — never resting on top " +
+  "of it, in the air beside it or through something solid — and its path is clear of the table and " +
+  "of every hand.";
+/** A fault the check names on a tool or a tool's working part. */
+const TOOL_FAULT =
+  /\b(?:blades?|(?:drill|router)\s+bits?|saws?|chisels?|gouges?|froes?|wedges?|mauls?|axes?|hatchets?|knife|knives|draw\s?knife|drawknives|spokeshaves?|planes?|drills?|screwdrivers?|hammers?|mallets?|needles?|scissors|shears|cutters?|wrench(?:es)?|pliers|tools?)\b/i;
+/**
+ * The same words naming no tool: a wedge of food, a shoe or a golf club, a door wedge, pine needles.
+ * Taken out before a fault or a picture's words are read for a tool.
+ */
+const NOT_A_TOOL =
+  /\b(?:(?:lemon|lime|orange|apple|cheese|potato|tomato|melon|watermelon|cake|pizza|golf|sand|pitching|lob|gap|door)\s+wedges?|wedges?\s+(?:heels?|sandals?|shoes?|boots?|pillows?|cushions?|salads?|of\s+(?:lemon|lime|orange|apple|cheese|cake|pie|pizza|melon))|(?:pine|fir|spruce|cedar)\s+needles?)\b/gi;
+/**
+ * An AIRCRAFT in the fault or the picture: its "plane" is no tool. The replay over the stored
+ * storyboards found two pictures of passengers in "plane seats" and at a "plane window" (job 410
+ * scenes 2 and 24) that would have been told how a plane shaves wood. No word a workshop uses too:
+ * not "pilot" (a pilot hole), "flying" (chips flying), "flight" (of stairs) or "jet" (jet-black).
+ */
+const AIRCRAFT =
+  /\b(?:air(?:plane|craft|liner|port|line)s?|aeroplanes?|jetliners?|cockpits?|runways?|passengers?|tray\s+tables?|fuselages?|overhead\s+bins?|propellers?|hangars?|planes?\s+(?:seats?|windows?|wings?|tickets?|cabins?|aisles?|rides?|trips?|engines?|crash(?:es)?|landing|lands))\b/i;
+/** A fault's or a picture's words with every tool word that names no tool taken out. */
+const toolWords = (t: string, aircraft: boolean) => {
+  const out = t.replace(NOT_A_TOOL, " ");
+  return aircraft ? out.replace(/\bplanes?\b/gi, " ") : out;
+};
+/**
+ * …a tool that splits wood (`SPLIT_STRIKE_CLAUSE`) — a maul or axe is swung, never struck. Not END GRAIN
+ * on its own: the replay found seven pictures of a wood-burning pen or torch on a tray's end grain
+ * (jobs 110, 131, 146, 161, 171, 175) that would have been told to strike a froe with a club. Nor a
+ * table saw's riving knife.
+ */
+const SPLITTING_TOOL = /\b(?:froes?\b|riv(?:e|en|es|ing)\b(?!\s+kni(?:fe|ves)))/i;
+/** …a wedge, only where something is split (a wedge alone may hold a door or be a slice of cheese). */
+const SPLITTING_WEDGE = /\bwedges?\b/i;
+const SPLIT_CUE = /\b(?:split(?:s|ting)?|mauls?|sledges?(?:hammers?)?|logs?|bolts?|stumps?|firewood|kindling)\b/i;
+/** …a tool that shaves wood by a pull or a push (`SHAVING_STROKE_CLAUSE`). */
+const SHAVING_TOOL = /\b(?:draw\s?knife|drawknives|spokeshaves?|planes?|planing)\b/i;
+/**
+ * A fault in the BODY — a finger, hand or arm too many or too few. A fresh seed clears it (job 352's
+ * note: 7 of 9 broken frames came right on a plain reroll), and naming "six fingers" in the prompt is
+ * the one thing that could put them back, so it keeps its plain reroll even beside a tool.
+ */
+const BODY_COUNT_FAULT =
+  /\b(?:extra|third|too\s+many|too\s+few|six|seven|eight)[\s-]+(?:fingers?|fingered|thumbs?|hands?|handed|arms?|armed|legs?)\b|\b(?:fingers?|thumbs?|hands?|arms?)\s+(?:fused|merged|duplicated)\b/i;
+
+/**
+ * The clause the first broken draw of a tool or a line is redrawn with (`faultRedrawFor`'s "named
+ * fault"): the check's own words for what was wrong, then the rule that fixes it — a line's
+ * (`CONNECTING_LINES_CLAUSE`) in any picture; on a picture of someone at work, the rule of the tool's
+ * own kind, named by the fault or else by the picture's words (`SPLIT_STRIKE_CLAUSE`,
+ * `SHAVING_STROKE_CLAUSE`), else `TOOL_AT_WORK_FIX`. Undefined for any other fault, a fault with no
+ * words, a finger or a hand too many (`BODY_COUNT_FAULT`), and a tool in a picture with nobody in it —
+ * a tool with no hand on it cannot be put to work, so that frame keeps its plain reroll and then the
+ * at-rest draw. Pure.
+ */
+export function namedFaultClause(
+  what: string | undefined,
+  /** The picture's own words (its subject and description), for a fault that names no tool kind. */
+  words: string,
+  atWork: boolean
+): string | undefined {
+  const fault = (what ?? "")
+    .replace(/["“”]/g, "'")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/[.;,:\s]+$/, "");
+  if (!fault || BODY_COUNT_FAULT.test(fault)) return undefined;
+  let rules: string[];
+  // A plane, a wedge or a needle that is no tool (an aircraft, a slice, a pine) names no tool's rule.
+  const aircraft = AIRCRAFT.test(`${fault} ${words}`);
+  const faultTool = toolWords(fault, aircraft);
+  if (connectingLinesClause(fault)) rules = [CONNECTING_LINES_CLAUSE];
+  else if (atWork && TOOL_FAULT.test(faultTool)) {
+    const kinds = (t: string) => [
+      ...(SPLITTING_TOOL.test(t) || (SPLITTING_WEDGE.test(t) && SPLIT_CUE.test(t)) ? [SPLIT_STRIKE_CLAUSE] : []),
+      ...(SHAVING_TOOL.test(t) ? [SHAVING_STROKE_CLAUSE] : []),
+    ];
+    const own = kinds(faultTool);
+    const fromWords = kinds(toolWords(words, aircraft));
+    rules = own.length ? own : fromWords.length ? fromWords : [TOOL_AT_WORK_FIX];
+  } else return undefined;
+  return `${NAMED_FAULT_START} ${fault}. This time draw it the way it really is. ${rules.join(" ")}`;
+}
+
+/**
+ * The prompt of the named-fault redraw: the prompt as it was, the fault and its rule after it —
+ * never twice. Pure.
+ */
+export function namedFaultRedraw(
+  prompt: string,
+  what: string | undefined,
+  words: string,
+  atWork: boolean
+): string {
+  if (prompt.includes(NAMED_FAULT_START)) return prompt;
+  const clause = namedFaultClause(what, words, atWork);
+  return clause ? `${prompt} ${clause}` : prompt;
 }
 import {
   deriveStyleBible,
@@ -3854,6 +3991,8 @@ export function promoteCutawayToHost(s: StoryboardScene): void {
   s.objectMotion = undefined;
   s.splitVisual = undefined;
   s.visualPrompt = talkingHeadVisualPrompt(DEFAULT_HOST_DESCRIPTOR, s.index);
+  // The prompt is no longer a rewrite of a cutaway, so what it was written for no longer applies.
+  s.promptLane = undefined;
   // A shot-list piece is exactly as long as its words; the ordinary host floor would freeze it.
   s.minHoldSec = Math.max(
     s.minHoldSec ?? 0,
@@ -5439,6 +5578,33 @@ export const RULED_OUT_RULE =
   "you can see (\"don't count on it\") is not this rule.";
 
 /**
+ * What the prompt writer is handed beside a line is not the line (2026-10-20, job 414 scenes 2-8).
+ * The props list, the stretch line and the shots before cover other lines — the stretch line LATER
+ * ones too — and the writer took them as things to show: the back wall with the axe, froe and
+ * drawknife a line reveals at 21 s was in every picture from 2.6 s, under lines that name no tool.
+ * "Anything on the PROPS LIST looks exactly as listed. Continue from the previous shots: the same
+ * objects…" read as "put them in", and outweighed "no future events". This replaces it; the code
+ * takes out what still gets through when a later line reveals it (`withoutAddedKeyThings`).
+ */
+export const NOTHING_UNNAMED_RULE =
+  "ONLY WHAT THIS LINE NAMES: a thing on the PROPS LIST looks exactly as listed WHEN the shot shows " +
+  "it — the list is how things look, never a reason to put one in. Continue from the previous " +
+  "shots — the story further along, a different framing — but a thing they showed comes back only " +
+  "when this line or its MUST SHOW is about it. The stretch line and the props list cover other " +
+  "lines too, some still to come: never put in a thing they name that this line and its MUST SHOW " +
+  "do not, not even in the background — a thing a later line reveals, shown early, gives the " +
+  "reveal away.";
+
+/**
+ * A line about nothing being there is a picture of the empty place (2026-10-20, job 414 scene 2:
+ * "you will come up nearly empty-handed" over a cabin crowded with crocks, a pail, bowls and chests).
+ */
+export const NOTHING_THERE_RULE =
+  "NOTHING THERE: when the line says a place is empty or bare, or that a search comes up (nearly) " +
+  "empty, show that place bare — empty shelves, an empty room or yard, a bare table — with nothing " +
+  "put in to fill it, unless the line itself goes on to put something there.";
+
+/**
  * Composition rule for every generated b-roll frame. The setting clause used to ask for "natural
  * everyday clutter", and the model filled the frame edges with branded shop-vacs, tool chests and
  * bins while the subject sat small in the middle — an openwork lattice then showed that clutter
@@ -5865,8 +6031,9 @@ export const STILL_BROLL_ENHANCER_SYSTEM =
   "thing, named plainly first in your prompt and framed CLOSE — taking up much of the frame, the " +
   "first thing the eye lands on, though casually framed like a real phone photo rather than dead " +
   "centre, with the place only a background — never a " +
-  "different object, a wider scene it gets lost in, or a symbol of it. Anything on the PROPS LIST looks exactly as listed. Continue from " +
-  "the previous shots: the same objects, the story further along, a different framing.\n" +
+  "different object, a wider scene it gets lost in, or a symbol of it.\n" +
+  `- ${NOTHING_UNNAMED_RULE}\n` +
+  `- ${NOTHING_THERE_RULE}\n` +
   "- PLACE: set the shot where the narration puts it. When the line is about where a thing is " +
   "used, sold, or comes from (a Japanese home with sliding doors, a market stall, a customer's " +
   'living room, outdoors) — or compares the subject to where it is FOUND ("the kind of ' +
@@ -6083,21 +6250,22 @@ export const OBJECT_MOTION_DIRECTIVE =
   "follows a real path under gravity, nothing impossibly suspended, and nothing blurred, " +
   "streaked, or smeared. Everything else in the frame stays at rest.";
 
+// THERE IS NO HANDS-AT-WORK VIDEO DIRECTIVE ANY MORE (2026-10-20, job 413 scenes 9-10). Hands and
+// people are never a video (`videoKind`, 2026-09-30), yet the still/motion balancer could still flip
+// a hands shot to motion before the prompt writer ran, and the writer was then told "this is a VIDEO
+// cutaway with hands at work … fingers on the tool, pressing or adjusting what they work on". It
+// handed that back as both pictures' description, the gate made them photos, and scene 9 shipped as
+// someone hand-planing a board on a garage-business channel. A prompt is now written for what the
+// video rule will make the shot (`cutawayPromptLane`), so a hands shot is written as a photo.
+
 /**
- * Prepended to the cutaway enhancer userMessage on a `humanPresent` VIDEO clip (not still).
- * The shared `STILL_BROLL_ENHANCER_SYSTEM` demands hands "paused or at rest" — correct for
- * stills and Ken Burns, wrong for the video lane where `ANON_PERSON_SUFFIX` and
- * `PERSON_MOTION_CAMERA_CLAUSE` expect hands mid-task from the first frame. Same pattern as
- * `OBJECT_MOTION_DIRECTIVE`: override only the settled-instant rule for hands; everything else
- * in the system prompt stays.
+ * The instruction blocks the cutaway prompt writer is handed beside a shot. A rewrite that repeats
+ * one of them instead of describing its own picture is refused (`rewriteFault`).
  */
-export const HUMAN_MOTION_DIRECTIVE =
-  "IMPORTANT: this is a VIDEO cutaway with hands at work — the narration implies a manual " +
-  "action. For this one prompt, override the paused/at-rest rule for the hands ONLY: describe " +
-  "bare weathered hands already in frame and mid-task from the start (fingers on the tool, " +
-  "pressing or adjusting what they work on), never entering from off-screen and never paused " +
-  "on a finished result. Keep everything else at rest — no face, head, or body, and no broad " +
-  "arm movement. The hands hold realistic anatomy with no extra fingers.";
+export const CUTAWAY_STOCK_DIRECTIVES: readonly string[] = [
+  CUTAWAY_PERSON_FREE_DIRECTIVE,
+  OBJECT_MOTION_DIRECTIVE,
+];
 
 /**
  * HERO FRAMING for a shot the shot list cut for one named thing (`scene.showSubject`). It replaces
@@ -6130,6 +6298,86 @@ const SHOT_ANGLE_SUFFIX: Record<string, string> = {
 };
 
 /**
+ * A FROE OR A WEDGE IS STRUCK IN, never pressed (round 14, job 414 scene 17: "split by hand … with a
+ * froe" drawn four times with the blade lying flat on top of the bolt's end grain, both hands pressing
+ * down on the handle and no club anywhere — refused as broken on every draw, and the first draw
+ * shipped). The end-grain rule said where the edge goes, never what drives it there, and two hands
+ * on a handle cannot put an edge into end grain, so the picture maker left it on top. A maul or an
+ * axe that splits is swung, so neither is named here. Part of `TOOL_POSITION_CLAUSE`.
+ */
+export const SPLIT_STRIKE_CLAUSE =
+  "A froe or a wedge never goes in by hand pressure: it is STRUCK down into the end grain with a " +
+  "wooden club, mallet or sledge — for a froe, one hand holds its handle upright while the other " +
+  "brings the club down on the back of its blade — or, once a froe is sunk in the wood, its handle " +
+  "is pulled sideways to lever the split open.";
+
+/**
+ * A TOOL THAT SHAVES TRAVELS ALONG THE PIECE (round 14, job 414 scene 13: "since folk schools still
+ * teach plenty of these" drawn with a drawknife laid along the length of the board, the worker at the
+ * bench's side — its stroke would run across the board's narrow width; scene 14 repeated the stroke).
+ * The tool rules gave a pull tool its grip and set-up, never which way it travels against the work.
+ * Part of `TOOL_POSITION_CLAUSE`. Which way a PLANE goes is not said: a Western plane is pushed, a
+ * Japanese one pulled, and the stored storyboards hold a Japanese plane — told "pushed away", a
+ * picture of one being pulled would be turned round.
+ */
+export const SHAVING_STROKE_CLAUSE =
+  "A tool that shaves wood by being pulled or pushed — a drawknife, spokeshave or plane — has its " +
+  "edge lying ACROSS the piece and travels ALONG the piece's length, with the grain (a drawknife is " +
+  "pulled toward the user's body), never sideways across the piece's narrow " +
+  "width; the piece is held still in a vise, on a shaving horse, against a bench stop or clamped down.";
+
+/**
+ * EVERY CABLE, WIRE OR HOSE ENDS AT THE PART IT SERVES (round 14, job 413 scene 29: "pull the spark
+ * plug wire first" drawn with the plug lead looping down into the carburetor's fuel inlet — the fuel
+ * hose had become the plug wire, 11 s on a small-engine channel). The picture's words named one end of
+ * the wire and nothing said where the other goes, so the picture maker ran it to the nearest round
+ * fitting and merged the two lines. Added to any picture whose words name a line that connects things
+ * (`connectingLinesClause`), with people in it or not. A line coiled or hung up is left loose: the
+ * replay over the stored storyboards found garden hoses coiled on a wall beside a fire extinguisher,
+ * which a rule to fit every hose to a part would have plumbed into something. Lines MAY meet at a real
+ * fitting: the replay found plumbing pictures — a sink's P-trap with its slip nuts (job 11), "grey PVC
+ * pipework with visible joints and bends" (job 403 scenes 10 and 14) — where a pipe is several pieces
+ * and a branch joins the run at a tee; told "one continuous piece" that never joins another line, the
+ * picture maker could cut the drain apart. What it must never do is turn one line into another of a
+ * different kind, which is what job 413 drew.
+ */
+export const CONNECTING_LINES_CLAUSE =
+  "Every cable, wire, cord, hose or pipe that connects things runs unbroken from where it really " +
+  "starts to the part it really serves (a pipe through its own real joints and bends), and is fitted " +
+  "onto that part: an electrical lead to what it powers or fires, a fuel, water or air line to its " +
+  "own fitting. It never runs into a different part's fitting, never swaps with or turns into a " +
+  "different line (an electrical lead never becomes a fuel or water line), and never fades into a " +
+  "surface; lines meet only where a real fitting joins them, and two lines that run side by side stay " +
+  "two separate lines. One that is coiled, hung up or lying loose has its own free ends and runs into " +
+  "nothing.";
+
+/**
+ * Words naming a line that connects one thing to another. A bare "cord" is not one: the replay found it
+ * almost only as a craft material (a drawstring, clothesline cord coiled into a fabric bowl, a twisted
+ * cord of yarn) — only an electrical cord, or one said to be plugged in or running somewhere, is.
+ */
+const CONNECTING_LINE =
+  /\b(?:cables?|wires?|wiring|hoses?|hosepipes?|tubing|pipes?|(?:power|extension|electric(?:al)?|charging|charger|lamp|appliance|usb|phone|mains)\s+cords?|cords?\s+(?:plugged|running|runs|leading)|(?:fuel|gas|oil|water|air|brake|vacuum|power|supply|feed|drain)\s+lines?)\b/i;
+/**
+ * …and the same words used for something that connects nothing: a wire brush, mesh, fence, grille or
+ * display rack, wire-rimmed glasses, a cable-knit sweater or a cable stitch, a pipe wrench or clamp, a
+ * tobacco pipe — and a line the words say is NOT there. The replay found five smoke alarms described
+ * "no visible wiring" or "no wires or connections" (jobs 229, 259, 381, 393, 394): told how wires run,
+ * the picture maker would be handed the wires the line rules out.
+ */
+const NOT_A_CONNECTING_LINE =
+  /\b(?:(?:no|without|never)\s+(?:visible\s+|exposed\s+|loose\s+|hanging\s+|trailing\s+)?(?:wires?|wiring|cables?|cords?|hoses?|pipes?)(?:\s+(?:or|and|nor)\s+\w+)?|wire[\s-]+(?:brush(?:es)?|wheels?|racks?|mesh|baskets?|shel(?:f|ves|ving)|fenc(?:e|es|ing)|whisks?|frames?|hangers?|cutters?|strippers?|wool|rimmed|framed|grilles?|grills?|grates?|guards?|display)|cables?[\s-]+(?:knit|stitch(?:es|ing)?|needles?|patterns?|cars?|ties?)|(?:chicken|barbed|baling|fence|fencing|picture|floral|craft|jewelry|jewellery|beading|armature)\s+wires?|pipe\s+(?:wrench(?:es)?|cutters?|cleaners?|clamps?)|(?:tobacco|smoking|corncob)\s+pipes?)/gi;
+
+/**
+ * `CONNECTING_LINES_CLAUSE` (with its leading space) when a picture's own words name a cable, wire,
+ * cord, hose or pipe that connects things; "" otherwise — a picture with no line in it is never told
+ * about lines. Pure.
+ */
+export function connectingLinesClause(words: string): string {
+  return CONNECTING_LINE.test(words.replace(NOT_A_CONNECTING_LINE, " ")) ? ` ${CONNECTING_LINES_CLAUSE}` : "";
+}
+
+/**
  * Appended to the HANDS-ONLY b-roll lane (`humanPresent`) — used only when a beat genuinely
  * needs a human action on screen. B-roll never shows a person: only bare hands and forearms
  * enter the frame at the task, never a face, head, or body, and never the channel host.
@@ -6156,6 +6404,10 @@ const SHOT_ANGLE_SUFFIX: Record<string, string> = {
  * knife only as a carving one: a kitchen knife cuts DOWN into the board beside the guide hand, and
  * one being sharpened has fingers on its flat (job 406's knife-sharpening lines), poses "pushed away
  * from the other hand" does not describe.
+ *
+ * WHAT DRIVES A SPLITTING EDGE IN, AND WHICH WAY A SHAVING TOOL TRAVELS (round 14, the review of job
+ * 414): `SPLIT_STRIKE_CLAUSE` and `SHAVING_STROKE_CLAUSE`, inside this clause so every picture of a
+ * person or hands at work carries them.
  */
 export const TOOL_POSITION_CLAUSE =
   "Every tool is held and placed the way a person who really uses it does: by its handle, in its " +
@@ -6168,13 +6420,17 @@ export const TOOL_POSITION_CLAUSE =
   "grain — the top, when it stands on end — its edge sunk in the wood and its blade along the " +
   "grain, so the split opens along the line of the blade; never pushed into the side of the piece, " +
   "resting on the wood with its edge not in it, sticking out into the air with no wood under its " +
-  "edge, or lying across a split already open. An axe that is chopping, felling or hewing rather " +
+  "edge, or lying across a split already open. " +
+  SPLIT_STRIKE_CLAUSE +
+  " An axe that is chopping, felling or hewing rather " +
   "than splitting bites into the side of the log or trunk. The holding " +
   "hand stays well back and to the side of the blade, bit or edge — never in front of it, in its " +
   "path, or right beside the cut — and a blade never cuts into the table under the work. A chisel, " +
   "gouge, plane or a knife carving wood is pushed AWAY from the other hand: that hand is on the " +
   "tool itself or holds the work behind the edge, or the work is clamped, and no hand ever lies on " +
-  "the work ahead of where the edge points. A piece being split is held by its block, fork or " +
+  "the work ahead of where the edge points. " +
+  SHAVING_STROKE_CLAUSE +
+  " A piece being split is held by its block, fork or " +
   "wedge, never by a hand where it splits open. The piece " +
   "being worked sits ON its surface or in its holder as a separate solid thing — never sunk " +
   "into, passing through or grown out of the table or bench.";
@@ -7298,8 +7554,11 @@ export function buildStillPrompt(
   // on every picture that named it ("close view of the toilet's internal porcelain S-shaped trapway
   // channel") or was about it ("close-up of the smooth white curved S-shaped porcelain channel").
   const outside = !visualOverride && drawnFromOutside(scene) ? ` ${SEEN_FROM_OUTSIDE_CLAUSE}` : "";
+  // A LINE ENDS AT THE PART IT SERVES (`connectingLinesClause`, job 413 scene 29: the spark plug wire
+  // drawn running into the carburetor's fuel inlet) — only when the picture's own words name one.
+  const lines = !aggressive ? connectingLinesClause(`${shown ?? ""} ${visual}`) : "";
   return withAllowedText(
-    `${lead}${visual}${scrubLegibleWriting(namedLookClause(scene))}${look}${place}${another}${outside}${item}${angleSuffix}${personSuffix}${memory}${app} ${amateurIphoneLook(subject, motion)} ${framing} ${noFigures} ${NO_BOOK_SUFFIX}`,
+    `${lead}${visual}${scrubLegibleWriting(namedLookClause(scene))}${look}${place}${another}${outside}${lines}${item}${angleSuffix}${personSuffix}${memory}${app} ${amateurIphoneLook(subject, motion)} ${framing} ${noFigures} ${NO_BOOK_SUFFIX}`,
     scene.pictureText,
     scene.blurPrint
   );
@@ -7488,6 +7747,9 @@ export function asksToReadPrint(text: string | undefined): boolean {
  * already soft, a cover or an operator's asset, or a SCREEN: its words are already drawn as soft
  * bars (`SCREEN_TEXT_AS_BARS`) and an arm's-length view would shrink the screen it is about. A split
  * scene is read off its panel (`splitVisual`), which inherits the mark (`buildSplitRightScene`).
+ * A picture whose line says some of the words is not marked, yet its OTHER print is soft too: the
+ * allowed-words rule carries that itself (`withAllowedText` → `ALLOWED_TEXT_REST_CLAUSE`), so the
+ * said words stay readable — the arm's-length view and the step back would shrink them past reading.
  * Returns whether it marked. Mutates the scene.
  */
 export function blurUnsaidPrint(scene: StoryboardScene): boolean {
@@ -7502,8 +7764,54 @@ export function blurUnsaidPrint(scene: StoryboardScene): boolean {
 }
 
 /**
+ * ALLOWED WORDS AND SOFT PRINT GO TOGETHER (2026-10-19, job 411 scene 17). A line that says one word
+ * printed on a thing ("…ends in the word migratorius") allows that word — and the rest of the print
+ * on the same thing was never asked to be soft. The picture was "close-up of an open bird field guide
+ * page … with its entry text", and it came back twice with a sharp heading and two readable paragraphs
+ * of made-up entry text beside the one allowed word, refused for writing both times and shipped. The
+ * blurred-print road (`BLURRED_PRINT_CLAUSE`, arm's length, the step back) is not the answer here: it
+ * shrinks the said word past reading too. So the allowed words are the one sharp writing, and every
+ * other print on the page, label, box or sign falls out of focus around them.
+ */
+export const ALLOWED_TEXT_REST_CLAUSE =
+  "Those words are the one sharp, in-focus writing, large enough to read at a glance. Any other " +
+  "printing — the rest of a page, label, box or sign, or anything else in the frame — is there but " +
+  "small, soft and out of focus, the way a phone blurs print it is not focused on: no other word, " +
+  "letter or number can be read. Never an evenly sharp close-up of a whole page, label or box full " +
+  "of print: the camera is on those words and the rest falls away.";
+
+/**
+ * A description that asks for MORE print than the said words — job 411 scene 17's "with its entry
+ * text" — asks for it a clause before the rule that allows one word, and the picture maker drew the
+ * entry. Only a determiner-led ask ("with its text", "and the printed wording"), never one followed by
+ * what it reads (that is the allowed words) or one already soft, and never a bare "print", which is
+ * also a pattern. "Already soft" reads to the end of the clause: stored descriptions say "and the
+ * text is unreadable" (job 303 scene 18) and "a small logo and the text are soft and unreadable" (job
+ * 343 scene 4), which a second "soft and unreadable" would only garble. Nor is a thing named after
+ * print ("the writing desk", "the text message", "the printing press") an ask for print.
+ */
+const OTHER_PRINT_ASK =
+  /\b(?:with|and|showing|plus)\s+(?:its|the|their|some|his|her)\s+(?:(?:(?:entry|body|printed|descriptive|written|surrounding|other|accompanying)\s+)?(?:text|writing|wording|paragraphs?|printing)|(?:fine|small)\s+print)\b(?!\s*(?:reading|reads|that\s+reads|saying|says|soft|blurred|["'“‘:]))(?!\s+(?:desk|pad|paper|press|message|box|table|tool|instrument|set|kit|hand|style|surface|area|space|block|book)s?\b)(?![^.;,]{0,40}\b(?:soft|blurred|blurry|unreadable|illegible|out\s+of\s+focus)\b)/gi;
+
+/**
+ * Whether the allowed words follow an ask for print (`OTHER_PRINT_ASK`) — "a page with the text
+ * migratorius in italics" asks for the allowed word, not for more. Read off the words' own tokens,
+ * never the whole text: a label's three said things ("Photoelectric, Sealed 10-Year, Interconnected",
+ * job 335 scene 5) run past any window, and the ask before them would be wrongly softened. A short
+ * word ("the", "a") alone says nothing, so only one of four letters or more counts when there is one.
+ */
+function allowedWordsFollow(after: string, text: string): boolean {
+  const said = tokenSpans(text).map(t => t.tok);
+  const key = said.filter(w => w.length >= 4);
+  const near = new Set(tokenSpans(after.slice(0, 48)).map(t => t.tok));
+  return (key.length ? key : said).some(w => near.has(w));
+}
+
+/**
  * A picture whose line says the words printed on a thing (`scene.pictureText`) shows exactly those,
- * and nothing else readable: the look's no-writing rule is swapped for it. Unchanged otherwise.
+ * and nothing else readable: the look's no-writing rule is swapped for it, every other print is soft
+ * around them (`ALLOWED_TEXT_REST_CLAUSE`), and a description's ask for more print than that is asked
+ * soft (`OTHER_PRINT_ASK` — unless the allowed words follow it). Unchanged otherwise.
  */
 export function withAllowedText(
   prompt: string,
@@ -7524,10 +7832,82 @@ export function withAllowedText(
   const allowed =
     `The ONLY readable writing anywhere in the frame is exactly "${text}", printed clearly on the ` +
     `thing it belongs to and spelled exactly like that — no other words, letters, numbers, prices ` +
-    `or labels readable on any surface.`;
-  return prompt.includes(NO_READABLE_TEXT)
-    ? prompt.split(NO_READABLE_TEXT).join(allowed)
-    : `${prompt} ${allowed}`;
+    `or labels readable on any surface. ${ALLOWED_TEXT_REST_CLAUSE}`;
+  const framed = prompt.replace(OTHER_PRINT_ASK, (ask: string, at: number, whole: string) =>
+    allowedWordsFollow(whole.slice(at + ask.length), text) ? ask : `${ask} soft and unreadable`
+  );
+  return framed.includes(NO_READABLE_TEXT)
+    ? framed.split(NO_READABLE_TEXT).join(allowed)
+    : `${framed} ${allowed}`;
+}
+
+/** How the allowed-words redraw's clause starts — found again so it is never added twice. */
+export const ALLOWED_TEXT_REDRAW_START = "CLOSER ON THE SAID WORDS:";
+
+/**
+ * The redraw of a picture allowed some words (`scene.pictureText`) that came back with "writing" —
+ * other print readable, or the allowed words missing or misspelt (job 411 scene 17: the same sharp
+ * page twice, nothing changed between the draws). The blurred-print picture's step back
+ * (`STEP_BACK_CLAUSE`) would shrink the said words too, so this one goes the other way: closer on
+ * them, everything around them out of focus. Rides the re-roll the fault already gets — no extra
+ * draw — and is added once. Pure.
+ */
+export function allowedTextRedraw(prompt: string, text: string): string {
+  if (prompt.includes(ALLOWED_TEXT_REDRAW_START)) return prompt;
+  return (
+    `${prompt} ${ALLOWED_TEXT_REDRAW_START} the camera is closer on "${text.replace(/"/g, "'")}" ` +
+    "than before — those words large, sharp and in focus — and everything around them falls away " +
+    "soft and out of focus, too blurred for any other word, letter or number to be read."
+  );
+}
+
+/**
+ * A WORD THE LINE SAYS IS NOT MADE-UP WRITING (2026-10-19, job 413 scene 2). Under the list item
+ * "A loan," the picture maker put the heading "LOAN" on the loan papers — exactly the word spoken,
+ * the fine print soft — and the check, with no allowed words set (the shot list set none), refused it
+ * for writing three times: two redraws paid for, and a "readable writing" badge for a fault the
+ * picture did not have. The check now reports what it read (`READ_WORDS_QUESTION`) and this decides:
+ * writing made ONLY of words the picture's own line says — the test the planner's allowed words
+ * pass (`saidText`: every word in the line, at most six) — is not counted. Made-up writing still is:
+ * any word the line does not say ("American Robin" over a line naming the robin), a read the check
+ * cut short ("…"), and anything the prompt scrubber never lets into a prompt (`scrubLegibleWriting`:
+ * a brand the line names, a price list, a receipt). A NAME the line says is not passed either: the
+ * scrubber knows only some brands, and "Every spring, Marketplace fills up…" (job 413 scene 26) names
+ * one it does not — a real app's words stay soft and unreadable (`REAL_APP_SCREEN_CLAUSE`). A name is
+ * read off the line itself: a word it only ever writes capitalised away from a sentence's start. Every
+ * word of the read is counted, never the first 60 characters `saidText` keeps (a long made-up sixth
+ * word would go unread). Pure.
+ */
+export function writingTheLineSays(read: string | undefined, line: string | undefined): boolean {
+  // Quote marks round what was read are the check's, not the picture's ("'LOAN'" is LOAN) — and the
+  // scrubber drops a quoted word whole, which would read as a change.
+  const words = read
+    ?.replace(/["“”]/g, " ")
+    .replace(/(^|[\s,;:])['‘]+/g, "$1")
+    .replace(/['’]+(?=$|[\s,;:.])/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!words || !line?.trim() || /…|\.\.\./.test(words)) return false;
+  if (scrubLegibleWriting(words) !== words) return false;
+  const want = tokenSpans(words).map(t => t.tok);
+  if (!want.length || want.length > 6) return false;
+  const ordinary = ordinaryLineWords(line);
+  return want.every(w => ordinary.has(w));
+}
+
+/**
+ * The words a line says as ORDINARY words: written in lower case somewhere, or capitalised only where
+ * a sentence (or the piece of it a picture plays under) starts. A word the line only ever capitalises
+ * mid-sentence is a name — a brand, a store, a person, a title — and is left out. Pure.
+ */
+function ordinaryLineWords(line: string): Set<string> {
+  const out = new Set<string>();
+  for (const t of tokenSpans(line)) {
+    const raw = line.slice(t.start, t.end);
+    const before = line.slice(0, t.start).replace(/[\s"'“”‘’([—–-]+$/, "");
+    if (raw[0] === raw[0].toLowerCase() || !before || /[.!?:]$/.test(before) || raw === "I") out.add(t.tok);
+  }
+  return out;
 }
 
 /**
@@ -11143,7 +11523,8 @@ async function drawValidatedStill(
   // What the check named on the picture before this one (`checkFlags`), to spot a redraw that
   // changed nothing.
   let lastFaults = "";
-  // A blurred-print picture that came back readable is drawn from further back once.
+  // A blurred-print picture that came back readable is drawn from further back once (a picture
+  // allowed words of its line is drawn closer on them instead — `allowedTextRedraw`, added once).
   let steppedBack = false;
   // A content-policy block can't be cleared by resubmitting the same prompt — escalate the
   // ladder instead: aggressively-softened variant, then a Claude policy-safe rewrite, then a
@@ -11411,6 +11792,20 @@ async function drawValidatedStill(
         // glasses and a smile drawn, and nothing asked) — the same call, one more question.
         othersFaceAsked(scene, personFree, square)
       );
+      // A WORD ITS OWN LINE SAYS IS NOT MADE-UP WRITING (`writingTheLineSays`, job 413 scene 2: the
+      // heading "LOAN" under "A loan," refused three times). Decided here, before any redraw or record
+      // reads the verdict; a picture allowed words of its own is held to exactly those instead.
+      if (
+        defects.writing &&
+        !scene.pictureText &&
+        writingTheLineSays(defects.read, scene.cta ? undefined : scene.scriptText ?? scene.narration)
+      ) {
+        console.log(
+          `[Longform] scene ${scene.index} still's only readable writing ("${defects.read}") is words its ` +
+            "own line says → not counted as writing"
+        );
+        defects.writing = false;
+      }
       if (defects.missing) missed.add(buffer);
       // A THING SEEN CUT OPEN (`cutOpenFault`) is drawn from outside from then on, every redraw built
       // again included, and a frame that ships cut open is no memory for later pictures — job 403's
@@ -11434,8 +11829,20 @@ async function drawValidatedStill(
       // named a second time gets one draw with its prompt changed against it, before the keep below
       // can settle for the frame (job 352 scene 147 shipped broken → broken; job 343 scene 17 a sign
       // with writing on three of four draws). It is that fault's last chance, so it never loses its
-      // turn to the attempt budget. `FAULT_REDRAWS=0` turns it off.
-      const redraw = faultRedrawFor(scene, defects, faultsSeen, faultRedraws, tier === 0);
+      // turn to the attempt budget. A FIRST broken frame whose fault is a tool or a line ("named
+      // fault", round 14) has its plain reroll told what was wrong instead — the same draw, no extra.
+      // `FAULT_REDRAWS=0` turns both off.
+      // Someone drawn at work: a tool's fault is then told the rule of its own kind (`namedFaultClause`).
+      const atWork = !!scene.humanPresent && !personFree;
+      // A frame seen cut open already had its prompt changed against that (`SEEN_FROM_OUTSIDE_CLAUSE`).
+      const redraw = faultRedrawFor(
+        scene,
+        cutOpenFrames.has(buffer) ? { ...defects, what: undefined } : defects,
+        faultsSeen,
+        faultRedraws,
+        tier === 0,
+        atWork
+      );
       if (defects.broken) faultsSeen.broken++;
       if (defects.writing) faultsSeen.writing++;
       if (redraw && process.env.FAULT_REDRAWS !== "0") {
@@ -11448,15 +11855,30 @@ async function drawValidatedStill(
           personFree = true;
           prompt = `${buildStillPrompt({ ...scene, humanPresent: false, brollHostLook: undefined, brollHostRef: undefined, hostFaceShown: undefined }, false, visualOverride, subject, square)} ${PERSON_FREE_FALLBACK} ${THINGS_AT_REST_CLAUSE}`;
           lastError = `Still image has broken geometry (${defects.what})`;
+        } else if (redraw === "named fault") {
+          // The first broken frame's own reroll, told what was wrong and the rule that fixes it (job
+          // 414 scene 17: the froe on top of the bolt on four draws from one prompt).
+          prompt = namedFaultRedraw(
+            prompt,
+            defects.what,
+            `${scene.showSubject ?? ""} ${visualOverride ?? (square ? scene.splitVisual : undefined) ?? scene.visualPrompt ?? ""}`,
+            atWork
+          );
+          lastError = `Still image has broken geometry (${defects.what})`;
         } else {
           prompt = softPrintRedraw(prompt);
           lastError = "Still image has readable writing";
         }
-        if (attempt === attempts) attempts++;
+        // The named fault takes the plain reroll's own turn, so it never adds a draw.
+        if (attempt === attempts && redraw !== "named fault") attempts++;
         console.warn(
-          `[Longform] scene ${scene.index} still has ${redraw === "at rest" ? "broken geometry" : "readable writing"} ` +
-            `again (${defects.what}) → drawing it once more ` +
-            (redraw === "at rest" ? "with its things at rest and nobody in it" : "with the print soft, from further back")
+          `[Longform] scene ${scene.index} still has ${redraw === "soft print" ? "readable writing" : "broken geometry"} ` +
+            `${redraw === "named fault" ? "" : "again "}(${defects.what}) → drawing it once more ` +
+            (redraw === "at rest"
+              ? "with its things at rest and nobody in it"
+              : redraw === "named fault"
+                ? "told what was wrong and how it really works"
+                : "with the print soft, from further back")
         );
         continue;
       }
@@ -11545,6 +11967,12 @@ async function drawValidatedStill(
       if (defects.writing && !defects.overlay && scene.blurPrint && !scene.pictureText && !steppedBack) {
         steppedBack = true;
         prompt = `${prompt} ${STEP_BACK_CLAUSE}`;
+      }
+      // …and a picture ALLOWED words of its line goes the other way, once: closer on those words, the
+      // rest out of focus (`allowedTextRedraw`, job 411 scene 17's field-guide page, sharp twice from
+      // one prompt). The same re-roll below — no extra draw.
+      if (defects.writing && !defects.overlay && scene.pictureText) {
+        prompt = allowedTextRedraw(prompt, scene.pictureText);
       }
       if (defects.overlay || defects.writing) {
         const kind = defects.overlay ? "overlaid text" : "readable writing";
@@ -17113,20 +17541,38 @@ export async function enhanceBrollPrompts(
   // The scene's slice of the video's arc. Cutaways and splitVisual get it; CTA cutaways never do
   // — their narration is a sales pitch that CTA_BROLL_ENHANCER_SYSTEM exists to ignore, so a beat
   // derived from it would reintroduce exactly what that lane suppresses.
+  //
+  // The stretch covers LATER lines too (job 414: "the back wall revealing three hung tools—axe, froe,
+  // drawknife" was every picture's beat from 2.6 s, the reveal itself at 21 s), so it is labelled as
+  // such, and a line saying nothing is there never gets it: its "scattered salvage" filled scene 2's
+  // empty-handed search with crocks and chests (`saysNothingThere`).
+  const lineOf = (scene: StoryboardScene) => scene.scriptText ?? scene.narration;
   const beatLineFor = (scene: StoryboardScene): string => {
     const beat = scene.visualBeat?.trim();
-    return beat ? `This stretch of the video shows: ${beat}\n` : "";
+    if (!beat || saysNothingThere(lineOf(scene))) return "";
+    return (
+      `This stretch of the video (this line and the ones around it, LATER ones too — for ` +
+      `DISAMBIGUATION only, never a list of things to show) shows: ${beat}\n`
+    );
   };
+  const nothingThereFor = (scene: StoryboardScene): string =>
+    saysNothingThere(lineOf(scene))
+      ? `NOTHING THERE: this line says a place is empty or a search comes up (nearly) empty — show ` +
+        `that place bare, with nothing put in to fill it, unless the line itself goes on to put ` +
+        `something there.\n`
+      : "";
 
   // MEMORY between shots: the props list (how every recurring thing looks) and the three cutaways
   // just before this one, so the same panel is the same panel in every shot and the story moves
   // on instead of starting over. Each scene used to be rewritten alone, seeing only its own line.
+  // Both are how things LOOK and where the story is, never things to add (`NOTHING_UNNAMED_RULE`).
   // Without the light, weather or hour a look was written in (`sheetWithoutLight`): "draw anything on
   // it exactly like this" drew job 412's wilderness in "golden low light" every time, and job 411's
   // backyard "late fall to winter light" under a line about spring. A list kept from before is cut here.
   const sheet = sheetWithoutLight(params.continuitySheet?.trim());
   const propsLine = sheet
-    ? `Props list (how recurring things look — draw anything on it exactly like this):\n${sheet}\n`
+    ? `Props list (how recurring things look — when a shot shows one, draw it exactly like this; ` +
+      `never add one its line does not name):\n${sheet}\n`
     : "";
   const previousShotsFor = (i: number): string => {
     const prev: string[] = [];
@@ -17138,9 +17584,17 @@ export async function enhanceBrollPrompts(
         prev.unshift(`"${truncateWords(p.scriptText ?? "", 10)}" → ${pic}`);
     }
     return prev.length
-      ? `Shots just before this one (continue from them; do not repeat their framing):\n${prev.join("\n")}\n`
+      ? `Shots just before this one (the story so far — do not repeat their framing; a thing from ` +
+          `them comes back only when this line is about it):\n${prev.join("\n")}\n`
       : "";
   };
+
+  // NOTHING THE LINE DOES NOT NAME, checked on the answer (`withoutAddedKeyThings`, no call): a key
+  // thing a later line reveals (`notYetSaid` — job 414's three tools before 21 s), or under a line
+  // saying nothing is there any key thing its own words do not name, is taken out of the rewrite.
+  const notYetSaidAtPicture = notYetSaidAt(scenes.map(lineOf), params.keyThings);
+  const thingsToKeepOut = (scene: StoryboardScene, i: number) =>
+    saysNothingThere(lineOf(scene)) ? params.keyThings ?? [] : notYetSaidAtPicture(i);
   // SAY IT, SHOW IT: the shot list names the thing this picture exists to show.
   const mustShowFor = (scene: StoryboardScene): string =>
     scene.showSubject
@@ -17155,6 +17609,52 @@ export async function enhanceBrollPrompts(
     (scene.visualPromptSeed ??= scene.visualPrompt);
   const splitSeedOf = (scene: StoryboardScene): string | undefined =>
     (scene.splitVisualSeed ??= scene.splitVisual);
+
+  // WRITTEN FOR WHAT THE SHOT WILL BE (`cutawayPromptLane`, job 413 scenes 9-10): the motion
+  // directive and the "motion" type only for a shot the video rule lets move. A photo catching a
+  // thing mid-motion keeps the directive, written as a still, as before.
+  const laneLinesFor = (scene: StoryboardScene): { directive: string; type: string } => {
+    const lane = cutawayPromptLane(scene);
+    return {
+      directive: lane === "still" ? "" : `${OBJECT_MOTION_DIRECTIVE}\n`,
+      type: `Type: ${lane === "video" ? "motion-object" : "still"}\n`,
+    };
+  };
+
+  // A REWRITE THAT IS NOT ITS PICTURE IS REFUSED for the scene's own words — no second call. Job 413
+  // scenes 9-10 both came back as the hands directive they were given, reworded, and nothing looked:
+  // one rewrite repeating a stock directive, one naming one word of its six-word subject.
+  const adoptRewrite = (scene: StoryboardScene, i: number, answer: string): void => {
+    const lane = cutawayPromptLane(scene);
+    const seed = seedOf(scene);
+    const kept = withoutAddedKeyThings(answer, ownWordsOf(scene, seed), thingsToKeepOut(scene, i));
+    const enhanced = kept.text;
+    if (kept.added.length)
+      console.warn(
+        `[enhanceBrollPrompts] scene ${scene.index}: the rewrite shows ${kept.added.join(", ")}, ` +
+          `which its line does not name — ` +
+          (enhanced === undefined ? "kept the scene's own words" : "taken out")
+      );
+    const fault =
+      enhanced === undefined
+        ? "added"
+        : rewriteFault(enhanced, scene, seed, CUTAWAY_STOCK_DIRECTIVES);
+    if (!fault && enhanced !== undefined) {
+      scene.visualPrompt = enhanced;
+      scene.promptLane = lane;
+      return;
+    }
+    if (fault !== "added")
+      console.warn(
+        `[enhanceBrollPrompts] scene ${scene.index}: the rewrite ` +
+          (fault === "directive"
+            ? "repeats a stock directive"
+            : "leaves out what its line needs shown") +
+          ` — kept the scene's own words`
+      );
+    scene.visualPrompt = rewriteFallback(scene, seed);
+    scene.promptLane = undefined;
+  };
 
   // THE VIDEO'S OWN BOOK STAYS OUT OF A CUTAWAY, and nothing else is taken from it. A line that
   // mentions the book without a hard CTA signal (URL/QR/price) is not flagged cta, so the prompt
@@ -17189,6 +17689,7 @@ export async function enhanceBrollPrompts(
     const systemPrompt = isCta
       ? CTA_BROLL_ENHANCER_SYSTEM
       : STILL_BROLL_ENHANCER_SYSTEM;
+    const lane = laneLinesFor(scene);
     const userMessage = isCta
       ? (backdrop ? `${QR_BACKDROP_DIRECTIVE}\n` : "") +
         channelLine +
@@ -17200,20 +17701,16 @@ export async function enhanceBrollPrompts(
         `in the video's topic register): "${scene.scriptText ?? scene.narration}"\n\n` +
         `Enhanced prompt:`
       : `${CUTAWAY_PERSON_FREE_DIRECTIVE}\n` +
-        (scene.objectMotion && !scene.humanPresent
-          ? `${OBJECT_MOTION_DIRECTIVE}\n`
-          : "") +
-        (scene.humanPresent && !scene.stillImage
-          ? `${HUMAN_MOTION_DIRECTIVE}\n`
-          : "") +
+        lane.directive +
         channelLine +
         subjectLine +
         directionLine +
         propsLine +
         beatLineFor(scene) +
+        nothingThereFor(scene) +
         previousShotsFor(i) +
         mustShowFor(scene) +
-        `Type: ${scene.stillImage ? "still" : scene.objectMotion && !scene.humanPresent ? "motion-object" : scene.humanPresent ? "motion-human" : "still"}\n` +
+        lane.type +
         `Scene narration: "${scene.scriptText ?? scene.narration}"\n` +
         `Original prompt: ${seedOf(scene)}\n\n` +
         `Enhanced prompt:`;
@@ -17240,7 +17737,7 @@ export async function enhanceBrollPrompts(
           subject
         );
       } else if (enhanced) {
-        scene.visualPrompt = enhanced;
+        adoptRewrite(scene, i, enhanced);
       }
     } catch (err) {
       failure = err ?? new Error("unknown error");
@@ -17272,17 +17769,20 @@ export async function enhanceBrollPrompts(
   // below, so a failed group costs a retry, never a prompt. CTA cutaways stay one per call.
   const groupSize = Math.max(1, Math.floor(Number(process.env.BROLL_ENHANCE_BATCH ?? 8) || 1));
   const enhanceGroup = async (group: typeof cutaways): Promise<typeof cutaways> => {
-    const blocks = group.map(({ scene, i }, k) =>
-      `=== SHOT ${k + 1} ===\n` +
-      (scene.objectMotion && !scene.humanPresent ? `${OBJECT_MOTION_DIRECTIVE}\n` : "") +
-      (scene.humanPresent && !scene.stillImage ? `${HUMAN_MOTION_DIRECTIVE}\n` : "") +
-      beatLineFor(scene) +
-      previousShotsFor(i) +
-      mustShowFor(scene) +
-      `Type: ${scene.stillImage ? "still" : scene.objectMotion && !scene.humanPresent ? "motion-object" : scene.humanPresent ? "motion-human" : "still"}\n` +
-      `Scene narration: "${scene.scriptText ?? scene.narration}"\n` +
-      `Original prompt: ${seedOf(scene)}`
-    );
+    const blocks = group.map(({ scene, i }, k) => {
+      const lane = laneLinesFor(scene);
+      return (
+        `=== SHOT ${k + 1} ===\n` +
+        lane.directive +
+        beatLineFor(scene) +
+        nothingThereFor(scene) +
+        previousShotsFor(i) +
+        mustShowFor(scene) +
+        lane.type +
+        `Scene narration: "${scene.scriptText ?? scene.narration}"\n` +
+        `Original prompt: ${seedOf(scene)}`
+      );
+    });
     try {
       const result = await invokeGemini({
         systemPrompt: STILL_BROLL_ENHANCER_SYSTEM,
@@ -17309,7 +17809,7 @@ export async function enhanceBrollPrompts(
           typeof entry?.prompt === "string" ? entry.prompt : ""
         );
         if (!enhanced) return void left.push(item);
-        item.scene.visualPrompt = enhanced;
+        adoptRewrite(item.scene, item.i, enhanced);
         guardCutawayBook(item.scene, item.i);
       });
       return left;
@@ -17346,6 +17846,26 @@ export async function enhanceBrollPrompts(
     const err = await enhanceCutaway(item);
     if (err) noteFailure(item.scene.index, err);
   }
+
+  // THE PANEL'S REWRITE, HELD TO ITS LINE THE SAME WAY (job 414 scene 4): seeded with the cabin seen
+  // from outside, it came back as the inside back wall with the axe, froe and drawknife — under a
+  // line whose last words lead into that reveal — and was drawn as a near-copy of scene 2. A panel
+  // whose rewrite was about a thing not yet said goes back to its own seed; a seed with a person in
+  // it (a panel shows nobody) keeps what is left of the rewrite instead, or the rewrite as it was.
+  const keepPanelToItsLine = (scene: StoryboardScene, i: number, answer: string): string => {
+    const seed = splitSeedOf(scene);
+    const own = ownWordsOf({ showSubject: scene.showSubject, scriptText: lineOf(scene) }, seed);
+    const kept = withoutAddedKeyThings(answer, own, thingsToKeepOut(scene, i));
+    if (!kept.added.length) return answer;
+    console.warn(
+      `[enhanceBrollPrompts] splitVisual ${scene.index}: the rewrite shows ` +
+        `${kept.added.join(", ")}, which its line does not name — ` +
+        (kept.text !== undefined ? "taken out" : "kept the panel's own words")
+    );
+    if (kept.text !== undefined) return kept.text;
+    if (seed?.trim() && !namesSomeone(seed)) return seed;
+    return kept.left || answer;
+  };
 
   // Split-screen cutaways live on HOST scenes (scene.splitVisual, rendered in the right half),
   // which the cutaway pass above skips on `!hostPresent` — so this was the one b-roll lane no
@@ -17390,6 +17910,7 @@ export async function enhanceBrollPrompts(
             subjectLine +
             directionLine +
             beatLineFor(scene) +
+            nothingThereFor(scene) +
             `Scene narration: "${scene.scriptText ?? scene.narration}"\n` +
             `Original prompt: ${splitSeedOf(scene)}\n\n` +
             `Enhanced prompt:`,
@@ -17407,7 +17928,7 @@ export async function enhanceBrollPrompts(
           subject
         );
       } else if (enhanced) {
-        scene.splitVisual = enhanced;
+        scene.splitVisual = keepPanelToItsLine(scene, i, enhanced);
       }
       return null;
     } catch (err) {
@@ -18694,16 +19215,28 @@ async function runUnifiedPipeline(
   for (const f of gate.unresolved) {
     appendJobWarning(jobId, `Plan check ${f.rule} could not be fixed: ${f.detail}`);
   }
-  // A host beat the gate sent to the pictures gets the same rewrite every other cutaway got.
+  // A host beat the gate sent to the pictures gets the same rewrite every other cutaway got — and so,
+  // in the same call, does a shot written for motion in which the self-moving judge (or the person
+  // and tool rules) found nothing moving by itself, now an ordinary photo (`leftMotionLane`): its "in
+  // motion" wording describes something that does not happen (job 413 scenes 9-10 kept theirs to the
+  // end). A thing that still moves, made a photo only for the video share, keeps its wording.
   const gateDemoted = scenes
     .filter(s => hostsBeforeGate.has(s) && !s.hostPresent)
     .map(s => s.index);
-  if (gateDemoted.length) {
-    holdLineSeasons(scenes.filter(s => gateDemoted.includes(s.index)), params.keyThings);
-    const reEnhance = await enhanceBrollPrompts(scenes, params, gateDemoted);
+  const nowStill = scenes.filter(s => leftMotionLane(s)).map(s => s.index);
+  const reWrite = Array.from(new Set([...gateDemoted, ...nowStill]));
+  if (nowStill.length)
+    console.log(
+      `[Longform ${jobId}] ${nowStill.length} picture(s) written for motion turned out not to ` +
+        `move — written again as photos`
+    );
+  if (reWrite.length) {
+    // Every picture written again holds the season or hour its line names (`holdLineSeasons`).
+    holdLineSeasons(scenes.filter(s => reWrite.includes(s.index)), params.keyThings);
+    const reEnhance = await enhanceBrollPrompts(scenes, params, reWrite);
     if (reEnhance.failedScenes.length) appendJobWarning(jobId, enhanceWarningFor(reEnhance));
     for (const s of scenes) {
-      if (gateDemoted.includes(s.index))
+      if (reWrite.includes(s.index))
         s.visualPrompt = stripHostNames(s.visualPrompt, hostAliases);
     }
   }

@@ -125,6 +125,8 @@ import {
   amateurIphoneLook,
   EDIT_VIDEO_BROLL_ENHANCER_SYSTEM,
   STILL_BROLL_ENHANCER_SYSTEM,
+  NOTHING_THERE_RULE,
+  NOTHING_UNNAMED_RULE,
   buildStillPrompt,
   assembleScenePromptPreview,
   normalizeKeyframeToLandscape,
@@ -143,6 +145,7 @@ import {
   ANON_PERSON_SUFFIX,
   NO_FIGURES_SUFFIX,
   CUTAWAY_PERSON_FREE_DIRECTIVE,
+  OBJECT_MOTION_DIRECTIVE,
   CTA_EMPTY_HANDS_SUFFIX,
   LIPSYNC_HOST_DIRECTION,
   LIPSYNC_HOST_DIRECTION_PINNED,
@@ -2524,6 +2527,266 @@ describe("brollDepictsBook / non-CTA book guard", () => {
     const { failedScenes } = await enhanceBrollPrompts(scenes, baseParams);
     expect(scenes[0].visualPrompt).toBe("RAW");
     expect(failedScenes).toEqual([2]);
+  });
+});
+
+// A cutaway's prompt is written for what the shot will be, and an answer that is not its picture is
+// refused for the scene's own words (2026-10-20, job 413 scenes 9-10: both shipped the hands-at-work
+// VIDEO directive they were given, reworded — "Bare weathered hands with fingers already on a tool or
+// workbench task, pressing or adjusting what they work on" — and scene 9 came out as someone
+// hand-planing a board on a channel about garage businesses).
+describe("enhanceBrollPrompts — written for the shot it will be, refused when it is not its picture", () => {
+  const ANSWER_413 =
+    "Bare weathered hands with fingers already on a tool or workbench task, pressing or adjusting what " +
+    "they work on. Wooden workbench, pegboard wall, and tools visible in the background. No face, head, " +
+    "shoulders, or body visible.";
+  const sc = (extra: Partial<StoryboardScene>): StoryboardScene => ({
+    index: 0,
+    narration: "n",
+    visualPrompt: "vp",
+    hostPresent: false,
+    ...extra,
+  });
+  // As the prompt writer saw them: the balancer had made them moving shots, a person in them.
+  const scene9 = () =>
+    sc({
+      index: 9,
+      scriptText:
+        "and Gary’s Garage Secrets is for working people who want extra income with numbers a neighbor would believe — no apps, no coins, no course-sellers.",
+      showSubject: "the host working at his garage workbench with tools around him",
+      visualPrompt: "the host working at his garage workbench with tools around him",
+      humanPresent: true,
+      stillImage: false,
+    });
+  const scene10 = () =>
+    sc({
+      index: 10,
+      scriptText: "Here’s tonight’s deal:",
+      showSubject: "the host pulling a stool up to the garage workbench and opening a notebook",
+      visualPrompt: "the host pulling a stool up to the garage workbench and opening a notebook",
+      humanPresent: true,
+      stillImage: false,
+    });
+
+  afterEach(() => {
+    mockInvoke.mockReset();
+  });
+
+  it("a hands shot the balancer made moving is written as a photo — no video directive, Type still", async () => {
+    mockInvoke.mockResolvedValue({
+      text: "Bare weathered hands resting on a garage workbench, tools hung on the wall behind",
+    } as any);
+    const scenes = [scene9()];
+    await enhanceBrollPrompts(scenes, baseParams);
+    const sent = mockInvoke.mock.calls[0][0].userMessage as string;
+    expect(sent).not.toMatch(/VIDEO cutaway|pressing or adjusting|motion-human/);
+    expect(sent).not.toContain(OBJECT_MOTION_DIRECTIVE);
+    expect(sent).toContain("Type: still\n");
+    expect(scenes[0].visualPrompt).toMatch(/^Bare weathered hands resting on a garage workbench/);
+    expect(scenes[0].promptLane).toBe("still");
+  });
+
+  it("job 413's answer is refused for scene 10's own words; scene 9's, naming its bench and tools, stands", async () => {
+    mockInvoke.mockImplementation(async ({ userMessage }: any) =>
+      userMessage.includes("=== SHOT")
+        ? ({ text: JSON.stringify([{ shot: 1, prompt: ANSWER_413 }, { shot: 2, prompt: ANSWER_413 }]) } as any)
+        : ({ text: ANSWER_413 } as any)
+    );
+    const scenes = [scene9(), scene10()];
+    await enhanceBrollPrompts(scenes, baseParams);
+    // One call for the pair: the refusal costs nothing.
+    expect(mockInvoke).toHaveBeenCalledTimes(1);
+    expect(scenes[1].visualPrompt).toBe(
+      "the host pulling a stool up to the garage workbench and opening a notebook"
+    );
+    expect(scenes[1].promptLane).toBeUndefined();
+    expect(scenes[0].visualPrompt).toBe(ANSWER_413);
+    expect(scenes[0].promptLane).toBe("still");
+  });
+
+  it("a thing that moves by itself keeps the motion directive, and an answer handing it back is refused", async () => {
+    const kettle = () =>
+      sc({
+        index: 3,
+        scriptText: "and the kettle is already going on the stove.",
+        showSubject: "steam rising from a kettle on the stove",
+        visualPrompt: "steam rising from a kettle on the stove",
+        objectMotion: true,
+        stillImage: false,
+      });
+    mockInvoke.mockResolvedValue({
+      text: "Steam rising from the spout of a dented kettle on a gas stove, a plain kitchen behind",
+    } as any);
+    const good = [kettle()];
+    await enhanceBrollPrompts(good, baseParams);
+    const sent = mockInvoke.mock.calls[0][0].userMessage as string;
+    expect(sent).toContain(OBJECT_MOTION_DIRECTIVE);
+    expect(sent).toContain("Type: motion-object\n");
+    expect(good[0].promptLane).toBe("video");
+
+    // The directive's own words, handed back as the picture.
+    mockInvoke.mockReset();
+    mockInvoke.mockResolvedValue({
+      text:
+        "The moving element stays connected to its source and follows a real path under gravity, " +
+        "nothing impossibly suspended; everything else in the frame stays at rest.",
+    } as any);
+    const bad = [kettle()];
+    await enhanceBrollPrompts(bad, baseParams);
+    expect(bad[0].visualPrompt).toBe("steam rising from a kettle on the stove");
+    expect(bad[0].promptLane).toBeUndefined();
+  });
+
+  it("a moving shot the self-moving judge turned down is written as a photo", async () => {
+    mockInvoke.mockResolvedValue({ text: "A sliding door standing closed in a quiet room" } as any);
+    const scenes = [
+      sc({
+        index: 4,
+        scriptText: "and the sliding door at the back.",
+        showSubject: "a sliding door at the back of a quiet room",
+        visualPrompt: "a sliding door at the back of a quiet room",
+        objectMotion: true,
+        stillImage: false,
+        selfMoving: false,
+      }),
+    ];
+    await enhanceBrollPrompts(scenes, baseParams);
+    const sent = mockInvoke.mock.calls[0][0].userMessage as string;
+    expect(sent).not.toContain(OBJECT_MOTION_DIRECTIVE);
+    expect(sent).toContain("Type: still\n");
+    expect(scenes[0].promptLane).toBe("still");
+  });
+});
+
+// NOTHING THE LINE DOES NOT NAME (2026-10-20, job 414 scenes 2-8): the back wall with the axe, froe
+// and drawknife a line reveals at 21 s was in every picture from 2.6 s — the prompt writer took them
+// from the props list and the stretch line — and the empty-handed search was drawn crowded with
+// goods. The answers here are the real rewrites the writer gave.
+describe("enhanceBrollPrompts — nothing its line does not name, nothing in a place said to be empty", () => {
+  const SHEET_414 =
+    "HOME the log cabin: a historic cabin in Grayson County, Virginia, split-oak roof, hewn poplar walls, door hung on wooden pins with a string lock\n" +
+    "MAIN steel tools: an axe, a froe, and a drawknife hanging together on the cabin's back interior wall\n" +
+    "broadaxe: a heavy steel axe with a wide flat blade and a short curved wooden handle\n" +
+    "hearth: a stone fireplace set into the cabin's interior wall, dark soot-stained opening";
+  const BEAT_414 =
+    "The abandoned cabin interior with scattered salvage and the back wall revealing three hung tools—axe, froe, drawknife—that survived because the steel could not be grown.";
+  const PANEL_SEED =
+    "an old log cabin seen from outside, its walls made of hewn logs with scalloped axe marks and pale chinking, a roof of split oak boards, and a plank door hung on wooden pins with a latch string hanging out";
+  const ANSWERS = [
+    "Interior of a historic log cabin in Grayson County, Virginia, with hewn poplar walls. The back wall shows an axe, a froe, and a drawknife hanging together. Scattered salvage and old objects rest on surfaces around the cabin's dim interior.",
+    "Close view of bare weathered hands working on a hewn poplar log wall inside the cabin, fingers pressing and adjusting with a tool. The back wall with the three hung steel tools is visible behind. Nothing above the forearms shown.",
+    "An axe hanging on the cabin's back interior wall, its wide flat steel blade and short curved wooden handle clearly visible against the dark wood.",
+  ];
+  const PANEL_ANSWER =
+    "A back wall inside an abandoned log cabin, hewn poplar logs showing axe marks, with an axe, froe, and drawknife hung on the wall above a worn wooden shelf.";
+  const sc = (extra: Partial<StoryboardScene>): StoryboardScene => ({
+    index: 0,
+    narration: "n",
+    visualPrompt: "vp",
+    hostPresent: false,
+    visualBeat: BEAT_414,
+    ...extra,
+  });
+  const film = () => [
+    sc({
+      index: 1,
+      hostPresent: true,
+      scriptText: "Go through an old mountain cabin looking for anything",
+      visualPrompt: "the host talking",
+    }),
+    sc({
+      index: 2,
+      scriptText: "a store sold, and you will come up nearly empty-handed.",
+      showSubject: "the old log cabin interior, looking for store-bought goods",
+      visualPrompt: "the old log cabin interior, looking for store-bought goods",
+    }),
+    sc({
+      index: 3,
+      scriptText: "A log restorer in Grayson County, Virginia, let me try it.",
+      showSubject: "a log restorer working at the cabin's log wall, seen from behind",
+      visualPrompt: "a log restorer working at the cabin's log wall, seen from behind",
+      humanPresent: true,
+    }),
+    sc({
+      index: 4,
+      hostPresent: true,
+      scriptText:
+        "The roof was split oak, the walls were hewn poplar, and the door hung on wooden pins with a string for a lock. But on the back wall hung",
+      showSubject: PANEL_SEED,
+      visualPrompt: "the host talking",
+      splitVisual: PANEL_SEED,
+    }),
+    sc({
+      index: 5,
+      scriptText: "an axe,",
+      showSubject: "an axe (for the steel tools)",
+      visualPrompt: "an axe (for the steel tools)",
+      keyThing: "steel tools",
+      listCut: true,
+    }),
+  ];
+  const params = {
+    ...baseParams,
+    continuitySheet: SHEET_414,
+    keyThings: [
+      {
+        name: "steel tools",
+        look: "an axe, a froe, and a drawknife hanging together on the cabin's back interior wall",
+        main: true as const,
+      },
+      { name: "broadaxe", look: "a heavy steel axe with a wide flat blade and a short curved wooden handle" },
+      { name: "hearth", look: "a stone fireplace set into the cabin's interior wall, dark soot-stained opening" },
+    ],
+  };
+
+  afterEach(() => {
+    mockInvoke.mockReset();
+  });
+
+  it("job 414: the tools come out of scenes 2-3, the panel goes back to its own cabin, the list's axe stays — no extra call", async () => {
+    mockInvoke.mockImplementation(async ({ userMessage }: any) =>
+      userMessage.includes("=== SHOT")
+        ? ({ text: JSON.stringify(ANSWERS.map((prompt, k) => ({ shot: k + 1, prompt }))) } as any)
+        : ({ text: PANEL_ANSWER } as any)
+    );
+    const scenes = film();
+    await enhanceBrollPrompts(scenes, params);
+    // One call for the three cutaways, one for the panel: checking the answers costs nothing.
+    expect(mockInvoke).toHaveBeenCalledTimes(2);
+    expect(scenes[1].visualPrompt).toBe(
+      "Interior of a historic log cabin in Grayson County, Virginia, with hewn poplar walls. Scattered salvage and old objects rest on surfaces around the cabin's dim interior."
+    );
+    expect(scenes[2].visualPrompt).toBe(
+      "Close view of bare weathered hands working on a hewn poplar log wall inside the cabin, fingers pressing and adjusting with a tool. Nothing above the forearms shown."
+    );
+    expect(scenes[3].splitVisual).toBe(PANEL_SEED);
+    expect(scenes[4].visualPrompt).toBe(ANSWERS[2]);
+  });
+
+  it("the writer is told: the props list and the stretch line are not things to add, and an empty-handed search gets no stretch line", async () => {
+    mockInvoke.mockImplementation(async ({ userMessage }: any) =>
+      userMessage.includes("=== SHOT")
+        ? ({ text: JSON.stringify(ANSWERS.map((prompt, k) => ({ shot: k + 1, prompt }))) } as any)
+        : ({ text: PANEL_ANSWER } as any)
+    );
+    await enhanceBrollPrompts(film(), params);
+    const group = mockInvoke.mock.calls.find(c => (c[0].userMessage as string).includes("=== SHOT"))![0];
+    const sent = group.userMessage as string;
+    expect(group.systemPrompt).toContain(NOTHING_UNNAMED_RULE);
+    expect(group.systemPrompt).toContain(NOTHING_THERE_RULE);
+    expect(group.systemPrompt).not.toMatch(/Continue from the previous shots: the same objects/);
+    expect(sent).toContain("never add one its line does not name");
+    const [shot1, shot2] = sent.split("=== SHOT").slice(1);
+    expect(shot1).toContain("NOTHING THERE");
+    expect(shot1).not.toContain("This stretch of the video");
+    expect(shot2).toContain("LATER ones too");
+    expect(shot2).toContain(BEAT_414);
+    expect(shot2).not.toContain("NOTHING THERE");
+  });
+
+  it("the rules name no channel's things", () => {
+    for (const rule of [NOTHING_UNNAMED_RULE, NOTHING_THERE_RULE])
+      expect(rule).not.toMatch(/axe|froe|drawknife|cabin|tool|robin|holly|crock/i);
   });
 });
 
@@ -11121,6 +11384,97 @@ describe("a picture that ships with a fault says so, and two faults get one chan
     expect(out.buffer.equals(c)).toBe(true);
   });
 
+  // Job 414 scene 17 (round 14): the froe flat on top of the bolt, no club, broken on all four draws —
+  // the first broken frame's reroll went out from the very same prompt.
+  const froe = () =>
+    ({
+      index: 17,
+      scriptText:
+        "Number one is the roof, split by hand from white oak or chestnut with a froe, and the direction of the split mattered most. They",
+      showSubject:
+        "the host's hands holding a froe upright by its wooden handle, its flat blade driven into the end of a short pale white oak bolt",
+      visualPrompt:
+        "Bare hands holding a froe upright by its wooden handle, the flat blade driven into the end grain of a short pale white oak bolt.",
+      humanPresent: true,
+    }) as any;
+
+  it("job 414 scene 17: the first broken draw of a tool at work is redrawn told what was wrong; the second still gets the at-rest draw", async () => {
+    const { NAMED_FAULT_START, SPLIT_STRIKE_CLAUSE, THINGS_AT_REST_CLAUSE, PERSON_FREE_FALLBACK } = await import(
+      "./longformVideo"
+    );
+    const [a, b, c] = await Promise.all([pngOf("#a11"), pngOf("#a22"), pngOf("#a33")]);
+    checks(
+      { broken: true, what: "froe blade lying flat on top of the bolt, no club" },
+      { broken: true, what: "froe blade still resting on top" }
+    );
+    const genImage = drawsOf(a, b, c);
+    const out = await generateValidatedStill(froe(), 4, undefined, genImage);
+    expect(genImage).toHaveBeenCalledTimes(3); // no draw added: the named fault took the reroll's turn
+    const [p1, p2, p3] = genImage.mock.calls.map(c => c[0].prompt as string);
+    expect(p1).not.toContain(NAMED_FAULT_START);
+    expect(p2.startsWith(p1)).toBe(true);
+    const added = p2.slice(p1.length);
+    expect(added).toContain(`${NAMED_FAULT_START} froe blade lying flat on top of the bolt, no club.`);
+    expect(added).toContain(SPLIT_STRIKE_CLAUSE);
+    expect(p3).toContain(PERSON_FREE_FALLBACK);
+    expect(p3).toContain(THINGS_AT_REST_CLAUSE);
+    expect(p3).not.toContain(NAMED_FAULT_START);
+    expect(out.buffer.equals(c)).toBe(true);
+  });
+
+  it("a first broken draw whose fault is in no tool or line keeps its plain reroll", async () => {
+    const [a, b] = await Promise.all([pngOf("#b11"), pngOf("#b22")]);
+    checks({ broken: true, what: "hand with six fingers on the handle" });
+    const genImage = drawsOf(a, b);
+    const out = await generateValidatedStill(froe(), 4, undefined, genImage);
+    expect(genImage).toHaveBeenCalledTimes(2);
+    expect(genImage.mock.calls[1][0].prompt).toBe(genImage.mock.calls[0][0].prompt);
+    expect(out.buffer.equals(b)).toBe(true);
+  });
+
+  it("job 413 scene 29: a line in the wrong part is redrawn told so, with nobody in the picture too", async () => {
+    const { NAMED_FAULT_START, CONNECTING_LINES_CLAUSE } = await import("./longformVideo");
+    const [a, b] = await Promise.all([pngOf("#c11"), pngOf("#c22")]);
+    checks({ broken: true, what: "spark plug wire runs into the carburetor fuel inlet" });
+    const genImage = drawsOf(a, b);
+    const scene = {
+      index: 29,
+      scriptText: "pull the spark plug wire first, every time,",
+      showSubject: "the black rubber-coated spark plug wire on the mower engine",
+      visualPrompt: "A black rubber-coated spark plug wire connected to a mower engine.",
+    } as any;
+    const out = await generateValidatedStill(scene, 4, undefined, genImage);
+    const [p1, p2] = genImage.mock.calls.map(c => c[0].prompt as string);
+    expect(p1).toContain(CONNECTING_LINES_CLAUSE); // asked from the first draw
+    expect(p2.startsWith(p1)).toBe(true);
+    expect(p2.slice(p1.length)).toContain(`${NAMED_FAULT_START} spark plug wire runs into the carburetor fuel inlet.`);
+    expect(p2.slice(p1.length)).toContain(CONNECTING_LINES_CLAUSE);
+    expect(out.buffer.equals(b)).toBe(true);
+  });
+
+  it("the named fault adds no draw: broken on the last attempt ships as before, flagged", async () => {
+    const [a] = await Promise.all([pngOf("#d11")]);
+    checks({ broken: true, what: "froe blade lying flat on top of the bolt, no club" });
+    const genImage = drawsOf(a);
+    const out = await generateValidatedStill(froe(), 1, undefined, genImage);
+    expect(genImage).toHaveBeenCalledTimes(1);
+    expect(out.buffer.equals(a)).toBe(true);
+    expect(out.flaws).toEqual(["broken"]);
+  });
+
+  it("FAULT_REDRAWS=0 sends the first broken tool draw's reroll unchanged", async () => {
+    const [a, b] = await Promise.all([pngOf("#e11"), pngOf("#e22")]);
+    checks({ broken: true, what: "froe blade lying flat on top of the bolt, no club" });
+    const genImage = drawsOf(a, b);
+    process.env.FAULT_REDRAWS = "0";
+    try {
+      await generateValidatedStill(froe(), 4, undefined, genImage);
+    } finally {
+      delete process.env.FAULT_REDRAWS;
+    }
+    expect(genImage.mock.calls[1][0].prompt).toBe(genImage.mock.calls[0][0].prompt);
+  });
+
   // Job 343 scene 17: a plain picture (its line asks for no print) with writing on three of four draws.
   const houseSign = () =>
     ({
@@ -11184,6 +11538,90 @@ describe("a picture that ships with a fault says so, and two faults get one chan
     expect(genImage).toHaveBeenCalledTimes(2);
     expect(genImage.mock.calls[1][0].prompt).not.toContain(BLURRED_PRINT_CLAUSE);
     expect(out.flaws).toEqual(["writing"]);
+  });
+
+  // Job 411 scene 17: one allowed word, and the field-guide page came back sharp twice from one prompt.
+  const fieldGuide = () =>
+    ({
+      index: 17,
+      scriptText: "…the robin’s own scientific name, the one printed in the field guides, ends in the word migratorius…",
+      pictureText: "migratorius",
+      showSubject: "close-up of an open bird field guide page showing a painted American robin with its entry text",
+      visualPrompt: "close-up of an open bird field guide page showing a painted American robin with its entry text",
+    }) as any;
+
+  it("job 411 scene 17: writing on a picture allowed one word redraws closer on that word, once, in the draw it already gets", async () => {
+    const { ALLOWED_TEXT_REDRAW_START, ALLOWED_TEXT_REST_CLAUSE, STEP_BACK_CLAUSE } = await import("./longformVideo");
+    const [a, b, c] = await Promise.all([pngOf("#d11"), pngOf("#d22"), pngOf("#2d2")]);
+    checks({ writing: true, what: "entry paragraphs readable" });
+    const genImage = drawsOf(a, b, c);
+    const out = await generateValidatedStill(fieldGuide(), 4, undefined, genImage);
+    expect(genImage).toHaveBeenCalledTimes(2);
+    const [p1, p2] = genImage.mock.calls.map(c => c[0].prompt as string);
+    expect(p1).toContain(ALLOWED_TEXT_REST_CLAUSE);
+    expect(p1).not.toContain(ALLOWED_TEXT_REDRAW_START);
+    expect(p2.startsWith(p1)).toBe(true);
+    expect(p2.split(ALLOWED_TEXT_REDRAW_START).length - 1).toBe(1);
+    expect(p2).not.toContain(STEP_BACK_CLAUSE);
+    expect(out.buffer.equals(b)).toBe(true);
+    expect(out.flaws).toBeUndefined();
+  });
+
+  it("job 411 scene 17: still sharp after it, the picture is kept saying so — never a third draw", async () => {
+    const { ALLOWED_TEXT_REDRAW_START } = await import("./longformVideo");
+    const [a, b, c] = await Promise.all([pngOf("#e11"), pngOf("#e22"), pngOf("#e33")]);
+    mockScanStillDefects.mockReset();
+    mockScanStillDefects.mockResolvedValue(verdict({ writing: true, what: "entry paragraphs readable" }));
+    const genImage = drawsOf(a, b, c);
+    const out = await generateValidatedStill(fieldGuide(), 4, undefined, genImage);
+    expect(genImage).toHaveBeenCalledTimes(2);
+    expect((genImage.mock.calls[1][0].prompt as string).split(ALLOWED_TEXT_REDRAW_START).length - 1).toBe(1);
+    expect(out.flaws).toEqual(["writing"]);
+  });
+
+  // Job 413 scene 2: "A loan," — the picture maker put the heading "LOAN" on the papers.
+  const loan = () =>
+    ({
+      index: 2,
+      scriptText: "A loan,",
+      listCut: true,
+      showSubject: "a stack of cash and paperwork on a desk",
+      visualPrompt: "Stack of cash and paperwork laid out on a desk, close enough to fill the frame.",
+    }) as any;
+
+  it("job 413 scene 2: the only readable word is the one its line says — shipped on the first draw, no fault", async () => {
+    const [a, b] = await Promise.all([pngOf("#f11"), pngOf("#f22")]);
+    checks({ writing: true, read: "LOAN", what: "LOAN heading on the papers" });
+    const genImage = drawsOf(a, b);
+    const scene = loan();
+    const out = await generateValidatedStill(scene, 4, undefined, genImage);
+    expect(genImage).toHaveBeenCalledTimes(1);
+    expect(out.buffer.equals(a)).toBe(true);
+    expect(out.flaws).toBeUndefined();
+    expect(scene.pictureChecks.map((c: any) => c.flags)).toEqual([[]]);
+  });
+
+  it("job 413 scene 2: a word its line does not say is still made-up writing and is drawn again", async () => {
+    const [a, b] = await Promise.all([pngOf("#f33"), pngOf("#f44")]);
+    checks({ writing: true, read: "LOAN AGREEMENT", what: "heading on the papers" });
+    const genImage = drawsOf(a, b);
+    const scene = loan();
+    const out = await generateValidatedStill(scene, 4, undefined, genImage);
+    expect(genImage).toHaveBeenCalledTimes(2);
+    expect(out.buffer.equals(b)).toBe(true);
+    expect(scene.pictureChecks.map((c: any) => c.flags)).toEqual([["writing"], []]);
+  });
+
+  it("a CTA picture has no line of its own to excuse a word, and a picture allowed words is held to exactly those", async () => {
+    const [a, b, c, d] = await Promise.all([pngOf("#f55"), pngOf("#f66"), pngOf("#f77"), pngOf("#f88")]);
+    checks({ writing: true, read: "LOAN", what: "heading" });
+    const cta = drawsOf(a, b);
+    await generateValidatedStill({ ...loan(), cta: true }, 4, undefined, cta);
+    expect(cta).toHaveBeenCalledTimes(2);
+    checks({ writing: true, read: "LOAN", what: "heading" });
+    const said = drawsOf(c, d);
+    await generateValidatedStill({ ...loan(), pictureText: "cash" }, 4, undefined, said);
+    expect(said).toHaveBeenCalledTimes(2);
   });
 
   it("job 343 scene 30: 'missing' twice gets NO changed draw (not yet known to help) and says it shipped missing", async () => {

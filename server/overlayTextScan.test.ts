@@ -837,3 +837,61 @@ describe("the same-host question — a look on the host's face is judged on the 
     expect(SAME_HOST_SYSTEM).toMatch(/a different face, or more than one person/);
   });
 });
+
+describe("what the check reads, and the soft rest beside allowed words (jobs 413 and 411, 2026-10-19)", () => {
+  it("asks what it reads of a picture with a line and no allowed words, and hands it back beside writing", async () => {
+    const { READ_WORDS_QUESTION } = await import("./overlayTextScan");
+    // Job 413 scene 2: "A loan," and a heading "LOAN" on the papers.
+    mockInvoke.mockReset();
+    mockInvoke.mockResolvedValue({
+      text: '{"overlay":false,"broken":false,"writing":true,"read":"LOAN","missing":false,"messy":false,"wrong_place":false,"staged":false,"what":"LOAN heading on the papers"}',
+    } as any);
+    const v = await scanStillDefects(await imageOf(1280, 720), "a stack of cash and paperwork on a desk", "A loan,");
+    expect(v.writing).toBe(true); // the check only reports; the caller decides (`writingTheLineSays`)
+    expect(v.read).toBe("LOAN");
+    expect(mockInvoke).toHaveBeenCalledTimes(1); // rides the one check
+    const suffix = mockInvoke.mock.calls[0][0].systemSuffix as string;
+    expect(suffix).toContain(READ_WORDS_QUESTION);
+    expect(suffix).toContain('"read":"..."');
+  });
+
+  it("never asks — and drops a stray read — beside allowed words or with no line", async () => {
+    const { READ_WORDS_QUESTION } = await import("./overlayTextScan");
+    mockInvoke.mockReset();
+    mockInvoke.mockResolvedValue({
+      text: '{"overlay":false,"broken":false,"writing":true,"read":"American Robin migratorius","what":"entry text"}',
+    } as any);
+    // Job 411 scene 17: allowed "migratorius" — held to exactly that, nothing to excuse.
+    const allowed = await scanStillDefects(
+      await imageOf(1280, 720),
+      "close-up of an open bird field guide page",
+      "…ends in the word migratorius…",
+      "migratorius"
+    );
+    expect(allowed.writing).toBe(true);
+    expect(allowed.read).toBeUndefined();
+    expect(mockInvoke.mock.calls[0][0].systemSuffix).not.toContain(READ_WORDS_QUESTION);
+    // A CTA picture is checked with no line: no words of its own to pass.
+    mockInvoke.mockClear();
+    const noLine = await scanStillDefects(await imageOf(1280, 720), "a stack of cash");
+    expect(noLine.read).toBeUndefined();
+    expect(mockInvoke.mock.calls[0][0].systemSuffix).not.toContain(READ_WORDS_QUESTION);
+  });
+
+  it("counts the soft rest of a page as shown beside allowed words, and keeps the blurred-print note for soft print", async () => {
+    const { SOFT_REST_QUESTION, SOFT_PRINT_QUESTION } = await import("./overlayTextScan");
+    mockInvoke.mockReset();
+    mockInvoke.mockResolvedValue({ text: '{"overlay":false,"broken":false,"writing":false,"what":""}' } as any);
+    await scanStillDefects(await imageOf(1280, 720), "a field guide page with its entry text", "line", "migratorius");
+    expect(mockInvoke.mock.calls[0][0].systemSuffix).toContain(SOFT_REST_QUESTION);
+    expect(mockInvoke.mock.calls[0][0].systemSuffix).not.toContain(SOFT_PRINT_QUESTION);
+    mockInvoke.mockClear();
+    await scanStillDefects(await imageOf(1280, 720), "a label", "line", undefined, undefined, undefined, true);
+    expect(mockInvoke.mock.calls[0][0].systemSuffix).toContain(SOFT_PRINT_QUESTION);
+    expect(mockInvoke.mock.calls[0][0].systemSuffix).not.toContain(SOFT_REST_QUESTION);
+    // A plain picture gets neither.
+    mockInvoke.mockClear();
+    await scanStillDefects(await imageOf(1280, 720), "a stack of cash", "A loan,");
+    expect(mockInvoke.mock.calls[0][0].systemSuffix).not.toContain("QUESTION 4 NOTE");
+  });
+});

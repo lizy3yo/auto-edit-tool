@@ -8156,3 +8156,600 @@ describe("the season and the light are each picture's own (round 14, job 411 sce
     expect(lookWithoutLight(alarm)).toBe(alarm);
   });
 });
+
+describe("allowed words and soft print go together; a word the line says is not made-up writing (round 13 verification films, 2026-10-19)", () => {
+  // 411 scene 17, as stored: the line allows one word, and the picture came back twice as a sharp
+  // field-guide page — heading and two readable paragraphs of made-up entry text beside it.
+  const ROBIN_LINE =
+    "The funny part is that the robin’s own scientific name, the one printed in the field guides, ends in the word migratorius, which means just about what it sounds like. Seems somebody should have checked with the robins first.";
+  const fieldGuide = () =>
+    pic(17, ROBIN_LINE, "close-up of an open bird field guide page showing a painted American robin with its entry text", {
+      visualPrompt: "the empty backyard lawn in late November light",
+      keyThing: "robin",
+      pictureText: "migratorius",
+    });
+
+  it("411 scene 17: the one said word stays exact and sharp, the rest of the page is asked soft, and its ask for the entry text too", async () => {
+    const { ALLOWED_TEXT_REST_CLAUSE, NO_READABLE_TEXT } = await import("./longformVideo");
+    const s = fieldGuide();
+    const prompt = buildStillPrompt(s);
+    expect(prompt).toMatch(/ONLY readable writing anywhere in the frame is exactly "migratorius"/);
+    expect(prompt).toContain(ALLOWED_TEXT_REST_CLAUSE);
+    expect(prompt).toMatch(/with its entry text soft and unreadable/);
+    expect(prompt).not.toMatch(/entry text(?! soft and unreadable)/);
+    expect(prompt).not.toContain(NO_READABLE_TEXT);
+    // Not the blurred-print road: its arm's length and step back would shrink the said word past
+    // reading, and its "an engraved name is there too" asks for print nobody said.
+    expect(prompt).not.toContain(BLURRED_PRINT_CLAUSE);
+    expect(prompt).not.toMatch(/arm's-length view/);
+    expect(blurUnsaidPrint(s)).toBe(false);
+    expect(s.blurPrint).toBeUndefined();
+  });
+
+  it("411 scene 17: a redraw for writing goes closer on the said word, once, in the draw it already gets", async () => {
+    const { allowedTextRedraw, ALLOWED_TEXT_REDRAW_START, faultRedrawFor, STEP_BACK_CLAUSE } = await import("./longformVideo");
+    const prompt = buildStillPrompt(fieldGuide());
+    const once = allowedTextRedraw(prompt, "migratorius");
+    expect(once.startsWith(prompt)).toBe(true);
+    expect(once).toContain(`${ALLOWED_TEXT_REDRAW_START} the camera is closer on "migratorius"`);
+    expect(once).not.toContain(STEP_BACK_CLAUSE);
+    expect(allowedTextRedraw(once, "migratorius")).toBe(once);
+    // No extra draw: the changed-prompt fault redraw stays for plain pictures only.
+    expect(
+      faultRedrawFor({ pictureText: "migratorius" }, { writing: true }, { broken: 0, writing: 1 }, new Set(), true)
+    ).toBeUndefined();
+  });
+
+  it("an ask for print that IS the said words, and a picture with no allowed words, are left as they were", () => {
+    // The said words follow the ask: that text is the allowed text, not more print.
+    expect(withAllowedText("a page with the text migratorius in italics", "migratorius")).toMatch(
+      /^a page with the text migratorius in italics The ONLY/
+    );
+    expect(withAllowedText("a label with its text reading 2009", "2009")).toMatch(/^a label with its text reading 2009 The ONLY/);
+    // A pattern is not print: "with its print" is never touched; nor is print already asked soft.
+    expect(withAllowedText("a cushion with its floral print", "HOME")).toMatch(/^a cushion with its floral print The ONLY/);
+    expect(withAllowedText("a page with its text soft and blurred", "HOME")).toMatch(/^a page with its text soft and blurred The ONLY/);
+    // No allowed words, no soft print: byte for byte.
+    const plain = "close-up of an open bird field guide page showing a painted American robin with its entry text";
+    expect(withAllowedText(plain, undefined)).toBe(plain);
+  });
+
+  it("413 scene 2: the heading LOAN under the line \"A loan,\" is the line's own word, not made-up writing", async () => {
+    const { writingTheLineSays } = await import("./longformVideo");
+    expect(writingTheLineSays("LOAN", "A loan,")).toBe(true);
+    expect(writingTheLineSays("'LOAN'", "A loan,")).toBe(true);
+    expect(writingTheLineSays("“LOAN”", "A loan,")).toBe(true);
+    // The other list items of that opening, each with its own word.
+    expect(writingTheLineSays("LEASE", "a lease,")).toBe(true);
+  });
+
+  it("made-up writing is still refused: a word the line never says, a cut-short read, a brand, no line", async () => {
+    const { writingTheLineSays } = await import("./longformVideo");
+    // 411's page, had it carried no allowed word: "American" is nowhere in the line.
+    expect(writingTheLineSays("American Robin", ROBIN_LINE)).toBe(false);
+    expect(writingTheLineSays("LOAN AGREEMENT", "A loan,")).toBe(false);
+    expect(writingTheLineSays("LOAN Borrower Lender Amount", "A loan,")).toBe(false);
+    expect(writingTheLineSays("LOAN …", "A loan,")).toBe(false);
+    expect(writingTheLineSays("$10,000", "starting a business costs ten thousand dollars.")).toBe(false);
+    // A brand the line names is still never drawn readable (`scrubLegibleWriting`).
+    expect(writingTheLineSays("Etsy", "Sell it on Etsy")).toBe(false);
+    expect(writingTheLineSays(undefined, "A loan,")).toBe(false);
+    expect(writingTheLineSays("LOAN", undefined)).toBe(false);
+    // More than six words is a page of text, not a heading.
+    expect(
+      writingTheLineSays("the one printed in the field guides", ROBIN_LINE)
+    ).toBe(false);
+  });
+
+  it("the check reports what it read only where it can excuse it, and never beside an allowed word", async () => {
+    const { READ_WORDS_QUESTION, verdictShape, parseStillDefectVerdict } = await import("./overlayTextScan");
+    expect(READ_WORDS_QUESTION).toMatch(/EVERY word, number or letter a viewer can read/);
+    expect(verdictShape(undefined, "A loan,", false, false, false, false, true)).toContain('"read":"..."');
+    expect(verdictShape(undefined, "A loan,")).not.toContain('"read"');
+    expect(parseStillDefectVerdict('{"writing":true,"read":"LOAN","what":"heading on the papers"}').read).toBe("LOAN");
+    // A "read" beside no writing is no answer.
+    expect("read" in parseStillDefectVerdict('{"writing":false,"read":"LOAN"}')).toBe(false);
+  });
+
+  // Review of the fix: a name the scrubber does not know, a read longer than 60 characters, and asks
+  // for print that are no ask at all.
+  it("a name the line says is not passed, though the scrubber does not know it (413 scene 26's line)", async () => {
+    const { writingTheLineSays } = await import("./longformVideo");
+    const line =
+      "Every spring, Marketplace fills up with mowers listed as ran-last-season, priced twenty-five to seventy-five dollars.";
+    expect(writingTheLineSays("Marketplace", line)).toBe(false);
+    // …while an ordinary word of the same line still is.
+    expect(writingTheLineSays("MOWERS", line)).toBe(true);
+    // A capital where the line's sentence starts is no name.
+    expect(writingTheLineSays("EVERY SPRING", line)).toBe(true);
+    expect(writingTheLineSays("LOAN", "Somewhere along the line, everybody agreed. A loan, a lease")).toBe(true);
+  });
+
+  it("every word of a long read is counted, not only its first 60 characters", async () => {
+    const { writingTheLineSays } = await import("./longformVideo");
+    const line = "the agricultural department certification requirements overview";
+    expect(writingTheLineSays("Agricultural Department Certification Requirements Overview", line)).toBe(true);
+    expect(writingTheLineSays("Agricultural Department Certification Requirements Overview Fabricated", line)).toBe(false);
+  });
+
+  it("print already soft, a thing named after print, and long allowed words after the ask are left as written", () => {
+    // Stored descriptions (jobs 303 scene 18, 343 scene 4), had they carried allowed words.
+    expect(withAllowedText("a tablet with icons and boxes, and the text is unreadable.", "4")).toMatch(
+      /^a tablet with icons and boxes, and the text is unreadable\. The ONLY/
+    );
+    expect(withAllowedText("A small orange logo and the text are soft and unreadable.", "4")).toMatch(
+      /^A small orange logo and the text are soft and unreadable\. The ONLY/
+    );
+    expect(withAllowedText("a lamp beside the writing desk", "4")).toMatch(/^a lamp beside the writing desk The ONLY/);
+    expect(withAllowedText("a phone with the text message open", "4")).toMatch(/^a phone with the text message open The ONLY/);
+    // The label's three said things (job 335 scene 5) follow the ask: not softened, however long.
+    const said = "Photoelectric, Sealed 10-Year, Interconnected";
+    expect(withAllowedText(`a smoke alarm box with its printed text ${said} on the front`, said)).toMatch(
+      new RegExp(`^a smoke alarm box with its printed text ${said} on the front The ONLY`)
+    );
+    // …and an ask that is followed by nothing said is still softened.
+    expect(withAllowedText("a smoke alarm box with its printed text in sharp black ink", said)).toMatch(
+      /^a smoke alarm box with its printed text soft and unreadable in sharp black ink/
+    );
+  });
+});
+
+// Job 413 scenes 9-10 (2026-10-20): both pictures shipped the hands-at-work VIDEO directive they were
+// given, reworded, as their description — scene 9, under the channel's own introduction, came out as
+// someone hand-planing a board on a channel about garage businesses. The shots were moving when the
+// prompt writer saw them (the balancer had flipped them) and photos when they shipped.
+describe("a cutaway is written for the shot it will be, and an answer that is not its picture is refused (job 413 scenes 9-10)", () => {
+  const ANSWER =
+    "Bare weathered hands with fingers already on a tool or workbench task, pressing or adjusting what " +
+    "they work on. Wooden workbench, pegboard wall, and tools visible in the background. No face, head, " +
+    "shoulders, or body visible.";
+  const scene9 = pic(
+    9,
+    "and Gary’s Garage Secrets is for working people who want extra income with numbers a neighbor would believe — no apps, no coins, no course-sellers.",
+    "the host working at his garage workbench with tools around him",
+    { humanPresent: true, stillImage: false }
+  );
+  const scene10 = pic(10, "Here’s tonight’s deal:", "the host pulling a stool up to the garage workbench and opening a notebook", {
+    humanPresent: true,
+    stillImage: false,
+  });
+
+  it("a shot of the host at work is written as a photo, never with a video directive", async () => {
+    const { cutawayPromptLane } = await import("./brollRewrite");
+    expect(cutawayPromptLane(scene9)).toBe("still");
+    expect(cutawayPromptLane(scene10)).toBe("still");
+  });
+
+  it("scene 10's answer leaves out its stool and notebook and goes back to its own words; scene 11's stands", async () => {
+    const { rewriteFault, rewriteFallback } = await import("./brollRewrite");
+    const { CUTAWAY_STOCK_DIRECTIVES } = await import("./longformVideo");
+    expect(rewriteFault(ANSWER, scene10, scene10.showSubject!, CUTAWAY_STOCK_DIRECTIVES)).toBe("subject");
+    expect(rewriteFallback(scene10, scene10.showSubject!)).toBe(scene10.showSubject);
+    const scene11 = pic(
+      11,
+      "seventeen businesses,",
+      "the guided knife-sharpening unit on the workbench with a kitchen knife clamped in its guide and the host's hands drawing a stone along the edge",
+      { listCut: true, humanPresent: true }
+    );
+    expect(
+      rewriteFault(
+        "A guided knife-sharpening unit clamped to a garage workbench with a kitchen knife held in its metal guide, bare weathered hands pressing an abrasive stone along the blade edge, concrete floor and tool pegboard in the background.",
+        scene11,
+        scene11.showSubject!,
+        CUTAWAY_STOCK_DIRECTIVES
+      )
+    ).toBeUndefined();
+  });
+
+  it("a shot written for motion that the gate makes a photo is written again; one still moving is not", async () => {
+    const { leftMotionLane } = await import("./brollRewrite");
+    const door = pic(4, "and the sliding door at the back.", "a sliding door at the back of a quiet room", {
+      promptLane: "video",
+      objectMotion: undefined,
+      stillImage: true,
+      selfMoving: false,
+    });
+    expect(leftMotionLane(door)).toBe(true);
+    const steam = pic(3, "and the kettle is already going.", "steam rising from a kettle on the stove", {
+      promptLane: "video",
+      objectMotion: true,
+      stillImage: false,
+    });
+    expect(leftMotionLane(steam)).toBe(false);
+    // Made a photo only to keep the video share down: the steam still rises, the photo catches it, and
+    // the wording stays — no second call, and no "settled instant" rewrite to put the kettle out.
+    const sharedOut = pic(3, "and the kettle is already going.", "steam rising from a kettle on the stove", {
+      promptLane: "video",
+      objectMotion: undefined,
+      stillImage: true,
+      selfMoving: true,
+    });
+    expect(leftMotionLane(sharedOut)).toBe(false);
+  });
+});
+
+/**
+ * A TOOL WORKS THE WAY IT REALLY DOES, AND A LINE ENDS AT THE PART IT SERVES (round 14, the review of
+ * jobs 413 and 414 made on the round-12 code). Job 413 scene 29: "pull the spark plug wire first" drew
+ * the plug lead looping into the carburetor's fuel inlet. Job 414 scene 13: a drawknife laid along the
+ * board, its stroke across the narrow width. Job 414 scene 17: the froe flat on top of the bolt, both
+ * hands pressing, no club — broken on all four draws, and every redraw went out without a word changed.
+ */
+describe("a tool works the way it really does, and a line ends at the part it serves (round 14, jobs 413 and 414)", () => {
+  const WOODWORKER = "A broad man in his sixties with a short white beard, wearing a sage green work shirt with rolled sleeves";
+  const froe17 = () =>
+    pic(
+      17,
+      "Number one is the roof, split by hand from white oak or chestnut with a froe, and the direction of the split mattered most. They",
+      "the host's hands holding a froe upright by its wooden handle, its flat blade driven into the end of a short pale white oak bolt",
+      {
+        visualPrompt:
+          "Bare hands holding a froe upright by its wooden handle, the flat blade driven into the end grain of a short pale white oak bolt.",
+        keyThing: "white oak bolt",
+        humanPresent: true,
+      }
+    );
+  const drawknife13 = () =>
+    pic(
+      13,
+      "since folk schools still teach plenty of these",
+      "a student at a workbench pulling a drawknife toward themself with both hands on its two bent end handles, shaving a pale board, seen from the side",
+      {
+        visualPrompt:
+          "Bare weathered hands on a workbench, fingers gripping both bent handles of a drawknife, pulling it toward the body across a pale tapered wooden board, shaved surface visible, seen from the side.",
+        humanPresent: true,
+        otherPerson: "a folk school student",
+      }
+    );
+  const plugWire29 = (over: Partial<StoryboardScene> = {}) =>
+    pic(
+      29,
+      "Two rules before your hands go near one: pull the spark plug wire first, every time, because a mower that turns over with your fingers under the deck will not apologize.",
+      "close-up of the host's fingers pulling the grey metal boot cap of a black rubber-coated spark plug wire off the spark plug on the mower engine.",
+      {
+        visualPrompt:
+          "Bare weathered hands, fingers pulling the grey metal boot cap off the end of a black rubber-coated spark plug wire connected to a mower engine.",
+        keyThing: "spark plug wire",
+        humanPresent: true,
+        ...over,
+      }
+    );
+
+  it("414-17 a froe goes in under a club, never pressed by hand — in every picture of someone at work", async () => {
+    const { SPLIT_STRIKE_CLAUSE } = await import("./longformVideo");
+    expect(SPLIT_STRIKE_CLAUSE).toMatch(/never goes in by hand pressure/);
+    expect(SPLIT_STRIKE_CLAUSE).toMatch(/STRUCK down into the end grain with a wooden club, mallet or sledge/);
+    expect(SPLIT_STRIKE_CLAUSE).toMatch(/brings the club down on the back of its blade/);
+    // A froe already in is levered, with no club: the rule never makes that picture wrong.
+    expect(SPLIT_STRIKE_CLAUSE).toMatch(/once a froe is sunk in the wood, its handle is pulled sideways to lever the split open/);
+    // A maul or an axe that splits is swung: it is never told to be struck with a club.
+    expect(SPLIT_STRIKE_CLAUSE).not.toMatch(/\bmaul\b|\baxe\b/);
+    expect(TOOL_POSITION_CLAUSE).toContain(SPLIT_STRIKE_CLAUSE);
+    const scenes = [froe17()];
+    markHostBroll(scenes, { hostLook: WOODWORKER, hostName: "Sam" }, "https://x/host.png");
+    expect(buildStillPrompt(scenes[0])).toContain(SPLIT_STRIKE_CLAUSE);
+    expect(ANON_PERSON_SUFFIX).toContain(SPLIT_STRIKE_CLAUSE);
+    expect(otherPersonClause("a folk school student")).toContain(SPLIT_STRIKE_CLAUSE);
+  });
+
+  it("414-13 a drawknife lies across the board and strokes along it, the piece held", async () => {
+    const { SHAVING_STROKE_CLAUSE } = await import("./longformVideo");
+    expect(SHAVING_STROKE_CLAUSE).toMatch(/edge lying ACROSS the piece and travels ALONG the piece's length, with the grain/);
+    expect(SHAVING_STROKE_CLAUSE).toMatch(/a drawknife is pulled toward the user's body/);
+    // Which way a plane goes is never said: a Japanese plane is pulled (job 161 scene 117 holds one).
+    expect(SHAVING_STROKE_CLAUSE).not.toMatch(/pushed away|plane (?:is )?pushed/);
+    expect(SHAVING_STROKE_CLAUSE).toMatch(/never sideways across the piece's narrow width/);
+    expect(SHAVING_STROKE_CLAUSE).toMatch(/held still in a vise, on a shaving horse, against a bench stop or clamped down/);
+    expect(TOOL_POSITION_CLAUSE).toContain(SHAVING_STROKE_CLAUSE);
+    expect(buildStillPrompt(drawknife13())).toContain(SHAVING_STROKE_CLAUSE);
+    // The rules before it are all still there (jobs 406 and 407).
+    expect(TOOL_POSITION_CLAUSE).toMatch(/An axe that is chopping, felling or hewing rather than splitting bites into the side of the log or trunk/);
+    expect(TOOL_POSITION_CLAUSE).toMatch(/that hand is on the tool itself or holds the work behind the edge/);
+  });
+
+  it("a tool at rest, with nobody in the picture, is told neither how to strike nor how to stroke", async () => {
+    const { SPLIT_STRIKE_CLAUSE, SHAVING_STROKE_CLAUSE } = await import("./longformVideo");
+    const scenes = [pic(3, "The froe is the tool that made those roofs.", "a froe and a drawknife hanging from pegs on a log cabin wall")];
+    markHostBroll(scenes, { hostLook: WOODWORKER, hostName: "Sam" }, "https://x/host.png");
+    expect(scenes[0].humanPresent).toBeFalsy();
+    const prompt = buildStillPrompt(scenes[0]);
+    expect(prompt).not.toContain(SPLIT_STRIKE_CLAUSE);
+    expect(prompt).not.toContain(SHAVING_STROKE_CLAUSE);
+  });
+
+  it("413-29 the spark plug wire runs to the one part it serves — with people in the picture or not", async () => {
+    const { CONNECTING_LINES_CLAUSE } = await import("./longformVideo");
+    expect(CONNECTING_LINES_CLAUSE).toMatch(/runs unbroken from where it really starts to the part it really serves/);
+    expect(CONNECTING_LINES_CLAUSE).toMatch(
+      /never runs into a different part's fitting, never swaps with or turns into a different line \(an electrical lead never becomes a fuel or water line\)/
+    );
+    // A pipe is several pieces and a branch joins its run at a tee (job 11's P-trap, job 403's PVC
+    // pipework "with visible joints and bends"): lines may meet at a real fitting.
+    expect(CONNECTING_LINES_CLAUSE).toMatch(/a pipe through its own real joints and bends/);
+    expect(CONNECTING_LINES_CLAUSE).toMatch(/lines meet only where a real fitting joins them/);
+    expect(CONNECTING_LINES_CLAUSE).not.toMatch(/ONE continuous piece|never joins/);
+    expect(CONNECTING_LINES_CLAUSE).toMatch(/two lines that run side by side stay two separate lines/);
+    const scenes = [plugWire29()];
+    markHostBroll(scenes, { hostLook: WOODWORKER, hostName: "Gary" }, "https://x/host.png");
+    expect(buildStillPrompt(scenes[0])).toContain(CONNECTING_LINES_CLAUSE);
+    // The same engine with nobody at it.
+    expect(buildStillPrompt(plugWire29({ humanPresent: false }))).toContain(CONNECTING_LINES_CLAUSE);
+    // Not on a content-policy fallback, which softens the picture's words away.
+    expect(buildStillPrompt(plugWire29({ humanPresent: false }), true)).not.toContain(CONNECTING_LINES_CLAUSE);
+  });
+
+  it("only a picture naming a line that connects things is told about lines", async () => {
+    const { connectingLinesClause, CONNECTING_LINES_CLAUSE } = await import("./longformVideo");
+    for (const words of [
+      "a garden hose coiled beside an outdoor tap",
+      "an extension cord running from the wall socket to the saw",
+      "jumper cables clamped onto the battery terminals",
+      "the fuel line from the tank to the carburetor",
+      "copper pipes under the kitchen sink",
+      "a tangle of wiring behind the dashboard",
+      "a green hosepipe running from the tap to the sprinkler",
+      // The replay's own: jobs 270 and 403.
+      "an electrical cord running under a rug on the floor",
+      "grey PVC pipe network running beneath the house toward the street",
+    ])
+      expect(connectingLinesClause(words), words).toBe(` ${CONNECTING_LINES_CLAUSE}`);
+    for (const words of [
+      "a wire brush resting on the workbench",
+      "a cord of split firewood stacked by the shed",
+      "chicken wire fence around the garden bed",
+      "a pipe wrench on the bench",
+      "a cordless drill on the bench",
+      "a cable-knit sweater folded on the bed",
+      "wire-rimmed glasses resting on an open book",
+      // The replay's smoke alarms (jobs 229, 259, 381, 394) and space heater (job 229): no line to run.
+      "a rounded white replacement alarm unit held in an open hand, no visible wiring",
+      "round white smoke alarm held in a hand near the ceiling, no wires visible",
+      "The unit displays no wires or connections, only the plain white face",
+      "A black space heater with a metal wire grille sitting on the floor near a low bed",
+      "a stack of folded quilts on a bed",
+      "the froe and the drawknife hanging on the back wall",
+    ])
+      expect(connectingLinesClause(words), words).toBe("");
+    // 414-17's froe names no line, and is not told about one.
+    const scenes = [froe17()];
+    markHostBroll(scenes, { hostLook: WOODWORKER, hostName: "Sam" }, "https://x/host.png");
+    expect(buildStillPrompt(scenes[0])).not.toContain(CONNECTING_LINES_CLAUSE);
+  });
+
+  it("the still check names a line in the wrong part, a drawknife along the board, and a froe pressed by hand", () => {
+    const q2 = STILL_DEFECT_SYSTEM.slice(STILL_DEFECT_SYSTEM.indexOf("QUESTION 2"), STILL_DEFECT_SYSTEM.indexOf("QUESTION 3"));
+    expect(q2).toMatch(/a cable, wire, cord, hose or pipe that runs into a part it does not serve or into another part's fitting/);
+    expect(q2).toMatch(/one line turning into a different one with no fitting between them/);
+    expect(q2).toMatch(/lines meeting at a real fitting \(a pipe tee, a coupler, a plug in its socket\) are right/);
+    expect(q2).not.toMatch(/two different lines joined into one/);
+    expect(q2).toMatch(/a drawknife or spokeshave whose blade lies ALONG the length of the piece it is shaving/);
+    expect(q2).toMatch(/stroke would run sideways across the piece's narrow width instead of along its length/);
+    expect(q2).toMatch(
+      /A froe or wedge pressed down on top of the wood by the hands alone, its edge not in it and no club, mallet or sledge to strike it in, is this fault/
+    );
+    // …never a froe already in and levered, nor a hewing axe or a tool at rest (job 407).
+    expect(q2).toMatch(/a froe already sunk in the wood and levered by its handle needs no club in the frame/);
+    expect(q2).toMatch(/An axe chopping, felling or hewing into the side of a log or trunk is right/);
+    expect(q2).toMatch(/a tool hanging, lying or resting unused is splitting nothing/);
+    expect(q2).toMatch(/When unsure, answer false/);
+    // The check's own words name the tool or the line, so the redraw can be told which rule it broke.
+    expect(STILL_DEFECT_SYSTEM).toMatch(/a fault in a tool, cable, wire or hose names it/);
+  });
+
+  it("414-17 the first broken draw of a tool at work, or of a line in any picture, is redrawn told what was wrong", async () => {
+    const { faultRedrawFor } = await import("./longformVideo");
+    type R = "at rest" | "soft print" | "named fault";
+    const none = new Set<R>();
+    const first = { broken: 0, writing: 0 };
+    const once = { broken: 1, writing: 0 };
+    const froe = { broken: true, what: "froe blade lying flat on top of the bolt, no club" };
+    expect(faultRedrawFor({}, froe, first, none, true, true)).toBe("named fault");
+    // A tool with nobody at it cannot be put to work: its plain reroll, then the at-rest draw, as before.
+    expect(faultRedrawFor({}, froe, first, none, true, false)).toBeUndefined();
+    // A line is wrong in any picture (413-29, the engine with nobody at it too).
+    const wire = { broken: true, what: "spark plug wire runs into the carburetor fuel inlet" };
+    expect(faultRedrawFor({}, wire, first, none, true, false)).toBe("named fault");
+    // A fault in no tool and no line keeps its plain reroll (7 of 9 cleared, job 352).
+    for (const what of ["cutting board floating above the table", "hand with six fingers", "shelf edge fails to line up", ""])
+      expect(faultRedrawFor({}, { broken: true, what }, first, none, true, true), what).toBeUndefined();
+    // The second broken still gets the one at-rest draw, the named fault tried or not.
+    expect(faultRedrawFor({}, froe, once, new Set<R>(["named fault"]), true, true)).toBe("at rest");
+    // Once only; never over a content-policy rung; never on a check that could not run.
+    expect(faultRedrawFor({}, froe, first, new Set<R>(["named fault"]), true, true)).toBeUndefined();
+    expect(faultRedrawFor({}, froe, first, none, false, true)).toBeUndefined();
+    expect(faultRedrawFor({}, { ...froe, unchecked: true }, first, none, true, true)).toBeUndefined();
+  });
+
+  it("the redraw names the fault and the rule of the tool's own kind — from the fault, else from the picture's words", async () => {
+    const {
+      namedFaultRedraw,
+      NAMED_FAULT_START,
+      SPLIT_STRIKE_CLAUSE,
+      SHAVING_STROKE_CLAUSE,
+      CONNECTING_LINES_CLAUSE,
+      TOOL_AT_WORK_FIX,
+    } = await import("./longformVideo");
+    const P = "Bare hands holding a froe upright.";
+    const words17 = `${froe17().showSubject} ${froe17().visualPrompt}`;
+    const out = namedFaultRedraw(P, "froe blade lying flat on top of the bolt, no club.", words17, true);
+    expect(out.startsWith(`${P} `)).toBe(true);
+    expect(out).toContain(
+      `${NAMED_FAULT_START} froe blade lying flat on top of the bolt, no club. This time draw it the way it really is.`
+    );
+    expect(out).toContain(SPLIT_STRIKE_CLAUSE);
+    expect(out).not.toContain(SHAVING_STROKE_CLAUSE);
+    // Never twice.
+    expect(namedFaultRedraw(out, "froe still on top of the bolt", words17, true)).toBe(out);
+    // A fault naming only the blade takes its kind from the picture's own words.
+    expect(namedFaultRedraw(P, "blade resting on top of the wood", words17, true)).toContain(SPLIT_STRIKE_CLAUSE);
+    // 414-13.
+    const words13 = `${drawknife13().showSubject} ${drawknife13().visualPrompt}`;
+    const stroke = namedFaultRedraw(P, "drawknife lying along the board's length", words13, true);
+    expect(stroke).toContain(SHAVING_STROKE_CLAUSE);
+    expect(stroke).not.toContain(SPLIT_STRIKE_CLAUSE);
+    // 413-29: the line's rule, in a picture of someone at work or not.
+    const words29 = `${plugWire29().showSubject} ${plugWire29().visualPrompt}`;
+    for (const atWork of [true, false]) {
+      const line = namedFaultRedraw(P, "plug wire loops into the carburetor fuel inlet", words29, atWork);
+      expect(line).toContain(CONNECTING_LINES_CLAUSE);
+      expect(line).not.toContain(TOOL_AT_WORK_FIX);
+    }
+    // A tool of no named kind gets the plain tool rule.
+    const chisel = namedFaultRedraw(P, "chisel edge in the air beside the wood", "hands chopping a mortise with a chisel", true);
+    expect(chisel).toContain(TOOL_AT_WORK_FIX);
+    expect(chisel).not.toContain(SPLIT_STRIKE_CLAUSE);
+    // A fault in no tool and no line leaves the prompt as it was.
+    expect(namedFaultRedraw(P, "cutting board floating above the table", words17, true)).toBe(P);
+    expect(namedFaultRedraw(P, undefined, words17, true)).toBe(P);
+  });
+
+  // The replay over the stored storyboards (the review of this fix): the kind of tool was read off words
+  // that name no such tool, and would have put a froe and a club into pictures with none.
+  it("a tool's kind is read only off a tool of that kind: end grain, a riving knife, a slice, an aircraft", async () => {
+    const { namedFaultClause, SPLIT_STRIKE_CLAUSE, SHAVING_STROKE_CLAUSE, TOOL_AT_WORK_FIX } = await import(
+      "./longformVideo"
+    );
+    // Jobs 131 scene 68 and 171 scene 326: a wood-burning pen and tool on a tray's END GRAIN — no split.
+    for (const words of [
+      "Weathered bare hands grip a wood-burning pen, its metal tip glowing orange, positioned over the pale pine end grain of a clamped tea tray in a garage workshop under flat daylight",
+      "hands using a woodburning tool on the end grain of a wooden tray, close up",
+    ]) {
+      const c = namedFaultClause("woodburning tool tip in the air above the tray", words, true);
+      expect(c, words).toContain(TOOL_AT_WORK_FIX);
+      expect(c, words).not.toContain(SPLIT_STRIKE_CLAUSE);
+      expect(namedFaultClause("tool tip sunk through the end grain", words, true), words).not.toContain(SPLIT_STRIKE_CLAUSE);
+    }
+    // A table saw's riving knife is no riving tool.
+    const saw = namedFaultClause("saw blade passing through the riving knife", "hands feeding a board past a table saw's riving knife", true);
+    expect(saw).toContain(TOOL_AT_WORK_FIX);
+    expect(saw).not.toContain(SPLIT_STRIKE_CLAUSE);
+    // A wedge of food is no splitting wedge, and is no tool at all.
+    expect(namedFaultClause("lemon wedges floating above the plate", "hands squeezing lemon wedges over a plate", true)).toBeUndefined();
+    const knife = namedFaultClause("knife blade passing through the board", "hands cutting a lemon into wedges on a cutting board", true);
+    expect(knife).toContain(TOOL_AT_WORK_FIX);
+    expect(knife).not.toContain(SPLIT_STRIKE_CLAUSE);
+    // …while a wedge splitting a log, and a froe, still get the strike.
+    expect(namedFaultClause("steel wedge resting on top of the log", "hands driving a steel wedge into a log", true)).toContain(SPLIT_STRIKE_CLAUSE);
+    expect(namedFaultClause("wedge lying on top, not in the wood", "splitting a round with a wedge and a sledge", true)).toContain(SPLIT_STRIKE_CLAUSE);
+    expect(namedFaultClause("froe resting on top of the bolt", "", true)).toContain(SPLIT_STRIKE_CLAUSE);
+    // Job 410 scenes 2 and 24: passengers in "plane seats", at a "plane window" — no plane that shaves.
+    const seats = "two older passengers seated side by side in the same row of plane seats, seen from behind";
+    expect(namedFaultClause("plane seat back merging into the window", seats, true)).toBeUndefined();
+    expect(namedFaultClause("plane wing bent through the window", "a plane window view of farmland far below", true)).toBeUndefined();
+    // …while a woodworker's plane still does (job 352 scene 140).
+    const jack =
+      "host's hands pushing a long grey metal jack plane with a wooden rear handle and front knob across a rough oak board face";
+    expect(namedFaultClause("plane lying sideways across the board's width", jack, true)).toContain(SHAVING_STROKE_CLAUSE);
+    expect(namedFaultClause("blade lifted off the board", jack, true)).toContain(SHAVING_STROKE_CLAUSE);
+    // A workshop's own words never read as an aircraft: a pilot hole, chips flying, jet-black handles.
+    expect(
+      namedFaultClause(
+        "plane lying sideways, chips flying",
+        "hands pushing a jet-black hand plane along a board beside a drilled pilot hole",
+        true
+      )
+    ).toContain(SHAVING_STROKE_CLAUSE);
+  });
+
+  it("a finger or a hand too many keeps its plain reroll, even beside a tool: naming it could draw it again", async () => {
+    const { namedFaultClause, faultRedrawFor } = await import("./longformVideo");
+    const words = `${froe17().showSubject} ${froe17().visualPrompt}`;
+    for (const what of [
+      "six fingers on the froe handle",
+      "hand with too many fingers gripping the saw",
+      "extra hand on the drill",
+      "a third arm holding the chisel",
+      "six-fingered hand on the hammer",
+    ]) {
+      expect(namedFaultClause(what, words, true), what).toBeUndefined();
+      expect(faultRedrawFor({}, { broken: true, what }, { broken: 0, writing: 0 }, new Set(), true, true), what).toBeUndefined();
+    }
+    // Two hands pressing a froe down is the very fault of job 414 scene 17, never a body count.
+    expect(namedFaultClause("froe pressed down by two hands, no club", words, true)).toBeDefined();
+  });
+
+  it("the new rules name no channel's things", async () => {
+    const { SPLIT_STRIKE_CLAUSE, SHAVING_STROKE_CLAUSE, CONNECTING_LINES_CLAUSE, TOOL_AT_WORK_FIX } = await import(
+      "./longformVideo"
+    );
+    for (const clause of [SPLIT_STRIKE_CLAUSE, SHAVING_STROKE_CLAUSE, CONNECTING_LINES_CLAUSE, TOOL_AT_WORK_FIX])
+      expect(clause).not.toMatch(/spark plug|carburet|mower|engine|oak|chestnut|bolt|shingle|roof|cabin|folk school|Foxfire/i);
+  });
+});
+
+/**
+ * NOTHING THE LINE DOES NOT NAME (2026-10-20, the review of job 414, an old-cabin film): the back wall
+ * with the axe, froe and drawknife a line reveals at 21 s ("But on the back wall hung an axe, a froe,
+ * and a drawknife") filled the pictures from 2.6 s on, and "you will come up nearly empty-handed" was
+ * drawn as a cabin crowded with goods.
+ */
+describe("job 414: what a later line reveals is not shown early; a search that finds nothing finds nothing", () => {
+  const lines = [
+    "Go through an old mountain cabin looking for anything",
+    "a store sold, and you will come up nearly empty-handed.",
+    "A log restorer in Grayson County, Virginia, let me try it.",
+    "The roof was split oak, the walls were hewn poplar, and the door hung on wooden pins with a string for a lock. But on the back wall hung",
+    "an axe,",
+    "a froe,",
+    "and a drawknife,",
+    "and the steel in those three was the one thing that homestead could not grow.",
+  ];
+  const tools = {
+    name: "steel tools",
+    look: "an axe, a froe, and a drawknife hanging together on the cabin's back interior wall",
+  };
+
+  it("before the reveal the tools are taken out of the picture; under 'those three' they stay", async () => {
+    const { notYetSaid, ownWordsOf, withoutAddedKeyThings } = await import("./brollRewrite");
+    const scene2 = { scriptText: lines[1], showSubject: "the old log cabin interior, looking for store-bought goods" };
+    const before = withoutAddedKeyThings(
+      "Interior of a historic log cabin in Grayson County, Virginia, with hewn poplar walls. The back wall shows an axe, a froe, and a drawknife hanging together. Scattered salvage and old objects rest on surfaces around the cabin's dim interior.",
+      ownWordsOf(scene2, scene2.showSubject),
+      notYetSaid(lines, 1, [tools])
+    );
+    expect(before.text).not.toMatch(/axe|froe|drawknife/);
+    expect(before.text).toMatch(/^Interior of a historic log cabin/);
+    const scene8 = { scriptText: lines[7], showSubject: "a closer view of the steel tools hanging on the cabin wall" };
+    const group =
+      "The axe, froe, and drawknife hanging together on the cabin's back interior wall, all three steel tools visible in one view against the dark hewn poplar.";
+    expect(notYetSaid(lines, 7, [tools])).toEqual([]);
+    expect(withoutAddedKeyThings(group, ownWordsOf(scene8, scene8.showSubject), [tools]).text).toBe(group);
+  });
+
+  it("the empty-handed search is a line about nothing being there; a line naming a bare surface is not", async () => {
+    const { saysNothingThere } = await import("./brollRewrite");
+    expect(saysNothingThere(lines[1])).toBe(true);
+    expect(saysNothingThere(lines[3])).toBe(false);
+    expect(saysNothingThere("Keep the stack off bare concrete,")).toBe(false);
+  });
+});
+
+/**
+ * THE CHECK NEVER EMPTIES A PICTURE (2026-10-20, the review of the job 414 fix, replayed over the local
+ * storyboards): taking out a key thing a later line names took the part of the rewrite it sat in, and
+ * on "is that clean Japanese look really worth anything on a market table" (job 264 scene 7) the part
+ * was the work itself — the EMPTY market table the operator refused on job 269 came back. A part that
+ * carries the scene's own words is the picture: the scene keeps its own words instead.
+ */
+describe("the later-line check: a market table keeps its finished pieces (job 264 scene 7, the job 269 case)", () => {
+  it("the trim that would leave an empty table is refused for the scene's own words", async () => {
+    const { ownWordsOf, rewriteFallback, withoutAddedKeyThings } = await import("./brollRewrite");
+    const scene = {
+      scriptText: "wondering if that clean Japanese look is really worth anything on a market table.",
+      showSubject: "market table outdoors holding finished wood pieces set in rows",
+    };
+    const holder = {
+      name: "charred cedar incense holder",
+      look: "small blackened cedar block, square-edged, single angled hole drilled halfway, oiled matte-black finish, felt dot on underside, sits on workbench",
+    };
+    const r = withoutAddedKeyThings(
+      "Fold-out wooden table outdoors draped with plain cloth, holding finished charred cedar incense holders and kumiko lattice panels arranged in rows.",
+      ownWordsOf(scene, scene.showSubject),
+      [holder]
+    );
+    expect(r.added).toEqual(["charred cedar incense holder"]);
+    expect(r.text).toBeUndefined();
+    expect(r.left).toBe("Fold-out wooden table outdoors draped with plain cloth.");
+    expect(rewriteFallback(scene, scene.showSubject)).toBe("market table outdoors holding finished wood pieces set in rows");
+  });
+});

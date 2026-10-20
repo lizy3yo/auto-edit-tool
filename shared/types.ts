@@ -388,6 +388,14 @@ export interface StoryboardScene {
    */
   visualPromptSeed?: string;
   /**
+   * What `visualPrompt` was last WRITTEN for by `enhanceBrollPrompts` (`server/brollRewrite.ts`):
+   * a clip of something moving by itself, a photo catching it mid-motion, or an ordinary photo.
+   * A shot written for motion in which nothing turns out to move by itself (the plan gate makes it
+   * an ordinary photo) is written again (`leftMotionLane`). Unset when the prompt is the scene's own
+   * words (no rewrite landed).
+   */
+  promptLane?: "video" | "moving-thing" | "still";
+  /**
    * Read-only preview, computed at poll time by `pollJob` and NEVER persisted: the exact
    * fully-assembled prompts this scene ships to the providers — `assembledClipPrompt` to
    * grok-imagine-video, `assembledStillPrompt` to gpt-image-2. Undefined outside pollJob.
