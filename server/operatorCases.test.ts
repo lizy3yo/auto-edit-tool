@@ -8159,3 +8159,62 @@ describe("a tool works the way it really does, and a line ends at the part it se
       expect(clause).not.toMatch(/spark plug|carburet|mower|engine|oak|chestnut|bolt|shingle|roof|cabin|folk school|Foxfire/i);
   });
 });
+
+// A SPLIT PANEL IS BUILT FROM ITS LINE (round 14, 2026-10-20, the review of job 414). Scene 4: for nine
+// of the panel's ten seconds the voice described the cabin from outside, and the panel showed the inside
+// back wall that only the last words, "But on the back wall hung", begin to talk about. Scene 22: under
+// "got shaved thin at one end with a drawknife", a finished shingle and no drawknife. The rows are the
+// job's own; the rules are general.
+describe("a split panel is built from its line, and keeps the tool its line names (job 414 scenes 4 and 22)", () => {
+  const HOST =
+    "the channel's host, exactly as in their host photo, seated in a chair talking directly to the camera";
+  const LINE_4 =
+    "The roof was split oak, the walls were hewn poplar, and the door hung on wooden pins with a string for a lock. But on the back wall hung";
+  const CABIN_4 =
+    "an old log cabin seen from outside, its walls made of hewn logs with scalloped axe marks and pale chinking, a roof of split oak boards, and a plank door hung on wooden pins with a latch string hanging out";
+  const LINE_22 = "They went up rough as shakes, or got shaved thin at one end with a drawknife to make shingles.";
+  const SHINGLE_22 =
+    "a split shingle lying on a log outside the cabin, one end shaved thin to a smooth taper, fresh pale wood curls scattered beside it";
+  const host = (index: number, scriptText: string, extra: Partial<StoryboardScene> = {}) =>
+    ({ index, narration: scriptText, scriptText, hostPresent: true, visualPrompt: HOST, audioDuration: 10, ...extra }) as StoryboardScene;
+
+  it("414 scene 4: a forced panel starts from what the line needs, and the check hears where the line runs on", async () => {
+    const { enforceHostSplitMix, panelSeedFor } = await import("./longformVideo");
+    const { leadIntoNext } = await import("./shotList");
+    const row = host(4, LINE_4, { showSubject: CABIN_4, brollVisual: CABIN_4, audioDuration: 9.9482 });
+    expect(panelSeedFor(row)).toBe(CABIN_4);
+    // Whichever beats the split share lands on, each panel starts from what its line needs.
+    const film = [
+      host(1, "Hello, friends."),
+      host(2, "Some of the old ways are gone.", { showSubject: "an empty old homestead in a clearing" }),
+      row,
+      host(5, "That is where we start.", { brollVisual: "a woodlot at first light" }),
+      host(6, "See you next time."),
+    ];
+    enforceHostSplitMix(film);
+    const split = film.filter(s => s.splitVisual);
+    expect(split.length).toBeGreaterThan(0);
+    for (const s of split) expect(s.splitVisual).toBe(panelSeedFor(s));
+    expect(leadIntoNext(LINE_4, 9.9482)).toEqual({ words: "But on the back wall hung", sec: 2.1 });
+    // A line whose last clause is whole, and the line's point, is not marked (job 153 scene 452).
+    expect(leadIntoNext("The Japanese look people paid me for wasn't the precision work. It was the fire,")).toBeUndefined();
+  });
+
+  it("414 scene 22: the panel keeps the drawknife, resting on the work; a panel that kept it, or is about another sentence, is left alone", async () => {
+    const { withLineTool } = await import("./shotList");
+    expect(withLineTool(SHINGLE_22, LINE_22)).toBe(`${SHINGLE_22}, a drawknife resting on the work, unattended.`);
+    // Job 407 scene 18, the same line: the drawknife was already there.
+    const KEPT =
+      "A pale oak board held flat on a work surface, one end shaved thin by drawknife strokes, wood curls resting on the board and ground nearby.";
+    expect(withLineTool(KEPT, LINE_22)).toBe(KEPT);
+    // Job 118 scene 61: the chisel belongs to the sentence before the cleat the panel shows.
+    const CLEAT =
+      "Wooden shelf back edge showing a slim wooden cleat fastened with screws, clamped horizontally on a workbench under even indoor daylight.";
+    expect(
+      withLineTool(
+        CLEAT,
+        "knock the chunks out, and pare it flat with the chisel, same rule as before, board clamped down and both hands behind the edge. When you hang it, screw a hidden cleat on the back into a wall stud,"
+      )
+    ).toBe(CLEAT);
+  });
+});

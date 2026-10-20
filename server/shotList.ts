@@ -3851,6 +3851,172 @@ export function oneThingPanels(
 // ─── Does each split panel show what its line is about? ─────────────────────────────────
 
 /**
+ * THE LINE'S LAST WORDS LEAD INTO THE NEXT ONE (2026-10-20, job 414 scene 4). A split panel sits
+ * beside its host take for the whole line, and a host take may stop mid-sentence where the shot list
+ * hands over to the pictures: "The roof was split oak, the walls were hewn poplar, and the door hung
+ * on wooden pins with a string for a lock. But on the back wall hung" — 8 s about the cabin from
+ * outside, then the first words of the sentence whose list plays on the pictures after it. The
+ * panel writer and the panel check both took those six words for the subject, and for ten seconds
+ * the panel showed the inside back wall while the voice described the roof, the walls and the door.
+ * The panel check is told them, with about how long they are said, so it weighs the rest. Only words
+ * after a whole sentence, at least two, at most a third of the line's words — job 409 scene 3's "His
+ * father made it to eighty-one. And somewhere between the sympathy cards and the cards for new
+ * grandbabies," is mostly that second sentence, and its panel of the cards is right — and only words
+ * cut off mid-clause, with no comma or stop after them: a clause that is whole says its own thing
+ * and may be the line's point ("…wasn't the precision work. It was the fire," over a charred piece,
+ * job 153 scene 452). Replayed over the 1,638 local split panels: 12 marked, this one among them.
+ * Undefined otherwise. Pure.
+ */
+export function leadIntoNext(
+  line: string | undefined,
+  sec?: number
+): { words: string; sec?: number } | undefined {
+  const text = (line ?? "").replace(/\s+/g, " ").trim();
+  if (!text || /[.!?,;:—–-]["'”’)\]]*$/.test(text)) return undefined;
+  // The LAST sentence end followed by more words (greedy).
+  const m = /^(.*[.!?]["'”’)\]]*)\s+(\S.*)$/.exec(text);
+  if (!m) return undefined;
+  const words = m[2].trim();
+  const all = text.split(" ").length;
+  const n = words.split(" ").length;
+  if (n < 2 || n * 3 > all) return undefined;
+  return { words, ...(sec && sec > 0 ? { sec: Math.round(((sec * n) / all) * 10) / 10 } : {}) };
+}
+
+/**
+ * Hand tools a line may say a job is done WITH. Words that name nothing else only: no "level",
+ * "square", "file", "iron", "club" or "hook", which a line uses for other things.
+ */
+const HAND_TOOL = String.raw`(?:(?:hand|coping|hack|bow|pull|rip|crosscut|jig|band|circular|chain)\s?saws?|saws?|chisels?|gouges?|froes?|mauls?|axes?|hatchets?|adzes?|draw\s?knife|drawknives|spokeshaves?|(?:hand\s+|block\s+|jack\s+|smoothing\s+)?planes?|drills?|screwdrivers?|hammers?|mallets?|wedges?|(?:knitting\s+|sewing\s+)?needles?|crochet\s+hooks?|scissors|shears|clippers|pruners|secateurs|trowels?|spades?|shovels?|rakes?|hoes?|paint\s?brush(?:es)?|brush(?:es)?|paint\s+rollers?|scrapers?|putty\s+knife|knife|knives|sanding\s+blocks?|sandpaper|rasps?|wrench(?:es)?|spanners?|pliers|soldering\s+irons?|whisks?|spatulas?|ladles?|rolling\s+pins?|graters?|peelers?|razors?|combs?|tweezers|awls?|staplers?|glue\s+guns?|wire\s+brush(?:es)?)`;
+/**
+ * "…with a drawknife to make shingles", "…using a sharp chisel,": the tool, one describing word
+ * allowed before it, and only where the tool word ends the noun — never "a drill bit", "a plane seat"
+ * or "a saw blade", whose last word is the thing.
+ */
+const DONE_WITH_TOOL = new RegExp(
+  String.raw`\b(?:with|using)\s+(?:a|an|the|his|her|my|your|their|our|one|some)\s+((?:pair\s+of\s+)?(?:[a-z-]+\s+)?${HAND_TOOL})(?=\s*(?:[,.;:!?)"”’]|$)|\s+(?:to|and|or|on|in|into|onto|along|across|over|from|until|till|then|so|for|at|by|while|before|after|against|through|like)\b)`,
+  "gi"
+);
+/** A clause that rules the tool out ("not with a chisel", "you don't need a…"). */
+const RULED_OUT = /\b(?:not|never|no|without|instead\s+of|rather\s+than|don['’]t|doesn['’]t|didn['’]t|won['’]t|can['’]t|isn['’]t|aren['’]t)\b[^,.;:!?]*$/i;
+/** Tools only ever said in the plural, which a picture names as "a pair of …". */
+const PAIR_TOOL = /^(?:scissors|shears|clippers|pruners|secateurs|pliers|tweezers)$/i;
+
+/** A word's stem for naming a tool: plural and spacing taken out ("draw knife" = "drawknives", "axes" = "axe"). */
+const toolStem = (w: string) => {
+  const t = w.toLowerCase().replace(/\bdraw\s+kni/g, "drawkni").replace(/knives\b/g, "knife");
+  return /(?:ch|sh)es$/.test(t) ? t.slice(0, -2) : /[^s]s$/.test(t) ? t.slice(0, -1) : t;
+};
+
+/**
+ * The hand tool the line says its job is done WITH ("got shaved thin at one end with a drawknife"),
+ * as the line names it ("drawknife", "sharp chisel", "pair of scissors"), or undefined — also when the
+ * clause rules it out ("not with a chisel", "you don't need a …") or the sentence's own `forbids` names
+ * it. Pure.
+ */
+export function lineTool(line: string | undefined, forbids?: string): string | undefined {
+  return findLineTool(line, forbids)?.tool;
+}
+
+/** `lineTool`, and where in the (space-normalised) line it is said. */
+function findLineTool(line: string | undefined, forbids?: string): { tool: string; at: number } | undefined {
+  const text = (line ?? "").replace(/\s+/g, " ");
+  DONE_WITH_TOOL.lastIndex = 0;
+  for (let m = DONE_WITH_TOOL.exec(text); m; m = DONE_WITH_TOOL.exec(text)) {
+    if (RULED_OUT.test(text.slice(0, m.index))) continue;
+    const tool = m[1].toLowerCase().trim();
+    const head = toolStem(tool.split(/\s+/).pop() ?? "");
+    if (forbids && forbids.toLowerCase().split(/[^a-z]+/).some(w => toolStem(w) === head)) continue;
+    return { tool, at: m.index };
+  }
+  return undefined;
+}
+
+/** Grammar words, which say nothing of what a sentence or a picture is about. */
+const NOT_ABOUT =
+  /^(?:with|that|this|these|those|from|into|onto|your|their|they|them|then|than|when|what|which|where|have|been|were|will|would|could|should|just|only|also|same|each|every|some|more|most|very|over|under|about|after|before|while|here|there|it's|i'm|you're)$/;
+/** The stems of the words that say what `text` is about. */
+const aboutStems = (text: string): Set<string> =>
+  new Set(
+    (text.toLowerCase().match(/[a-z']+/g) ?? [])
+      .filter(w => w.length >= 4 && !NOT_ABOUT.test(w))
+      .map(w => w.replace(/'s$/, "").replace(/(?:ing|ed|es|s)$/, ""))
+  );
+
+/**
+ * Is the panel about the sentence the tool is said in? A line of one sentence, yes. A longer one only
+ * when that sentence shares at least as many words with the panel as any other sentence of the line:
+ * "…and pare it flat with the chisel, same rule as before… When you hang it, screw a hidden cleat on
+ * the back into a wall stud," (jobs 118 and 122) has its panel on the cleat, and a chisel resting on
+ * it would be the other sentence's tool.
+ */
+function panelOnToolSentence(panel: string, line: string, at: number): boolean {
+  const text = line.replace(/\s+/g, " ");
+  const sentences: { from: number; to: number }[] = [];
+  const re = /[^.!?]+(?:[.!?]+["'”’)\]]*|$)/g;
+  for (let m = re.exec(text); m && m[0]; m = re.exec(text)) sentences.push({ from: m.index, to: m.index + m[0].length });
+  if (sentences.length < 2) return true;
+  const shown = aboutStems(panel);
+  const overlap = (s: { from: number; to: number }) =>
+    Array.from(aboutStems(text.slice(s.from, s.to))).filter(w => shown.has(w)).length;
+  const own = sentences.find(s => at >= s.from && at < s.to);
+  if (!own) return false;
+  const mine = overlap(own);
+  return mine > 0 && sentences.every(s => s === own || overlap(s) <= mine);
+}
+
+/**
+ * A PERSON-FREE PANEL KEEPS THE TOOL ITS LINE NAMES (2026-10-20, job 414 scene 22). A panel shows
+ * nobody, so a line about someone working is drawn as the work — and the tool went with the hands:
+ * under "got shaved thin at one end with a drawknife to make shingles" the panel check rewrote the
+ * panel as "a split shingle lying on a log…, fresh pale wood curls scattered beside it", the drawknife
+ * the line names nowhere in it. The panel rules ask for the tool; this is the guarantee, whatever
+ * wrote the panel: the tool the line says the job is done with (`lineTool`), when the panel's words do
+ * not name it, is added resting on the work, unattended — never held, so no hand is asked for. Only
+ * when the panel is about the sentence the tool is said in (`panelOnToolSentence`); never a panel
+ * drawn on the host's own body (hair, skin, nails), and never twice. Replayed over the 1,638 local
+ * split panels: 17 lines name such a tool, 10 panels had left it out and get it (this one, and a
+ * jigsaw, a pull saw and scissors on panels of the work they did), and the cleat panels of jobs 118
+ * and 122, whose chisel is in the other sentence, do not. Pure.
+ */
+export function withLineTool(panel: string, line: string | undefined, forbids?: string): string {
+  const text = panel.trim();
+  if (!text || (BODY_PART_WORDS.test(text) && !REAL_HOLDER.test(text))) return panel;
+  const found = findLineTool(line, forbids);
+  if (!found || !panelOnToolSentence(text, line ?? "", found.at)) return panel;
+  const { tool } = found;
+  const head = toolStem(tool.split(/\s+/).pop() ?? "");
+  const named = text
+    .toLowerCase()
+    .replace(/\bdraw\s+kni/g, "drawkni")
+    .split(/[^a-z]+/)
+    .some(w => w && toolStem(w) === head);
+  if (named) return panel;
+  const bare = tool.replace(/^pair\s+of\s+/, "");
+  const what = PAIR_TOOL.test(bare.split(/\s+/).pop() ?? "")
+    ? `a pair of ${bare}`
+    : `${/^[aeiou]/.test(tool) ? "an" : "a"} ${tool}`;
+  return `${text.replace(/[\s.,;:]+$/, "")}, ${what} resting on the work, unattended.`;
+}
+
+/**
+ * Every split panel whose line names the tool its job is done with keeps that tool (`withLineTool`).
+ * `only` limits it to the panels just written. Returns how many changed. Pure apart from mutating
+ * `scenes`.
+ */
+export function keepPanelTools(scenes: StoryboardScene[], only?: (s: StoryboardScene) => boolean): number {
+  let n = 0;
+  for (const s of scenes) {
+    if (!panelCandidate(s) || (only && !only(s))) continue;
+    const kept = withLineTool(s.splitVisual!, s.scriptText ?? s.narration, s.forbids);
+    if (kept === s.splitVisual) continue;
+    s.splitVisual = kept;
+    n++;
+  }
+  return n;
+}
+
+/**
  * The panel pass's own rules, sent after `FIT_SYSTEM` (`systemSuffix`, so the line check's rulebook
  * stays one cached block). Neutral examples only: the cases are in the tests.
  */
@@ -3865,6 +4031,14 @@ them. Judge every PANEL by all the rules above, and also:
   a person or hands in it, so who and other are never set on a panel. The one exception is a body
   part the line is about (hair, skin, nails): it is drawn on the host, close, the face not shown — a
   panel showing it that way is RIGHT; never rewrite it into a product or a part lying on its own.
+- A TOOL the line says the job is done with ("trimmed with scissors", "smoothed with a scraper")
+  stays in the panel, resting on the work, unattended, and the work is at the stage the line says —
+  part-done while it is being done. A panel of the result alone, the named tool left out, is WRONG.
+- A panel is beside the host for its WHOLE line, so it shows what MOST of the line is about, by how
+  long each part is said. A PANEL marked (ends on "…") ends on the first words of the next sentence
+  ("…, but on the shelf above it sat"): they lead into the pictures after it and are never the
+  panel's subject — a panel showing only what they name is WRONG; rewrite it to what the rest of the
+  line describes.
 - A FIGURE OF SPEECH about what the host does or feels ("I lean in a little closer", "that one
   stopped me in my tracks") is never drawn as the empty prop of that action: the panel shows what
   the line is really about.
@@ -3886,7 +4060,8 @@ A panel is never split or joined. Answer one entry for EVERY PANEL line, with th
  * angle, its timing) is never touched. The panel's words, the seed a later redraw rewrites from, its
  * key thing (the check's name, else the first the words name — the panel is drawn from that thing's
  * pictures, `withSplitMemory`), the part, named look and words it was tied to while the new words
- * still name them (`tieToTypedWords`), and its stage while it is still of the same thing. A rewrite
+ * still name them (`tieToTypedWords`), and its stage while it is still of the same thing; the tool its
+ * line says the job is done with is added when the rewrite left it out (`withLineTool`). A rewrite
  * with a person or hands in it is not used: a panel is person-free beside the host (a body part is
  * drawn on the host by `buildSplitRightScene`, so that one is kept). Returns how many were rewritten.
  * Pure apart from mutating `scenes`.
@@ -3909,8 +4084,10 @@ export function applyPanelFixes(scenes: StoryboardScene[], fixes: PictureFix[], 
     const others = named.map(t => t.name).filter(name => name !== primary?.name);
     s.otherKeyThings = others.length ? others : undefined;
     s.buildStage = f.stage !== undefined ? f.stage ?? undefined : was.thing === primary?.name ? was.stage : undefined;
-    s.splitVisual = f.show;
-    s.splitVisualSeed = f.show;
+    // The tool the line names stays, resting on the work (`withLineTool`, job 414 scene 22).
+    const show = withLineTool(f.show, s.scriptText ?? s.narration, s.forbids);
+    s.splitVisual = show;
+    s.splitVisualSeed = show;
     // Judged again on the new words (`judgeSelfMoving`) before any panel is made to move.
     s.splitSelfMoving = undefined;
     n++;
@@ -3950,7 +4127,12 @@ export async function fitSplitPanelsToLines(
       if (i >= from && panelCandidate(s)) {
         panels++;
         const secs = s.audioDuration ? ` (${s.audioDuration.toFixed(1)} s)` : "";
-        lines.push(`#${i} PANEL${secs}: said "${said}" | shows: ${s.splitVisual!.trim()}`);
+        // Its last words only begin the next sentence (`leadIntoNext`, job 414 scene 4).
+        const tail = leadIntoNext(said, s.audioDuration);
+        const ends = tail
+          ? ` (ends on "${tail.words}"${tail.sec != null ? `, about ${tail.sec.toFixed(1)} s` : ""})`
+          : "";
+        lines.push(`#${i} PANEL${secs}${ends}: said "${said}" | shows: ${s.splitVisual!.trim()}`);
       } else if (fitCandidate(s)) {
         lines.push(`CONTEXT: said "${said}" | shows: ${s.showSubject ?? s.visualPrompt ?? ""}`);
       } else {

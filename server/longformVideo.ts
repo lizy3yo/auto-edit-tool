@@ -56,6 +56,7 @@ import {
   fitPicturesToLines,
   fitSplitPanelsToLines,
   judgeSelfMoving,
+  keepPanelTools,
   oneThingPanels,
   ownTypedPicture,
   ownTypedPanel,
@@ -3467,6 +3468,21 @@ export function enforceStillMotionRatio(
 }
 
 /**
+ * What a split panel the pipeline adds starts from: what its line needs (`showSubject`, the shot
+ * list's and the line check's words for this very line), else the beat's storyboard cutaway
+ * (`brollVisual`), else its own prompt. Job 414 scene 4: the panel's line needed "an old log cabin
+ * seen from outside … a roof of split oak boards, and a plank door hung on wooden pins", and the
+ * panel came back as the inside back wall the line's last six words begin to talk about; the lane
+ * that wrote it had never been told what the line needs (`enhanceBrollPrompts`, its MUST SHOW).
+ * A person in those words is no matter here: the panel writer draws it person-free. Pure.
+ */
+export function panelSeedFor(
+  s: Pick<StoryboardScene, "showSubject" | "brollVisual" | "visualPrompt">
+): string | undefined {
+  return s.showSubject?.trim() || s.brollVisual || s.visualPrompt;
+}
+
+/**
  * Split the host runtime between full-frame host (alone) and split-frame host (a generated
  * visual beside them via `splitVisual`), so the split lane lands at ≈7.5% of total. The
  * storyboard prompt nudges Claude; this converges the actual split by runtime in code.
@@ -3474,10 +3490,9 @@ export function enforceStillMotionRatio(
  * Run AFTER `rebalanceHostScreenTime` so it only sees the final host set. The open/close
  * bookends are never FORCED a split — the host stays clean and full-frame at the top/tail.
  * CTA host scenes ARE eligible (the QR overlay rides on the `cta` flag, not the split). A
- * forced split's right half is sourced from the scene's `brollVisual` fallback (or its own
- * `visualPrompt`). Scenes are flipped only while each flip moves the split-seconds total
- * closer to target, walking a spread order. Mutates `scenes` in place; pure otherwise —
- * unit-tested.
+ * forced split's right half starts from what its line needs (`panelSeedFor`). Scenes are flipped
+ * only while each flip moves the split-seconds total closer to target, walking a spread order.
+ * Mutates `scenes` in place; pure otherwise — unit-tested.
  */
 export function enforceHostSplitMix(
   scenes: StoryboardScene[],
@@ -3539,7 +3554,9 @@ export function enforceHostSplitMix(
     for (const s of spreadOrder(candidates)) {
       if (acc >= target) break;
       if (Math.abs(acc + dur(s) - target) < Math.abs(acc - target)) {
-        s.splitVisual = s.brollVisual ?? s.visualPrompt;
+        s.splitVisual = panelSeedFor(s);
+        // A new panel is rewritten from ITS seed, never from an older panel's (`splitSeedOf`).
+        s.splitVisualSeed = undefined;
         acc += dur(s);
       }
     }
@@ -3624,7 +3641,11 @@ export function addMissingSplitsToUnrendered(
   const before = new Map(
     scenes.map(s => [
       s,
-      { splitVisual: s.splitVisual, splitMotion: s.splitMotion },
+      {
+        splitVisual: s.splitVisual,
+        splitMotion: s.splitMotion,
+        splitVisualSeed: s.splitVisualSeed,
+      },
     ])
   );
   enforceHostSplitMix(scenes, pacing);
@@ -3635,6 +3656,7 @@ export function addMissingSplitsToUnrendered(
       // Rendered: the footage is the truth, whatever the converge just decided about it.
       s.splitVisual = was.splitVisual;
       s.splitMotion = was.splitMotion;
+      s.splitVisualSeed = was.splitVisualSeed;
     } else if (s.splitVisual && !was.splitVisual) {
       added.push(s);
     }
@@ -6085,8 +6107,9 @@ const CTA_BROLL_ENHANCER_SYSTEM =
  * The last two clauses exist because banning hands leaves this lane with no legal subject on a
  * person-action beat: `STILL_BROLL_ENHANCER_SYSTEM` also says "do not add new objects", so the
  * only compliant output left was to restate `Original prompt:` — and `enforceHostSplitMix` seeds
- * `splitVisual` from `brollVisual ?? visualPrompt`, so that seed is often the host's own
- * talking-head prompt. The cutaway lane never had the bug: its directive already pairs the
+ * `splitVisual` from `panelSeedFor` (what the line needs, else `brollVisual ?? visualPrompt`), so on
+ * a beat with neither that seed is the host's own talking-head prompt, and on a beat of someone at
+ * work it names the person. The cutaway lane never had the bug: its directive already pairs the
  * prohibition with a positive fallback ("a pair of bare hands at the work").
  */
 export const SPLIT_PANEL_PERSON_FREE_DIRECTIVE =
@@ -6099,7 +6122,18 @@ export const SPLIT_PANEL_PERSON_FREE_DIRECTIVE =
   "surface, or finished result — unattended and at rest, in place exactly as the action left it. " +
   "Never substitute a diagram, chart, illustration, cross-section, or anatomical rendering; the " +
   "panel is always a real photograph of real objects.\n" +
-  "IMPORTANT: the narration decides the SUBJECT; the original prompt only supplies wording. If " +
+  // Job 414 scene 22 (2026-10-20): "got shaved thin at one end with a drawknife" became a finished
+  // piece on its own — the tool left with the hands. `withLineTool` puts back what still gets through.
+  'IMPORTANT: a TOOL the narration says the job is done with ("trimmed with scissors", "smoothed ' +
+  'with a scraper") stays in the panel, resting on the work, unattended, and the work is shown at ' +
+  "the stage the narration describes — part-done while it is being done. Never the finished result " +
+  "alone with the named tool left out.\n" +
+  // Job 414 scene 4: eight seconds about a building from outside, then the first words of the next
+  // sentence ("But on the back wall hung") — and the panel showed only those.
+  "IMPORTANT: the narration decides the SUBJECT — what MOST of it is about, by how long each part " +
+  'is said, never a few closing words that only begin the next sentence ("…, but on the shelf ' +
+  'above it sat"); the original prompt only supplies wording. A MUST SHOW line, when given, IS that ' +
+  "subject: keep it, drawn with no person. If " +
   "the original prompt is about something this narration is not about, DISCARD it entirely and " +
   'describe the narrated subject instead — here that outranks the "do not add new objects" rule.\n' +
   // Job 406 scene 19 (2026-10-18): the line offered a choice ("a guided sharpening system or a belt
@@ -17428,6 +17462,19 @@ export async function enhanceBrollPrompts(
     (scene.visualPromptSeed ??= scene.visualPrompt);
   const splitSeedOf = (scene: StoryboardScene): string | undefined =>
     (scene.splitVisualSeed ??= scene.splitVisual);
+  // A PANEL IS WRITTEN FROM WHAT ITS LINE NEEDS (job 414 scene 4): the panel's seed was the line's
+  // own subject, the cabin from outside with its roof, walls and door, handed over as "Original
+  // prompt", which this lane's directive says only supplies wording — and the stretch's beat ("the
+  // back wall revealing three hung tools") and the line's last words ("But on the back wall hung")
+  // won. A panel starting from what its line needs (`panelSeedFor`) is told so, as the cutaway lane
+  // is (`mustShowFor`). Not a panel whose words the panel check or a person wrote since: those are
+  // later judgements of the same line, and its old subject would pull them back.
+  const panelMustShowFor = (scene: StoryboardScene): string => {
+    const need = scene.showSubject?.trim();
+    return need && need === splitSeedOf(scene)?.trim()
+      ? `MUST SHOW (what this line needs — the subject of the panel, drawn with NO person): ${need}\n`
+      : "";
+  };
 
   // WRITTEN FOR WHAT THE SHOT WILL BE (`cutawayPromptLane`, job 413 scenes 9-10): the motion
   // directive and the "motion" type only for a shot the video rule lets move. A photo catching a
@@ -17655,9 +17702,10 @@ export async function enhanceBrollPrompts(
   // Split-screen cutaways live on HOST scenes (scene.splitVisual, rendered in the right half),
   // which the cutaway pass above skips on `!hostPresent` — so this was the one b-roll lane no
   // LLM ever touched. It is also the least-directed text in the pipeline: `enforceHostSplitMix`
-  // seeds splitVisual from `brollVisual ?? visualPrompt`, so a host scene with no brollVisual
-  // renders the host's OWN talking-head prompt as the right half. Always the motion lane — the
-  // right half is a grok clip, never a Ken Burns still.
+  // seeds splitVisual from `panelSeedFor` (`showSubject ?? brollVisual ?? visualPrompt`), so a host
+  // scene with none of the first two renders the host's OWN talking-head prompt as the right half,
+  // and a seed that is the line's subject is said to be (`panelMustShowFor`). Always the motion
+  // lane — the right half is a grok clip, never a Ken Burns still.
   //
   // A CTA beat takes the SAME lane the CTA cutaway takes (`CTA_BROLL_ENHANCER_SYSTEM` +
   // `sanitizeCtaCutaway`), which until now was wired to cutaways only. On a pitch beat the
@@ -17695,6 +17743,7 @@ export async function enhanceBrollPrompts(
             subjectLine +
             directionLine +
             beatLineFor(scene) +
+            panelMustShowFor(scene) +
             `Scene narration: "${scene.scriptText ?? scene.narration}"\n` +
             `Original prompt: ${splitSeedOf(scene)}\n\n` +
             `Enhanced prompt:`,
@@ -17747,6 +17796,8 @@ export async function enhanceBrollPrompts(
   // the pipeline's, a retrofit's, a retry's, an operator's non-verbatim prompt (`oneThingPanels`).
   const splitScenes = new Set(splits.map(x => x.scene));
   oneThingPanels(scenes, params.keyThings, s => splitScenes.has(s));
+  // …and keeps the tool its line says the job is done with (`keepPanelTools`, job 414 scene 22).
+  keepPanelTools(scenes, s => splitScenes.has(s));
 
   // Deterministic book→on-topic swap over every scene's splitVisual, plus the literal-pitch swap
   // on every pitch beat's panel AND full-frame prompt (a phone, a screen, a QR code, a scan, a
@@ -23100,8 +23151,8 @@ export async function retrofitSplitScreens(jobId: number): Promise<void> {
       });
 
       try {
-        // The converge seeds `splitVisual` from `brollVisual ?? visualPrompt` — on a host beat
-        // that is often the host's own talking-head prompt. Same fix as the main pipeline:
+        // The converge seeds `splitVisual` from `panelSeedFor` — on a host beat with no subject or
+        // cutaway that is the host's own talking-head prompt. Same fix as the main pipeline:
         // enhance every seed into a person-free right-panel prompt, then scrub host names.
         await ensureVideoSubject(params);
         const enh = await enhanceBrollPrompts(
@@ -23607,8 +23658,10 @@ async function runSplitEdit(
       scene.splitVisual = typed;
       if (edit.verbatim) scene.splitVisualSeed = typed;
     } else if (!scene.splitVisual) {
-      // Converting to a split with no prompt given — seed like the converge pass does.
-      scene.splitVisual = scene.brollVisual ?? scene.visualPrompt;
+      // Converting to a split with no prompt given — seed like the converge pass does, from what
+      // the line needs (`panelSeedFor`), and rewrite from that seed, not an older panel's.
+      scene.splitVisual = panelSeedFor(scene);
+      scene.splitVisualSeed = undefined;
     }
     // A seeded / non-verbatim prompt goes through the same person-free right-panel
     // rewrite as the pipeline, so a host-shot seed can't reach the image model raw.
@@ -24162,8 +24215,8 @@ async function retryFailedScenesLocked(
           `scene(s) (${newSplits.map(s => s.index).join(", ")}) — the format's split share had ` +
           `never been converged for this job`
       );
-      // The converge seeds `splitVisual` from `brollVisual ?? visualPrompt`, which on a host
-      // beat is often the talking-head prompt. Same fix the main pipeline and the retrofit
+      // The converge seeds `splitVisual` from `panelSeedFor`, which on a host beat with no subject
+      // or cutaway is the talking-head prompt. Same fix the main pipeline and the retrofit
       // apply: enhance each seed into a person-free right panel, then scrub host names before
       // any of it reaches a provider.
       await ensureVideoSubject(params);
