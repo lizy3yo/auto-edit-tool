@@ -9320,12 +9320,19 @@ export function unwantedCutawayBook(
  * prompt is the rewrite without the book, else the scene's own first prompt (`visualPromptSeed`)
  * without it, else what it must show, else the video's own subject (`genericCtaBrollFor` with no
  * neighbours). An exact look or key thing that is that book goes with it. Mutates the scene.
+ *
+ * `panel`: the same for a SPLIT PANEL (`unwantedPanelBook`) — its words (`splitVisual`) lose the book,
+ * else its seed (`splitVisualSeed`) without it, else what the line needs without it, else the video's
+ * own subject; the seed and the line's need lend only words that name nobody (a panel is person-free
+ * beside the host). The host beat's `showSubject` is left as it is: it is what the LINE needs, and
+ * never leads the panel's prompt (`buildSplitRightScene` draws the panel from its own words).
  */
 export function dropUnwantedBook(
   scene: StoryboardScene,
   i: number,
   ctaTitles: string[],
-  videoSubject?: string
+  videoSubject?: string,
+  panel = false
 ): void {
   const line = scene.scriptText ?? scene.narration ?? "";
   const about = scene.showSubject;
@@ -9334,7 +9341,7 @@ export function dropUnwantedBook(
     const src = t?.trim();
     return src ? withoutPrintedMatter(src, unwanted).kept.trim() || undefined : undefined;
   };
-  if (scene.showSubject?.trim() && unwanted(scene.showSubject)) {
+  if (!panel && scene.showSubject?.trim() && unwanted(scene.showSubject)) {
     scene.showSubject = without(scene.showSubject);
     if (!scene.showSubject) {
       scene.pictureText = undefined;
@@ -9344,7 +9351,15 @@ export function dropUnwantedBook(
   // The CTA's title is never the one readable writing allowed in a cutaway (`withAllowedText`).
   const said = scene.pictureText;
   if (said && ctaTitles.some(x => namesTitle(said, x))) scene.pictureText = undefined;
-  if (scene.visualPrompt?.trim() && unwanted(scene.visualPrompt)) {
+  if (panel && scene.splitVisual?.trim() && unwanted(scene.splitVisual)) {
+    const nobody = (t: string | undefined) => (t && !namesSomeone(t) ? t : undefined);
+    scene.splitVisual =
+      without(scene.splitVisual) ??
+      nobody(without(scene.splitVisualSeed)) ??
+      nobody(without(about)) ??
+      genericCtaBrollFor([], i, videoSubject, true);
+  }
+  if (!panel && scene.visualPrompt?.trim() && unwanted(scene.visualPrompt)) {
     scene.visualPrompt =
       without(scene.visualPrompt) ??
       without(scene.visualPromptSeed) ??
@@ -9359,6 +9374,23 @@ export function dropUnwantedBook(
     const others = scene.otherKeyThings.filter(k => !unwanted(k));
     scene.otherKeyThings = others.length ? others : undefined;
   }
+}
+
+/**
+ * THE BOOK GUARD FOR A SPLIT PANEL OUTSIDE THE PITCH (2026-10-20, the check of job 416): the same rule
+ * as a cutaway's (`unwantedCutawayBook`) — only the video's own book (its title, "my book") or one its
+ * line never speaks of, judged on the panel's words, its line and what the line needs (`showSubject`).
+ * The panel guard used to swap ANY book word for the nearest cutaway's prompt: job 416 scene 15, "the
+ * robin's own scientific name, the one printed in the field guides", lost its field-guide page to scene
+ * 14's Gulf Coast palms, and the same picture ran twice back to back for 18 s. Pure.
+ */
+export function unwantedPanelBook(scene: StoryboardScene, ctaTitles: string[] = []): boolean {
+  return unwantedCutawayBook(
+    scene.splitVisual,
+    scene.scriptText ?? scene.narration,
+    ctaTitles,
+    scene.showSubject
+  );
 }
 
 /** Calm, generic topic-neutral cutaway subjects — the LAST resort, used only when a CTA cutaway
@@ -9449,24 +9481,34 @@ export function sanitizeCtaCutaway(
  *
  * Checks the full-frame prompt of a person-free beat and the split panel of a split beat. Leaves
  * cover reveals and operator assets alone (literal images, no prompt renders) and a full-frame
- * host (no b-roll prompt at all). A book in ANY split panel is swapped too — the long-standing
- * book guard this pass absorbed. Behind the big QR card it also takes every person and hand out of
- * the words (`guardQrBackdrop`). Deterministic, idempotent, no LLM. Returns the indices it
- * changed. Mutates in place; pure otherwise — unit-tested.
+ * host (no b-roll prompt at all). A pitch beat's panel loses any book (the pitch speaks of the
+ * video's own) for on-topic b-roll. Any other panel keeps a book its line is about and loses only
+ * the video's own book (`ctaTitles`, "my book") or one its line never speaks of, from its OWN words
+ * (`unwantedPanelBook`, `dropUnwantedBook`) — never a neighbour's picture: job 416 scene 15's
+ * field-guide page under "the one printed in the field guides" was drawn as scene 14's coast again.
+ * Behind the big QR card it also takes every person and hand out of the words (`guardQrBackdrop`).
+ * Deterministic, idempotent, no LLM. Returns the indices it changed. Mutates in place; pure
+ * otherwise — unit-tested.
  */
 export function guardPitchVisuals(
   scenes: StoryboardScene[],
-  videoSubject?: string
+  videoSubject?: string,
+  ctaTitles: string[] = []
 ): number[] {
   const changed: number[] = [];
   scenes.forEach((s, i) => {
     const pitch = !!(s.cta || s.qrHero || s.qrCorner);
-    const literal = (text: string) =>
-      brollDepictsBook(text) || (pitch && ctaVisualIsLiteral(text));
     let touched = false;
-    if (s.splitVisual && literal(s.splitVisual)) {
-      s.splitVisual = genericCtaBrollFor(scenes, i, videoSubject);
-      touched = true;
+    if (s.splitVisual?.trim()) {
+      if (pitch) {
+        if (brollDepictsBook(s.splitVisual) || ctaVisualIsLiteral(s.splitVisual)) {
+          s.splitVisual = genericCtaBrollFor(scenes, i, videoSubject);
+          touched = true;
+        }
+      } else if (unwantedPanelBook(s, ctaTitles)) {
+        dropUnwantedBook(s, i, ctaTitles, videoSubject, true);
+        touched = true;
+      }
     }
     if (
       pitch &&
@@ -18221,15 +18263,16 @@ export async function enhanceBrollPrompts(
   // …and keeps the tool its line says the job is done with (`keepPanelTools`, job 414 scene 22).
   keepPanelTools(scenes, s => splitScenes.has(s));
 
-  // Deterministic book→on-topic swap over every scene's splitVisual, plus the literal-pitch swap
-  // on every pitch beat's panel AND full-frame prompt (a phone, a screen, a QR code, a scan, a
-  // link — `ctaVisualIsLiteral`). No LLM. MUST stay AFTER the passes above: these are the last
+  // Deterministic book guard over every scene's splitVisual (outside the pitch only the video's own
+  // book, or one its line never speaks of, taken out of the panel's own words), plus the literal-
+  // pitch swap on every pitch beat's panel AND full-frame prompt (a phone, a screen, a QR code, a
+  // scan, a link — `ctaVisualIsLiteral`). No LLM. MUST stay AFTER the passes above: these are the last
   // guards, so enhancing after them would let an LLM-introduced book or phone straight through —
   // reintroducing what ac2cb89 fixed. Unconditional over all scenes (not just `only`): idempotent,
   // cheap, and it catches a prompt Claude authored directly as well as one that predates this
   // call. The literal check is scoped to pitch beats because its vocabulary is ordinary content
   // elsewhere — a gardening video may legitimately show a screen or link a tool's name.
-  guardPitchVisuals(scenes, subject);
+  guardPitchVisuals(scenes, subject, ctaTitles);
 
   return {
     failedScenes: Array.from(new Set(failedScenes)).sort((a, b) => a - b),
@@ -19449,11 +19492,12 @@ async function runUnifiedPipeline(
         s.visualPrompt = stripHostNames(s.visualPrompt, hostAliases);
     }
   }
-  const guarded = guardPitchVisuals(scenes, params.videoSubject);
+  const guarded = guardPitchVisuals(scenes, params.videoSubject, ctaBookTitles(params));
   if (guarded.length > 0) {
     console.log(
       `[Longform ${jobId}] pitch guard: swapped a literal phone/screen/QR/link/book prompt, or a ` +
-        `person behind the big QR card, for on-topic b-roll on scene(s) ${guarded.join(", ")}`
+        `person behind the big QR card, for on-topic b-roll, or took the video's own book out of ` +
+        `a split panel, on scene(s) ${guarded.join(", ")}`
     );
   }
   // One continuous take where host beats now sit back to back (the CTA pitch after the book):

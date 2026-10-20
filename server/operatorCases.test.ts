@@ -1574,7 +1574,7 @@ describe("print the line never says is drawn soft, never asked for (the audit's 
     const screen =
       "a phone screen showing Facebook Marketplace: a white screen with a soft blue top bar, a two-column grid of item photos with soft grey bars below them, and a small logo that cannot be read";
     expect(brollDepictsBook(screen)).toBe(false);
-    // A split panel is swapped for ANY book (`guardPitchVisuals`) — this one is no book, so it stays.
+    // A split panel loses a book its line never speaks of (`guardPitchVisuals`) — this one is no book, so it stays.
     const split = host(7, "and Facebook Marketplace", { splitVisual: screen });
     expect(guardPitchVisuals([split])).toEqual([]);
     expect(split.splitVisual).toBe(screen);
@@ -9602,5 +9602,82 @@ describe("round 14: a graphic is read from when its words show, and sits clear o
     // the knife table (413, 1:40) and the frosted grass (411, 0:11): clear where they were designed
     expect(choose("NumberLabel", { w: 540, h: 220 }, ["knives"])).toBe("bottom left → bottom left");
     expect(choose("MythStamp", { w: 534, h: 254 }, ["robins"])).toBe("top right → top right");
+  });
+});
+
+describe("round 15: a split panel keeps the book its line is about, and is never its neighbour's picture again (job 416)", () => {
+  // Walter Wren's robins film: scene 15's panel under "the one printed in the field guides" was the
+  // field guide's page until the last guard, which swapped ANY book in a panel for the nearest
+  // cutaway's prompt — scene 14's Gulf Coast palms, word for word, so the coast ran twice back to
+  // back for 18 s and nothing showed the guide or the name. The panel now follows the cutaway's rule.
+  const COAST =
+    "A flat coastal landscape with scattered palm trees, short green grass, and a wide pale sky; several American robins scattered across the grass in winter.";
+  const GUIDE =
+    "an open bird field guide resting on a kitchen table, its page showing a painted illustration of an American robin, a brick-orange breast, a dark gray-brown back, a blackish head with broken white eye ring, a yellow bill";
+  const LINE =
+    "The funny part is that the robin’s own scientific name, the one printed in the field guides, ends in the word migratorius,";
+  const BIRDER = ["The Backyard Birder"];
+  const SUBJECT = "Robins DON'T All Fly South: 7 Things You";
+  const film = (panel: string, extra: Partial<StoryboardScene> = {}): StoryboardScene[] => [
+    {
+      index: 14,
+      scriptText:
+        "And if you live along the Gulf Coast or down in Florida, winter can be when you see the most robins all year, since that’s where a lot of those northern birds end up.",
+      narration: "And if you live along the Gulf Coast",
+      stillImage: true,
+      keyThing: "robin",
+      visualPrompt: COAST,
+    } as StoryboardScene,
+    {
+      index: 15,
+      hostPresent: true,
+      scriptText: LINE,
+      narration: "The funny part is that the robin’s own",
+      showSubject:
+        "A close-up of an open field guide page with a small robin illustration and blurred soft grey lines of print. One word in the entry is clearly legible.",
+      keyThing: "robin",
+      visualPrompt: "the channel's host, seated in a chair talking directly to the camera",
+      splitVisual: panel,
+      splitVisualSeed: GUIDE,
+      ...extra,
+    } as StoryboardScene,
+  ];
+
+  it("scene 15: the field guide's page stays beside 'the one printed in the field guides' — no Gulf Coast twice", () => {
+    const scenes = film(GUIDE);
+    expect(guardPitchVisuals(scenes, SUBJECT, BIRDER)).toEqual([]);
+    expect(scenes[1].splitVisual).toBe(GUIDE);
+  });
+
+  it("the video's own book is still taken out of a panel outside the pitch — from the panel's own words", () => {
+    const scenes = film(
+      "A robin on a snow-patched fence post, a copy of The Backyard Birder on the windowsill behind it"
+    );
+    expect(guardPitchVisuals(scenes, SUBJECT, BIRDER)).toEqual([15]);
+    expect(scenes[1].splitVisual).toBe("A robin on a snow-patched fence post");
+  });
+
+  it("a book its line never speaks of goes, and with nothing else in the panel it is the panel's own seed — never scene 14's coast", () => {
+    const LAWN = "robin on bare winter lawn, wider view of yard"; // scene 12's real seed
+    const scenes = film("a worn bird book open on a kitchen table", {
+      scriptText: "Across most of the lower forty-eight, you can find robins all winter long.",
+      showSubject: LAWN,
+      splitVisualSeed: LAWN,
+    });
+    expect(guardPitchVisuals(scenes, SUBJECT, BIRDER)).toEqual([15]);
+    expect(scenes[1].splitVisual).toBe(LAWN);
+    expect(guardPitchVisuals(scenes, SUBJECT, BIRDER)).toEqual([]);
+  });
+
+  it("a pitch panel still loses any book for on-topic b-roll, even under scene 24's 'thirty birds over nine chapters'", () => {
+    const scenes = film(GUIDE, {
+      cta: true,
+      qrCorner: true,
+      scriptText:
+        "It covers more than thirty birds over nine chapters, and every bird’s profile runs the same six parts, from how to identify it, to a surprising fact, to the common mistake to avoid.",
+    });
+    expect(guardPitchVisuals(scenes, SUBJECT, BIRDER)).toEqual([15]);
+    expect(brollDepictsBook(scenes[1].splitVisual!)).toBe(false);
+    expect(scenes[1].splitVisual).toBe(COAST); // the CTA lane's on-topic b-roll, as before
   });
 });
