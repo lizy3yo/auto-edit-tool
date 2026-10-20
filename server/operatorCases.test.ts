@@ -9664,7 +9664,7 @@ describe("round 15: the natural pose of what a person does; the camera, never th
     expect(prompt).toContain(FACING_EACH_OTHER_CLAUSE);
     expect(prompt).toContain(otherPersonClause("two passengers", 2));
     // Seated the way the seat faces, the row ahead showing its backs, never reversed or sideways…
-    expect(NATURAL_POSE_CLAUSE).toMatch(/facing the way their own seat, bed, desk, bench, counter or work faces/);
+    expect(NATURAL_POSE_CLAUSE).toMatch(/facing the way their own seat or their work faces, held up by what they sit, lie or lean on/);
     expect(NATURAL_POSE_CLAUSE).toMatch(/every seat and everyone in it faces that way, so the row ahead shows only its seat backs/);
     expect(NATURAL_POSE_CLAUSE).toMatch(/never sitting backwards or sideways in a seat that faces forward, facing their own seat back/);
     // …and the face hidden by where the camera stands — "aisle visible behind them" is no reason to turn them.
@@ -9748,11 +9748,18 @@ describe("round 15: the natural pose of what a person does; the camera, never th
   });
 
   it("every picture of a person carries it — anonymous hands too — but a step on the host's own face is unchanged", async () => {
-    const { NATURAL_POSE_CLAUSE, hostFaceClause, BODY_ON_PERSON_CLAUSE } = await import("./longformVideo");
+    const { NATURAL_POSE_CLAUSE, NATURAL_HANDS_POSE_CLAUSE, NATURAL_POSE_CAMERA_CLAUSE, hostFaceClause, BODY_ON_PERSON_CLAUSE } =
+      await import("./longformVideo");
     const hands = { humanPresent: true } as StoryboardScene;
     const anon = personClauseFor(hands, "hands kneading dough on a floured board");
     expect(anon).toContain(ANON_PERSON_SUFFIX);
-    expect(anon).toContain(NATURAL_POSE_CLAUSE);
+    // Hands only: where the hands come from, never the camera moved "over the shoulder" — the shoulder
+    // the hands clause keeps out of the shot ("everything above the forearms is outside the shot").
+    expect(anon).toContain(NATURAL_HANDS_POSE_CLAUSE);
+    expect(anon).not.toContain(NATURAL_POSE_CAMERA_CLAUSE);
+    expect(anon).not.toMatch(/over the shoulder|from the seat or row behind/);
+    expect(NATURAL_HANDS_POSE_CLAUSE).toMatch(/come into the picture from where a real person doing it sits or stands/);
+    expect(NATURAL_HANDS_POSE_CLAUSE).toMatch(/never reaching in from the far side of the work, over a seat back/);
     // A concealer step shows her face by design: its clause is exactly what it was.
     const step = [pic(4, "Dab it under the eyes and it brightens the whole face.", "the host dabbing concealer under her eyes")];
     markHostBroll(step, { hostLook: MAKEUP }, PHOTO);
@@ -9761,6 +9768,42 @@ describe("round 15: the natural pose of what a person does; the camera, never th
     expect(face).toBe(` ${hostFaceClause(step[0].brollHostLook!)} ${BODY_ON_PERSON_CLAUSE}`);
     expect(face).not.toContain(NATURAL_POSE_CLAUSE);
     expect(buildStillPrompt(step[0])).not.toMatch(/the CAMERA stands|natural pose for what/);
+  });
+
+  // Job 244 scene 3: a host picture of a chin line faces the camera, cut at the lips — "never seen from
+  // behind, never turned away". The camera half's "behind, over the shoulder, below the chin" would hide
+  // the chin the line is about, so it takes the body half alone.
+  it("a chin line's picture (job 244 scene 3) keeps its lips-cut framing: the pose, never the camera moved behind or below the chin", async () => {
+    const { NATURAL_POSE_BODY_CLAUSE, NATURAL_POSE_CAMERA_CLAUSE, NATURAL_POSE_CLAUSE } = await import("./longformVideo");
+    const scenes = [
+      pic(
+        3,
+        "Land two inches lower, and that same necklace drags your chin and your jawline down with it.",
+        "Host standing, fingertips adjusting a gold chain necklace resting at her collarbone, its pendant catching the window light",
+        { humanPresent: true }
+      ),
+    ];
+    markHostBroll(scenes, { hostLook: "a slender woman in her early sixties with fair skin and shoulder-length silver hair, a navy crewneck sweater" }, PHOTO);
+    expect(hostLipsCut(scenes[0])).toBe(true);
+    const prompt = buildStillPrompt(scenes[0]);
+    expect(prompt).toContain(HOST_LIPS_CUT_CLAUSE);
+    expect(prompt).toContain(NATURAL_POSE_BODY_CLAUSE);
+    expect(prompt).not.toContain(NATURAL_POSE_CAMERA_CLAUSE);
+    expect(prompt).not.toContain(NATURAL_POSE_CLAUSE);
+    expect(prompt).not.toMatch(/over the shoulder|below the chin/);
+    // A host picture of anything else takes both halves.
+    const bench = [pic(5, "and the old file still does the job.", "the host filing a worn tool at the workbench", { humanPresent: true })];
+    markHostBroll(bench, { hostLook: "a broad man in his sixties with a short grey beard, in a plaid flannel shirt" }, PHOTO);
+    expect(hostLipsCut(bench[0])).toBe(false);
+    expect(buildStillPrompt(bench[0])).toContain(NATURAL_POSE_CLAUSE);
+  });
+
+  // The rule rides every picture of a person, so it names no place and no furniture but the seat: a
+  // thing a prompt names is a thing the picture maker draws.
+  it("the pose rule names no place or furniture a picture would then draw", async () => {
+    const { NATURAL_POSE_CLAUSE, NATURAL_HANDS_POSE_CLAUSE } = await import("./longformVideo");
+    for (const clause of [NATURAL_POSE_CLAUSE, NATURAL_HANDS_POSE_CLAUSE])
+      expect(clause).not.toMatch(/\b(?:bus|theatre|theater|classroom|bed|desk|bench|counter|table|sofa|car|train)\b/i);
   });
 
   it("the still check names a pose no one takes, in words the redraw reads", () => {
@@ -9772,6 +9815,10 @@ describe("round 15: the natural pose of what a person does; the camera, never th
     expect(q2).toMatch(/a body twisted away from the work its own hands are doing/);
     expect(q2).toMatch(/two people talking or handing something over who stand or sit side by side facing the same way instead of toward each other/);
     expect(q2).toMatch(/a heavy thing held out at arm's length in one hand/);
+    // Seat-mates face the way their row faces while they talk (job 399 scene 2's man, 417-2 drawn
+    // right): a broken verdict there would redraw a right picture, and a second one ship it empty.
+    expect(q2).toMatch(/so are people side by side in one row of seats \(a car, a bench, a pew, a row of fixed seats\) who face the way the row faces while they talk/);
+    expect(q2).toMatch(/seats built to face each other \(a booth, a bay of four\)/);
     expect(q2).toMatch(/When unsure, answer false/);
     expect(STILL_DEFECT_SYSTEM).toMatch(/a person in a pose nobody takes starts "unnatural pose:" and says who and how/);
   });
@@ -9825,6 +9872,27 @@ describe("round 15: the natural pose of what a person does; the camera, never th
       "a third arm holding the cup",
     ])
       expect(namedFaultClause(what, words2, true), what).toBeUndefined();
+    // A thing's head or body, a "-handed" grip and a phone at arm's length are no pose: a fault with a
+    // rule of its own (a tool's, a line's) keeps that rule alone, anything else its plain reroll. The
+    // first five are the check's real words from the round 11-14 render logs.
+    for (const [what, ownRule] of [
+      ["axe head pressed on log, handle oddly bent", true],
+      ["froe blade floats above stump, handle through fist", true],
+      ["chainsaw bar cutting through log, hand placement implausible", false],
+      ["smoke detector hanging from ceiling by wires, detached from surface", true],
+      ["second tray table folded up on seatback, unattached", false],
+      ["axe head twisted sideways on its handle", true],
+      ["hammer head turned round on the handle", true],
+      ["one-handed grip, drill bit facing forward, not in wood", true],
+      ["shower head twisted off the wall", false],
+      ["phone held at arm's length, screen warped", false],
+    ] as const) {
+      const clause = namedFaultClause(what, "hands at work", true);
+      expect(clause ?? "", what).not.toContain(NATURAL_POSE_FIX);
+      if (!ownRule) expect(clause, what).toBeUndefined();
+    }
+    // Seat-mates face the way their row faces: the redraw says so beside "facing whoever they talk to".
+    expect(NATURAL_POSE_FIX).toMatch(/people side by side in one row of seats both face the way the row faces/);
     // The second broken draw still gets the one at-rest draw; the named fault once only.
     const again = { broken: true, what: "unnatural pose: sitting backwards" };
     expect(faultRedrawFor({}, again, { broken: 1, writing: 0 }, new Set<R>(["named fault"]), true, true)).toBe("at rest");

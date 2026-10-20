@@ -157,6 +157,9 @@ export const STILL_DEFECT_SYSTEM =
   // round to face the man behind it; job 402 scene 23 sat a woman sideways across her seat; job 417
   // scenes 9 and 31 had two people talking side by side to a wall. Each is a pose no one takes for what
   // they are doing, and the check now names it — in words the redraw can read (`namedFaultClause`).
+  // Seat-mates are the exception named: two passengers in one row (job 417 scene 2 drawn right, job 399
+  // scene 2's man) face forward while they talk, and a broken verdict there would redraw a right
+  // picture and, on a second one, ship it with nobody in it (`faultRedrawFor`'s "at rest").
   "- a person in a pose nobody takes for what they are doing: sitting backwards or sideways in a " +
   "seat that faces one way (facing their own seat back, or their legs across the seat); in rows of " +
   "fixed seats that all face one way, one row turned round to face the others; a body passing " +
@@ -164,7 +167,9 @@ export const STILL_DEFECT_SYSTEM =
   "hands are doing; two people talking or handing something over who stand or sit side by side " +
   "facing the same way instead of toward each other; a heavy thing held out at arm's length in one " +
   "hand. A person seen from behind or beside who sits the way their seat faces, its back hiding " +
-  "them, is right, and so is someone asleep on their front or side\n" +
+  "them, is right, and so is someone asleep on their front or side; so are people side by side in " +
+  "one row of seats (a car, a bench, a pew, a row of fixed seats) who face the way the row faces " +
+  "while they talk, and seats built to face each other (a booth, a bay of four)\n" +
   "- a mirror that does not reflect what is in front of it\n" +
   CUT_OPEN_BROKEN +
   "Answer false for everything else: unusual but possible products or craftsmanship, odd " +

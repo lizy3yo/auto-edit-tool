@@ -324,7 +324,8 @@ export const TOOL_AT_WORK_FIX =
 export const NATURAL_POSE_FIX =
   "Draw every person in the natural pose of what they are doing there: sitting the way their own " +
   "seat faces and held up by it, standing, lying or leaning the way a real person does it, facing the " +
-  "work in their hands and whoever the description has them talk to or hand something to; a heavy " +
+  "work in their hands and whoever the description has them talk to or hand something to — though " +
+  "people side by side in one row of seats both face the way the row faces; a heavy " +
   "thing is lifted close to the body with both hands. Keep any face out by moving the CAMERA — beside " +
   "them and a little behind, over the shoulder, from the seat or row behind, from the side, or close " +
   "and framed below the chin — never by turning the person round, reversing a seat or a row, or " +
@@ -339,6 +340,8 @@ export const NATURAL_POSE_FIX =
  */
 const SEAT_WORD = String.raw`(?:seats?|seat\s*backs?|chairs?|benches?|pews?|stools?|rows?|sofas?|couch(?:es)?|armrests?)`;
 const PERSON_WORD = String.raw`(?:body|torso|legs?|hips?|person|people|man|men|woman|women|figure|someone)`;
+/** Not after a word that makes "head" or "body" a thing's: an axe head, a shower head, a guitar body. */
+const NOT_A_PERSONS = String.raw`(?<!\b(?:axe|hammer|mallet|maul|sledge|club|screw|nail|bolt|rivet|drill|bit|wrench|socket|ratchet|shower|sprinkler|nozzle|spray|tap|faucet|match|pin|bed|print|printer|cylinder|engine|pump|golf|mop|broom|rake|shovel|spade|hoe|pick|arrow|spear|lamp|torch|cabbage|lettuce|garlic|flower|seed|guitar|violin|car|truck|van|boat|vase|bottle|jar|pot|kettle|camera|pen|tool|clamp|vise|saw|plane)[\s-])`;
 const POSE_FAULT = new RegExp(
   [
     // The words the check is asked to start a pose fault with.
@@ -356,15 +359,19 @@ const POSE_FAULT = new RegExp(
     String.raw`\b${PERSON_WORD}\s+(?:\w+\s+){0,3}(?:through|merged\s+(?:with|into)|inside)\s+(?:(?:the|their|his|her|a|its)\s+)?${SEAT_WORD}`,
     String.raw`\b${SEAT_WORD}\s+(?:passing|running|cutting|going)\s+through\s+(?:her|him|them|the\s+${PERSON_WORD})\b`,
     String.raw`\b${PERSON_WORD}\s+(?:\w+\s+){0,3}(?:hovering|floating)\s+(?:above|over|off)\b|\b(?:sitting|leaning|resting)\s+on\s+nothing\b`,
-    // A body or a head twisted off what it does.
-    String.raw`\b(?:body|torso|person|man|woman|figure|someone)\s+(?:\w+\s+){0,2}twisted\b|\btwisted\s+(?:body|torso|waist|spine|pose|posture)\b`,
+    // A body or a head twisted off what it does — a person's, never a thing's: a tool's or a fitting's
+    // head or body twisted ("axe head twisted on its handle", "guitar body twisted") is the thing's own
+    // fault and keeps its own redraw.
+    String.raw`${NOT_A_PERSONS}\b(?:body|torso|person|man|woman|figure|someone)\s+(?:\w+\s+){0,2}twisted\b|\btwisted\s+(?:body|torso|waist|spine|pose|posture)\b`,
     String.raw`\b(?:twisted|turned)\s+away\s+from\s+(?:the|their|his|her|its)\s+(?:task|work|job|desk|bench|table|counter|stove|sink)\b`,
-    String.raw`\bhead\s+(?:\w+\s+){0,2}(?:twisted|turned\s+(?:a)?round|facing\s+(?:a\s+)?different\s+way)\b|\bhead\s+turned\s+(?:away\s+)?(?:back\s+)?over\s+(?:the|a|his|her|their)\s+shoulder\b`,
-    // Two people dealing with each other who face the same way.
-    String.raw`\b(?:talk(?:s|ing|ed)?|speak(?:s|ing)?|chatting|convers\w*|hand(?:ed|ing)|handover|exchang\w*)\b[^.;]*\b(?:side\s+by\s+side|same\s+(?:way|direction)|facing\s+(?:away|the\s+wall|a\s+wall|forward)|backs?\s+to\s+(?:each\s+other|the\s+camera))\b`,
+    String.raw`${NOT_A_PERSONS}\bhead\s+(?:\w+\s+){0,2}(?:twisted|turned\s+(?:a)?round|facing\s+(?:a\s+)?different\s+way)\b|\bhead\s+turned\s+(?:away\s+)?(?:back\s+)?over\s+(?:the|a|his|her|their)\s+shoulder\b`,
+    // Two people dealing with each other who face the same way. "Handed" only as a verb, never
+    // "left-handed" or "one-handed" ("one-handed grip, bit facing forward" is a tool's fault).
+    String.raw`\b(?:talk(?:s|ing|ed)?|speak(?:s|ing)?|chatting|convers\w*|(?<!-)hand(?:ed|ing)|handover|exchang\w*)\b[^.;]*\b(?:side\s+by\s+side|same\s+(?:way|direction)|facing\s+(?:away|the\s+wall|a\s+wall|forward)|backs?\s+to\s+(?:each\s+other|the\s+camera))\b`,
     String.raw`\b(?:talking|speaking)\s+to\s+(?:the|a)\s+wall\b|\bfacing\s+away\s+from\s+each\s+other\b|\bnot\s+facing\s+each\s+other\b`,
-    // A heavy thing no body holds that way.
-    String.raw`\b(?:at|held\s+out\s+at)\s+(?:full\s+)?arm'?s'?\s+length\b`,
+    // A heavy thing no body holds that way: held in one hand at arm's length, or named heavy and held
+    // in one hand — never arm's length alone (a phone held out at arm's length is how phones are held).
+    String.raw`\b(?:one[-\s]handed|(?:with|in)\s+one\s+hand)\b[^,;]*\barm'?s'?\s+length\b|\barm'?s'?\s+length\b[^,;]*\b(?:one[-\s]handed|(?:with|in)\s+one\s+hand)\b`,
     String.raw`\b(?:one[-\s]handed|with\s+one\s+hand|in\s+one\s+hand)\b[^,;]*\bheavy\b|\bheavy\b[^,;]*\b(?:one[-\s]handed|with\s+one\s+hand|in\s+one\s+hand)\b`,
   ].join("|"),
   "i"
@@ -6644,25 +6651,47 @@ export const BODY_ON_PERSON_CLAUSE =
  * round: scene 2 drew two passengers sitting backwards, facing their own seat backs; scene 8 turned
  * the row ahead round to face the man behind it; job 402 scene 23 sat a passenger sideways across her
  * seat. The same contradiction turned a sleeper face-down under a line about her chest (job 405 scene
- * 7). Every picture of a person whose face is not shown carries this (`personClauseFor`): the body
+ * 7). Every picture of a person whose face is not shown carries this, or the part of it below that
+ * fits its framing (`personClauseFor`): the body
  * keeps the pose a real person takes there, and the face is hidden by where the camera stands. The
  * pictures that were right show how: from the row behind over a seat back, over the shoulder from
- * beside and a little behind, across the row from the side. Neutral places only — a place a prompt
- * names is a place the picture maker draws.
+ * beside and a little behind, across the row from the side. It names NO place and no furniture but
+ * the seat: a thing a prompt names is a thing the picture maker draws, and this rides every picture of
+ * a person — a first draft's "(a bus, a theatre, a classroom)" and "bed, desk, bench, counter" would
+ * have gone into every workshop and kitchen picture too.
+ *
+ * Two halves, because two framings already settle where the camera is. A host picture of a chin line
+ * (`HOST_LIPS_CUT_CLAUSE`) faces the camera, cut at the lips — "never seen from behind, never turned
+ * away" — so it takes the BODY half only: the camera half's "behind, over the shoulder, below the
+ * chin" would hide the very chin the line is about. Anonymous hands (`ANON_PERSON_SUFFIX`, "everything
+ * above the forearms is outside the shot") take neither — "over the shoulder" asks for the shoulder
+ * that clause forbids — but `NATURAL_HANDS_POSE_CLAUSE`.
  */
-export const NATURAL_POSE_CLAUSE =
-  "Whoever is in the picture — a whole person or only their hands — is in the natural pose for what " +
-  "they are doing, in that place: they sit, stand, lie, lean and work the way a real person does it " +
-  "there, facing the way their own seat, bed, desk, bench, counter or work faces, held up by what " +
-  "they sit, lie or lean on, the body turned toward what their hands are doing. Where fixed seats " +
-  "stand in rows that all face one way (a bus, a theatre, a classroom), every seat and everyone in it " +
-  "faces that way, so the row ahead shows only its seat backs. What keeps a face out of the picture is " +
-  "where the CAMERA stands — beside them and a little behind, over the shoulder, from the seat or row " +
-  "behind over its back, from the side, or close on the hands, lap or work below the chin — never the " +
-  "person turned round for it: never sitting backwards or sideways in a seat that faces forward, " +
-  "facing their own seat back, twisted away from what they are doing, or turned over to hide the " +
-  "face. A place the description puts behind or ahead of them is drawn where it really is from that " +
-  "camera, never a reason to turn them round.";
+export const NATURAL_POSE_BODY_CLAUSE =
+  "Whoever is in the picture is in the natural pose for what they are doing there: they sit, stand, " +
+  "lie, lean and work the way a real person does it, facing the way their own seat or their work " +
+  "faces, held up by what they sit, lie or lean on, the body turned toward what their hands are " +
+  "doing. Where fixed seats stand in rows that all face one way, every seat and everyone in it faces " +
+  "that way, so the row ahead shows only its seat backs.";
+export const NATURAL_POSE_CAMERA_CLAUSE =
+  "What keeps a face out of the picture is where the CAMERA stands — beside them and a little behind, " +
+  "over the shoulder, from the seat or row behind over its back, from the side, or close on the hands " +
+  "or the work below the chin — never the person turned round for it: never sitting backwards or " +
+  "sideways in a seat that faces forward, facing their own seat back, twisted away from what they are " +
+  "doing, or turned over to hide the face. A place the description puts behind or ahead of them is " +
+  "drawn where it really is from that camera, never a reason to turn them round.";
+export const NATURAL_POSE_CLAUSE = `${NATURAL_POSE_BODY_CLAUSE} ${NATURAL_POSE_CAMERA_CLAUSE}`;
+
+/**
+ * `NATURAL_POSE_CLAUSE` for a picture of anonymous HANDS only (`ANON_PERSON_SUFFIX`): no body is
+ * drawn, so no camera has to move round one — but the hands still come from where a real person
+ * doing the task sits or stands, the way their seat or the work faces, never over a seat back.
+ */
+export const NATURAL_HANDS_POSE_CLAUSE =
+  "The hands are in the natural position for what they are doing: they come into the picture from " +
+  "where a real person doing it sits or stands, facing the work the way their seat or the work faces " +
+  "— never reaching in from the far side of the work, over a seat back, or at an angle no real arm " +
+  "takes.";
 
 /**
  * TWO OR MORE PEOPLE WHO DEAL WITH EACH OTHER FACE EACH OTHER (2026-10-20, the survey of jobs 399-417
@@ -6736,8 +6765,16 @@ export function personClauseFor(scene: StoryboardScene, visual: string): string 
           "from their own shoulders to the hair or face — one hand at it when one is enough.";
   // The body in the natural pose of what it does, the face kept out by the camera
   // (`NATURAL_POSE_CLAUSE`, job 417 scene 2) — every picture of a person but a step or a look on the
-  // host's own face, whose face is the picture and whose clause asks for it.
-  const pose = faceShown ? "" : ` ${NATURAL_POSE_CLAUSE}`;
+  // host's own face, whose face is the picture and whose clause asks for it. A chin line's picture
+  // faces the camera cut at the lips (`HOST_LIPS_CUT_CLAUSE`), so it takes the body half only; and
+  // anonymous hands, nothing above the forearms in the shot, take the hands' own.
+  const pose = faceShown
+    ? ""
+    : lipsCut
+      ? ` ${NATURAL_POSE_BODY_CLAUSE}`
+      : !scene.otherPerson && !scene.brollHostLook
+        ? ` ${NATURAL_HANDS_POSE_CLAUSE}`
+        : ` ${NATURAL_POSE_CLAUSE}`;
   // Glasses or earrings on a face that is shown are seen from the front, where they sit.
   const wornClause = !worn
     ? ""
