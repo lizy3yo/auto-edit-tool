@@ -144,6 +144,7 @@ import {
   ensureVideoSubject,
   BODY_ON_PERSON_CLAUSE,
   ANON_PERSON_SUFFIX,
+  NATURAL_POSE_CLAUSE,
   NO_FIGURES_SUFFIX,
   CUTAWAY_PERSON_FREE_DIRECTIVE,
   OBJECT_MOTION_DIRECTIVE,
@@ -8433,7 +8434,7 @@ describe("buildStillPrompt (script-only + one fixed look tail)", () => {
     } as StoryboardScene;
     const prompt = buildStillPrompt(scene);
     expect(prompt).toBe(
-      `a homeowner inspects the finished bed ${ANON_PERSON_SUFFIX} ${BODY_ON_PERSON_CLAUSE} ${AMATEUR_IPHONE_LOOK} Wide 16:9 horizontal landscape framing. ${NO_FIGURES_SUFFIX} ${NO_BOOK_SUFFIX}`
+      `a homeowner inspects the finished bed ${ANON_PERSON_SUFFIX} ${NATURAL_POSE_CLAUSE} ${BODY_ON_PERSON_CLAUSE} ${AMATEUR_IPHONE_LOOK} Wide 16:9 horizontal landscape framing. ${NO_FIGURES_SUFFIX} ${NO_BOOK_SUFFIX}`
     );
     expect(prompt).toContain(ANON_PERSON_SUFFIX);
     expect(prompt.endsWith(NO_BOOK_SUFFIX)).toBe(true);
@@ -12350,6 +12351,50 @@ describe("someone else's face is asked about in the one check, and drawn again f
     expect(prompt.split(OTHERS_TURNED_AWAY_CLAUSE)).toHaveLength(2);
     expect(turnOthersAway(prompt)).toBe(prompt);
     expect(buildStillPrompt(passenger())).not.toContain(OTHERS_TURNED_AWAY_CLAUSE);
+  });
+
+  // Job 417 scene 2 (2026-10-20): two passengers drawn sitting backwards in their seats, and the check
+  // passed it. Named now, the first broken draw's own reroll is told the natural pose and that the
+  // camera moves — no draw added; a second broken draw still gets the at-rest draw.
+  it("an unnatural pose is redrawn told the pose and where the camera goes, in the reroll's own turn", async () => {
+    const { NAMED_FAULT_START, NATURAL_POSE_FIX, NATURAL_POSE_CLAUSE, PERSON_FREE_FALLBACK } = await import(
+      "./longformVideo"
+    );
+    const [a, b, c] = await Promise.all([pngOf("#e81"), pngOf("#e82"), pngOf("#e83")]);
+    const seated = () =>
+      ({
+        index: 2,
+        scriptText: "the same flight, and sat in the same row.",
+        showSubject: "two passengers seated together in an airline seat row",
+        visualPrompt:
+          "Two passengers seated side by side in an airline seat row, blue upholstered seats with headrests, narrow aisle visible behind them.",
+        humanPresent: true,
+        otherPerson: "two passengers",
+        otherPeople: 2,
+        stillImage: true,
+      }) as any;
+    checkSays({ broken: true, what: "unnatural pose: two people sitting backwards in their seats" });
+    let genImage = drawsOf(a, b);
+    let out = await generateValidatedStill(seated(), 4, undefined, genImage);
+    expect(genImage).toHaveBeenCalledTimes(2);
+    const [p1, p2] = genImage.mock.calls.map(c => c[0].prompt as string);
+    expect(p1).toContain(NATURAL_POSE_CLAUSE);
+    expect(p1).not.toContain(NAMED_FAULT_START);
+    expect(p2.startsWith(p1)).toBe(true);
+    const added = p2.slice(p1.length);
+    expect(added).toContain(`${NAMED_FAULT_START} unnatural pose: two people sitting backwards in their seats.`);
+    expect(added).toContain(NATURAL_POSE_FIX);
+    expect(out.buffer.equals(b)).toBe(true);
+    // Broken again: the existing at-rest draw, nobody in it — the budget is the one it always was.
+    checkSays(
+      { broken: true, what: "unnatural pose: two people sitting backwards in their seats" },
+      { broken: true, what: "unnatural pose: seats turned round to face each other" }
+    );
+    genImage = drawsOf(a, b, c);
+    out = await generateValidatedStill(seated(), 4, undefined, genImage);
+    expect(genImage).toHaveBeenCalledTimes(3);
+    expect(genImage.mock.calls[2][0].prompt as string).toContain(PERSON_FREE_FALLBACK);
+    expect(out.buffer.equals(c)).toBe(true);
   });
 
   it("who is asked, and whose words lose a smile: someone else in the picture, never a host take or the QR backdrop", async () => {

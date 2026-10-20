@@ -264,6 +264,11 @@ export const THINGS_AT_REST_CLAUSE =
  * (`namedFaultClause`), that reroll goes out with the fault named and the rule that fixes it
  * (`namedFaultRedraw`). It takes the reroll's own turn — no extra draw — and the second broken still
  * gets the at-rest draw.
+ *
+ * …AND SO IS A PERSON IN AN UNNATURAL POSE (2026-10-20, job 417 scene 2: two passengers sitting
+ * backwards in their seats, now named by the check, `STILL_DEFECT_SYSTEM`): the same named-fault
+ * reroll, told the natural pose and that the camera, never the body, keeps the face out
+ * (`NATURAL_POSE_FIX`). Only in a picture with someone drawn in it — the same `atWork`.
  */
 export type FaultRedraw = "at rest" | "soft print" | "named fault";
 export function faultRedrawFor(
@@ -310,6 +315,60 @@ export const TOOL_AT_WORK_FIX =
   "is working has its blade, bit or edge really in the material it works on — never resting on top " +
   "of it, in the air beside it or through something solid — and its path is clear of the table and " +
   "of every hand.";
+/**
+ * The redraw's rule for a person in an UNNATURAL POSE (2026-10-20, job 417 scene 2: two passengers
+ * sitting backwards, facing their own seat backs, under a prompt that asked to see them "from behind"
+ * with "a narrow aisle visible behind them"). The pose of what they do comes back, and the face is kept
+ * out by moving the camera — `NATURAL_POSE_CLAUSE` in one sentence a redraw can carry beside the fault.
+ */
+export const NATURAL_POSE_FIX =
+  "Draw every person in the natural pose of what they are doing there: sitting the way their own " +
+  "seat faces and held up by it, standing, lying or leaning the way a real person does it, facing the " +
+  "work in their hands and whoever the description has them talk to or hand something to; a heavy " +
+  "thing is lifted close to the body with both hands. Keep any face out by moving the CAMERA — beside " +
+  "them and a little behind, over the shoulder, from the seat or row behind, from the side, or close " +
+  "and framed below the chin — never by turning the person round, reversing a seat or a row, or " +
+  "twisting the body away from what it is doing.";
+/**
+ * A fault the check names in a person's POSE: the words the check is asked to start with
+ * ("unnatural pose:", `STILL_DEFECT_SYSTEM`), and the words it uses on its own for the same faults —
+ * sitting backwards or sideways in a seat, facing its own seat back, a row turned round, a body
+ * through its seat or held up by nothing, a body or head twisted off its task, two people talking side
+ * by side facing the same way, a heavy thing at arm's length. A seat, a row or a thing alone is no
+ * pose: "seat back merging into the window" (job 410 scene 2) has no one in it.
+ */
+const SEAT_WORD = String.raw`(?:seats?|seat\s*backs?|chairs?|benches?|pews?|stools?|rows?|sofas?|couch(?:es)?|armrests?)`;
+const PERSON_WORD = String.raw`(?:body|torso|legs?|hips?|person|people|man|men|woman|women|figure|someone)`;
+const POSE_FAULT = new RegExp(
+  [
+    // The words the check is asked to start a pose fault with.
+    String.raw`\bunnatural\s+(?:pose|posture|position|stance)\b|\b(?:awkward|impossible|wrong)\s+(?:pose|posture)\b`,
+    // Sitting the wrong way in a seat; facing its own seat back; turned round in it.
+    String.raw`\b(?:sit(?:s|ting)?|sat|seated|kneel(?:s|ing)?|perched)\s+(?:\w+\s+){0,2}(?:backwards?|sideways|the\s+wrong\s+way)\b`,
+    String.raw`\b(?:backwards?|sideways|the\s+wrong\s+way(?:\s+round)?)\s+(?:in|on|across)\s+(?:(?:the|their|his|her|a|an|its)\s+)?(?:own\s+)?${SEAT_WORD}\b`,
+    String.raw`\bfacing\s+(?:the|their|his|her|its)\s+(?:own\s+)?seat\s*backs?\b`,
+    String.raw`\b(?:turned|twisted)\s+(?:a)?round\s+in\s+(?:(?:the|their|his|her|a)\s+)?${SEAT_WORD}\b`,
+    String.raw`\bnot\s+(?:seated|sitting)\s+(?:properly|right|naturally)\b`,
+    // A row turned round against the others.
+    String.raw`\b${SEAT_WORD}\s+(?:\w+\s+){0,2}(?:facing|turned\s+(?:a)?round\s+to\s+face)\s+(?:each\s+other|the\s+wrong\s+way|backwards?|him|her|them|the\s+(?:man|woman|person)|the\s+(?:rows?|seats?)\s+behind)\b`,
+    String.raw`\b(?:reversed|backwards?)\s+${SEAT_WORD}\b|\b${SEAT_WORD}\s+(?:\w+\s+){0,2}reversed\b`,
+    // A body through its seat, or held up by nothing.
+    String.raw`\b${PERSON_WORD}\s+(?:\w+\s+){0,3}(?:through|merged\s+(?:with|into)|inside)\s+(?:(?:the|their|his|her|a|its)\s+)?${SEAT_WORD}`,
+    String.raw`\b${SEAT_WORD}\s+(?:passing|running|cutting|going)\s+through\s+(?:her|him|them|the\s+${PERSON_WORD})\b`,
+    String.raw`\b${PERSON_WORD}\s+(?:\w+\s+){0,3}(?:hovering|floating)\s+(?:above|over|off)\b|\b(?:sitting|leaning|resting)\s+on\s+nothing\b`,
+    // A body or a head twisted off what it does.
+    String.raw`\b(?:body|torso|person|man|woman|figure|someone)\s+(?:\w+\s+){0,2}twisted\b|\btwisted\s+(?:body|torso|waist|spine|pose|posture)\b`,
+    String.raw`\b(?:twisted|turned)\s+away\s+from\s+(?:the|their|his|her|its)\s+(?:task|work|job|desk|bench|table|counter|stove|sink)\b`,
+    String.raw`\bhead\s+(?:\w+\s+){0,2}(?:twisted|turned\s+(?:a)?round|facing\s+(?:a\s+)?different\s+way)\b|\bhead\s+turned\s+(?:away\s+)?(?:back\s+)?over\s+(?:the|a|his|her|their)\s+shoulder\b`,
+    // Two people dealing with each other who face the same way.
+    String.raw`\b(?:talk(?:s|ing|ed)?|speak(?:s|ing)?|chatting|convers\w*|hand(?:ed|ing)|handover|exchang\w*)\b[^.;]*\b(?:side\s+by\s+side|same\s+(?:way|direction)|facing\s+(?:away|the\s+wall|a\s+wall|forward)|backs?\s+to\s+(?:each\s+other|the\s+camera))\b`,
+    String.raw`\b(?:talking|speaking)\s+to\s+(?:the|a)\s+wall\b|\bfacing\s+away\s+from\s+each\s+other\b|\bnot\s+facing\s+each\s+other\b`,
+    // A heavy thing no body holds that way.
+    String.raw`\b(?:at|held\s+out\s+at)\s+(?:full\s+)?arm'?s'?\s+length\b`,
+    String.raw`\b(?:one[-\s]handed|with\s+one\s+hand|in\s+one\s+hand)\b[^,;]*\bheavy\b|\bheavy\b[^,;]*\b(?:one[-\s]handed|with\s+one\s+hand|in\s+one\s+hand)\b`,
+  ].join("|"),
+  "i"
+);
 /** A fault the check names on a tool or a tool's working part. */
 const TOOL_FAULT =
   /\b(?:blades?|(?:drill|router)\s+bits?|saws?|chisels?|gouges?|froes?|wedges?|mauls?|axes?|hatchets?|knife|knives|draw\s?knife|drawknives|spokeshaves?|planes?|drills?|screwdrivers?|hammers?|mallets?|needles?|scissors|shears|cutters?|wrench(?:es)?|pliers|tools?)\b/i;
@@ -357,7 +416,9 @@ const BODY_COUNT_FAULT =
  * fault"): the check's own words for what was wrong, then the rule that fixes it — a line's
  * (`CONNECTING_LINES_CLAUSE`) in any picture; on a picture of someone at work, the rule of the tool's
  * own kind, named by the fault or else by the picture's words (`SPLIT_STRIKE_CLAUSE`,
- * `SHAVING_STROKE_CLAUSE`), else `TOOL_AT_WORK_FIX`. Undefined for any other fault, a fault with no
+ * `SHAVING_STROKE_CLAUSE`), else `TOOL_AT_WORK_FIX`; and on a picture with someone in it, a person in
+ * an unnatural pose (`POSE_FAULT`) the natural pose and the camera moved (`NATURAL_POSE_FIX`), before
+ * any tool's rule the same fault names. Undefined for any other fault, a fault with no
  * words, a finger or a hand too many (`BODY_COUNT_FAULT`), and a tool in a picture with nobody in it —
  * a tool with no hand on it cannot be put to work, so that frame keeps its plain reroll and then the
  * at-rest draw. Pure.
@@ -378,6 +439,9 @@ export function namedFaultClause(
   // A plane, a wedge or a needle that is no tool (an aircraft, a slice, a pine) names no tool's rule.
   const aircraft = AIRCRAFT.test(`${fault} ${words}`);
   const faultTool = toolWords(fault, aircraft);
+  // A person's pose (`POSE_FAULT`, job 417 scene 2) is told the natural pose and where the camera goes,
+  // beside a tool's own rule when the same fault names one too.
+  const pose = atWork && POSE_FAULT.test(fault) ? [NATURAL_POSE_FIX] : [];
   if (connectingLinesClause(fault)) rules = [CONNECTING_LINES_CLAUSE];
   else if (atWork && TOOL_FAULT.test(faultTool)) {
     const kinds = (t: string) => [
@@ -386,8 +450,9 @@ export function namedFaultClause(
     ];
     const own = kinds(faultTool);
     const fromWords = kinds(toolWords(words, aircraft));
-    rules = own.length ? own : fromWords.length ? fromWords : [TOOL_AT_WORK_FIX];
-  } else return undefined;
+    rules = [...pose, ...(own.length ? own : fromWords.length ? fromWords : [TOOL_AT_WORK_FIX])];
+  } else if (pose.length) rules = pose;
+  else return undefined;
   return `${NAMED_FAULT_START} ${fault}. This time draw it the way it really is. ${rules.join(" ")}`;
 }
 
@@ -6569,6 +6634,54 @@ export const BODY_ON_PERSON_CLAUSE =
   "never looking cut off: no hair shaped like a head with no head inside it, no hand, foot or face " +
   "on its own. A few loose strands that really fall (in a brush, on a comb) are fine.";
 
+/**
+ * A PERSON IS ALWAYS IN THE NATURAL POSE OF WHAT THEY DO; THE CAMERA, NEVER THE BODY, KEEPS THE FACE
+ * OUT (2026-10-20, the operator on job 417: "they aren't even seated properly — an unnatural type of
+ * event the person is doing, in every action"). Every face rule placed the camera relative to the
+ * PERSON ("seen from behind or from the side"), and the description placed it relative to the ROOM
+ * ("a narrow aisle visible behind them"). In a row of fixed seats those two disagree — the seat back
+ * is where "behind" would be — and the picture model kept the room's view and turned the people
+ * round: scene 2 drew two passengers sitting backwards, facing their own seat backs; scene 8 turned
+ * the row ahead round to face the man behind it; job 402 scene 23 sat a passenger sideways across her
+ * seat. The same contradiction turned a sleeper face-down under a line about her chest (job 405 scene
+ * 7). Every picture of a person whose face is not shown carries this (`personClauseFor`): the body
+ * keeps the pose a real person takes there, and the face is hidden by where the camera stands. The
+ * pictures that were right show how: from the row behind over a seat back, over the shoulder from
+ * beside and a little behind, across the row from the side. Neutral places only — a place a prompt
+ * names is a place the picture maker draws.
+ */
+export const NATURAL_POSE_CLAUSE =
+  "Whoever is in the picture — a whole person or only their hands — is in the natural pose for what " +
+  "they are doing, in that place: they sit, stand, lie, lean and work the way a real person does it " +
+  "there, facing the way their own seat, bed, desk, bench, counter or work faces, held up by what " +
+  "they sit, lie or lean on, the body turned toward what their hands are doing. Where fixed seats " +
+  "stand in rows that all face one way (a bus, a theatre, a classroom), every seat and everyone in it " +
+  "faces that way, so the row ahead shows only its seat backs. What keeps a face out of the picture is " +
+  "where the CAMERA stands — beside them and a little behind, over the shoulder, from the seat or row " +
+  "behind over its back, from the side, or close on the hands, lap or work below the chin — never the " +
+  "person turned round for it: never sitting backwards or sideways in a seat that faces forward, " +
+  "facing their own seat back, twisted away from what they are doing, or turned over to hide the " +
+  "face. A place the description puts behind or ahead of them is drawn where it really is from that " +
+  "camera, never a reason to turn them round.";
+
+/**
+ * TWO OR MORE PEOPLE WHO DEAL WITH EACH OTHER FACE EACH OTHER (2026-10-20, the survey of jobs 399-417
+ * behind `NATURAL_POSE_CLAUSE`): "each seen from behind or from the side" made every body face away
+ * from one camera, so a conversation became two backs side by side facing a galley wall (job 417
+ * scenes 9 and 31) and a handover two men facing the same way, the scroll passed sideways (job 415
+ * scene 25). The pictures that read were the camera's doing: two people across a counter framed below
+ * the chin (job 410 scene 15), or past one person's shoulder at the other, whose face the frame cuts
+ * off (job 417 scenes 15, 20, 27). Only in a picture of several people — said to one person, "someone
+ * they talk to" is a second person the model adds.
+ */
+export const FACING_EACH_OTHER_CLAUSE =
+  "People who talk, listen or hand something to each other turn toward each other, as people do, and " +
+  "people side by side in one row both face the way the row faces. Their faces stay out by where the " +
+  "camera stands: beside the pair, both framed below the chin, or behind one of them, past that " +
+  "shoulder, with the other's face cut off by the top of the frame or hidden behind that head and " +
+  "shoulder — never two people who are talking or handing something over turned side by side to face " +
+  "the same way, away from each other.";
+
 /** Things worn on the FRONT of the head or body: a picture from behind would put them on the back. */
 const WORN_FRONT =
   /\b(?:head ?lamps?|headlights?|reading glasses|glasses|spectacles|goggles|sunglasses|necklaces?|pendants?|aprons?|face masks?|masks?|respirators?|(?:wrist ?)?watch(?:es)?|badges?|bibs?|visors?|ties?|brooch(?:es)?)\b/i;
@@ -6621,6 +6734,10 @@ export function personClauseFor(scene: StoryboardScene, visual: string): string 
           "when one is enough."
         : " Seen from the side, the head and shoulders turned the same way, the arms raised naturally " +
           "from their own shoulders to the hair or face — one hand at it when one is enough.";
+  // The body in the natural pose of what it does, the face kept out by the camera
+  // (`NATURAL_POSE_CLAUSE`, job 417 scene 2) — every picture of a person but a step or a look on the
+  // host's own face, whose face is the picture and whose clause asks for it.
+  const pose = faceShown ? "" : ` ${NATURAL_POSE_CLAUSE}`;
   // Glasses or earrings on a face that is shown are seen from the front, where they sit.
   const wornClause = !worn
     ? ""
@@ -6629,7 +6746,7 @@ export function personClauseFor(scene: StoryboardScene, visual: string): string 
         `and the body faces the camera so it shows there.`
       : ` The ${worn.toLowerCase()} is worn where it really sits, on the FRONT of the head or body; ` +
         `the person is seen from the side so it shows there — never on the back of the head or body.`;
-  return ` ${who} ${BODY_ON_PERSON_CLAUSE}${selfCare}${wornClause}`;
+  return ` ${who}${pose} ${BODY_ON_PERSON_CLAUSE}${selfCare}${wornClause}`;
 }
 
 /**
@@ -6652,11 +6769,14 @@ export function otherPersonClause(
   const named = who.trim().replace(/\.$/, "");
   const lookOf = (p: RecurringPerson) => p.look.trim().replace(/[.;,]+$/, "");
   const same = "the same person in every picture of them in this video, always drawn exactly like this";
+  // The camera is what stands behind or beside them (`NATURAL_POSE_CLAUSE`): "each seen from behind or
+  // from the side" alone sat job 417 scene 2's two passengers backwards in their seats.
   if (count > 1) {
     return (
       `The people in this shot are ${named} — ${count === 2 ? "two" : "a small group of"} different, ` +
       `ordinary people of that description, NONE of them the video's host: each seen from behind or ` +
-      `from the side, over the shoulder, faces turned away or out of frame so no face is ever shown. ` +
+      `from the side by a camera standing behind or beside them, over the shoulder, faces away from it ` +
+      `or out of frame so no face is ever shown. ${FACING_EACH_OTHER_CLAUSE} ` +
       `${knownLooks(looks, count)}Nobody else is in the frame, in the background or in a reflection. ` +
       `${everyoneBodyClause()}`
     );
@@ -6669,9 +6789,9 @@ export function otherPersonClause(
     ? `NOT the video's host, and ${same}: ${lookOf(looks[0])}. Seen`
     : `NOT the video's host, a different, ordinary person of that description: seen`;
   return (
-    `The only person in this shot is ${named} — ${person} from behind or from the side, over ` +
-    `the shoulder, the face turned away or out of frame so it is never shown. Nobody else is in ` +
-    `the frame, in the background or in a reflection. ${body}`
+    `The only person in this shot is ${named} — ${person} from behind or from the side by a camera ` +
+    `standing behind or beside them, over the shoulder, the face away from it or out of frame so it ` +
+    `is never shown. Nobody else is in the frame, in the background or in a reflection. ${body}`
   );
 }
 
@@ -6728,25 +6848,30 @@ export function hostWithOthersClause(
   const theHost = /\b(?:host|narrator|presenter)$/i.test(hostWho)
     ? `The host — ${look} — is`
     : `The ${hostWho.replace(/^(?:a|an|the|one)\s+/i, "")} is the video's host — ${look} — and is`;
+  // Seen from behind or the side by where the CAMERA stands, and turned toward each other when they
+  // deal with each other (`FACING_EACH_OTHER_CLAUSE`, job 417 scenes 9 and 31).
   const others =
     count > 1
       ? `The others are ${named} — ${count === 2 ? "two" : "a small group of"} different, ordinary ` +
-        `people of that description, none of them the host: each seen from behind or from the side, ` +
-        `over the shoulder, faces turned away or out of frame so no face is ever shown. ` +
+        `people of that description, none of them the host: each seen from behind or from the side by ` +
+        `a camera standing behind or beside them, over the shoulder, faces away from it or out of ` +
+        `frame so no face is ever shown. ` +
         knownLooks(looks, count)
       : looks[0]
         ? `The other person is ${named} — NOT the video's host, and the same person in every picture ` +
           `of them in this video, always drawn exactly like this: ` +
-          `${looks[0].look.trim().replace(/[.;,]+$/, "")}. Seen from behind or from the side, over the ` +
-          `shoulder, the face turned away or out of frame so it is never shown. `
+          `${looks[0].look.trim().replace(/[.;,]+$/, "")}. Seen from behind or from the side by a ` +
+          `camera standing behind or beside them, over the shoulder, the face away from it or out of ` +
+          `frame so it is never shown. `
         : `The other person is ${named} — NOT the video's host, a different, ordinary person of that ` +
-          `description: seen from behind or from the side, over the shoulder, the face turned away or ` +
-          `out of frame so it is never shown. `;
+          `description: seen from behind or from the side by a camera standing behind or beside them, ` +
+          `over the shoulder, the face away from it or out of frame so it is never shown. `;
   return (
     `The people in this shot are ${hostWho} and ${named}, and no face is shown anywhere. ${theHost} ` +
     `always drawn with that same hair, skin and clothes, seen from behind or from the side with the ` +
-    `head turned the same way as the shoulders, so the face is never shown. ${others}Nobody else is ` +
-    `in the frame, in the background or in a reflection. ${everyoneBodyClause()}`
+    `head turned the same way as the shoulders, so the face is never shown. ${others}` +
+    `${FACING_EACH_OTHER_CLAUSE} Nobody else is in the frame, in the background or in a reflection. ` +
+    `${everyoneBodyClause()}`
   );
 }
 
@@ -6864,8 +6989,9 @@ export const HOST_FACE_ONLY_SUFFIX =
 export const HOST_FRAMING_CLAUSE =
   "The head always faces the same way as the body, and the face is never shown — in one of two " +
   "ways only: (1) the body facing the camera, and the top edge of the frame cuts across the lower " +
-  "face, at the lips or the chin, the head straight above the shoulders; or (2) the whole body " +
-  "turned away — seen from behind or from the side, the head turned the same way as the shoulders. " +
+  "face, at the lips or the chin, the head straight above the shoulders; or (2) the camera behind or " +
+  "beside them — seen from behind or from the side, the body in the natural pose of what it is " +
+  "doing, the head turned the same way as the shoulders. " +
   "Never a body facing the camera with the head turned away to hide the face. They are recognisably " +
   "the host by the same hair colour and cut, the same skin and the same clothes and accessories as " +
   "in the reference photo (unless the description names other clothes).";
@@ -6903,15 +7029,23 @@ export const HOST_LIPS_CUT_ONLY_SUFFIX =
  * with the face in three-quarter view) — and for the redraw of any host picture that came back with
  * the face (job 406 scene 14, job 401 scene 20). Offered two framings the model took neither, so
  * this offers one. "From the side" leans behind: a true profile still draws an eye and the nose.
+ *
+ * IT MOVES THE CAMERA, NEVER THE HOST (2026-10-20, job 417's passengers sitting backwards in their
+ * seats, `NATURAL_POSE_CLAUSE`): it opened "The whole body is turned away from the camera", and a body
+ * told to turn away from a camera in front of its seat, desk or bench can only do it by sitting the
+ * wrong way round or twisting off its work (job 413 scene 14: after the redraw, the host hunched with
+ * his chin at bench height). The camera goes behind or beside the host; the pose stays the task's.
  */
 export const HOST_TURNED_AWAY_CLAUSE =
-  "The whole body is turned away from the camera — seen from behind, or from the side and a little " +
-  "behind, the head turned the same way as the shoulders — so the face is never shown: no eyes, nose " +
-  "or mouth toward the camera, only the back or the side of the head. However the description has " +
-  "them stand, swing, walk or hold something, the camera is behind or beside them, never in front. " +
-  "Never a body facing the camera, never a head turned back toward the lens. They are recognisably " +
-  "the host by the same hair colour and cut, the same skin and the same clothes and accessories as " +
-  "in the reference photo (unless the description names other clothes).";
+  "They are seen from behind, or from the side and a little behind — the CAMERA stands there, behind " +
+  "or beside them, never in front — so the face is never shown: no eyes, nose or mouth toward the " +
+  "camera, only the back or the side of the head, the head turned the same way as the shoulders. " +
+  "However the description has them sit, stand, swing, walk or hold something, the body keeps the " +
+  "natural pose of doing it, facing the way their seat, bench or work faces; it is the camera that " +
+  "moves round them, and the host is never turned round, reversed in a seat or twisted off the work " +
+  "for it. Never a body facing the camera, never a head turned back toward the lens. They are " +
+  "recognisably the host by the same hair colour and cut, the same skin and the same clothes and " +
+  "accessories as in the reference photo (unless the description names other clothes).";
 
 export function hostBrollClause(look: string, lipsCut = false, turnedAway = false): string {
   return (
@@ -6940,13 +7074,23 @@ export function turnHostAway(prompt: string): string {
  * 8): "seen from behind or from the side … the face turned away" came back as an older passenger in
  * profile, eye, glasses, nose and a smile all drawn. "From the side" leans behind here too, and what
  * they feel is carried by the body, never a face.
+ *
+ * IT MOVES THE CAMERA, NEVER THE PEOPLE (2026-10-20, `NATURAL_POSE_CLAUSE`): it opened "Everyone in
+ * this shot is turned away from the camera", and the redraw of job 417 scene 9 — "the attendant facing
+ * the passenger" — stood both women side by side with their backs to the camera, talking to the
+ * galley wall; job 415 scene 25's handover went the same way. Each body keeps the pose of what it
+ * does, toward the work, its seat or whoever it deals with, and the camera finds a place behind or
+ * beside them. Nothing here names a second person: the clause rides a picture of one person too.
  */
 export const OTHERS_TURNED_AWAY_CLAUSE =
-  "Everyone in this shot is turned away from the camera — seen from behind, or from the side and a " +
-  "little behind, each head turned the same way as the shoulders — so no face is shown: no eyes, nose " +
-  "or mouth toward the camera, only the back or the side of each head. However the description has " +
-  "them sit, stand, talk or hand something over, the camera is behind or beside them, never in front, " +
-  "and what they feel shows in the body — a nod, a lean, the set of the shoulders — never on a face.";
+  "No face is shown: the CAMERA stands behind or beside everyone in this shot — from behind, or from " +
+  "the side and a little behind, over a shoulder or from the seat or row behind — so each head, " +
+  "facing the same way as its shoulders, shows only its back or its side: no eyes, nose or mouth " +
+  "toward the camera. However the description has them sit, stand, talk or hand something over, each " +
+  "body keeps the natural pose of doing it, facing the way its seat or its work faces and toward " +
+  "whoever the description has it talk to or hand something to; it is the camera that moves to keep " +
+  "faces out, never a person turned round, reversed in a seat or turned away from what they are " +
+  "doing. What they feel shows in the body — a nod, a lean, the set of the shoulders — never on a face.";
 
 /**
  * A picture of someone else's prompt framed from behind, for the redraw after the still check saw a

@@ -152,6 +152,19 @@ export const STILL_DEFECT_SYSTEM =
   "head, an apron tied on the back)\n" +
   "- a head turned further round than a neck can turn, or facing a different way from the " +
   "shoulders; more than two arms or hands on one person\n" +
+  // 2026-10-20, the operator on job 417 ("they aren't even seated properly"): scene 2's two passengers
+  // sat backwards, facing their own seat backs, and passed with no flag; scene 8's row ahead was turned
+  // round to face the man behind it; job 402 scene 23 sat a woman sideways across her seat; job 417
+  // scenes 9 and 31 had two people talking side by side to a wall. Each is a pose no one takes for what
+  // they are doing, and the check now names it — in words the redraw can read (`namedFaultClause`).
+  "- a person in a pose nobody takes for what they are doing: sitting backwards or sideways in a " +
+  "seat that faces one way (facing their own seat back, or their legs across the seat); in rows of " +
+  "fixed seats that all face one way, one row turned round to face the others; a body passing " +
+  "through its seat, or sitting or leaning on nothing; a body twisted away from the work its own " +
+  "hands are doing; two people talking or handing something over who stand or sit side by side " +
+  "facing the same way instead of toward each other; a heavy thing held out at arm's length in one " +
+  "hand. A person seen from behind or beside who sits the way their seat faces, its back hiding " +
+  "them, is right, and so is someone asleep on their front or side\n" +
   "- a mirror that does not reflect what is in front of it\n" +
   CUT_OPEN_BROKEN +
   "Answer false for everything else: unusual but possible products or craftsmanship, odd " +
@@ -172,8 +185,9 @@ export const STILL_DEFECT_SYSTEM =
   'Return ONLY this JSON, no prose: {"overlay":true|false,"broken":true|false,"writing":true|false,"what":"..."}\n' +
   'what: 3-8 words naming the worst defect and where it sits (e.g. "white caption bar across ' +
   'the bottom", "cutting board floating above the table"); a fault in a tool, cable, wire or hose ' +
-  'names it (e.g. "saw blade resting on top of the plank", "power cord running into the tap"); "" ' +
-  "when both are false.";
+  'names it (e.g. "saw blade resting on top of the plank", "power cord running into the tap"); a ' +
+  'person in a pose nobody takes starts "unnatural pose:" and says who and how (e.g. "unnatural ' +
+  'pose: two people sitting backwards in their seats"); "" when both are false.';
 
 export interface StillDefectVerdict {
   overlay: boolean;
