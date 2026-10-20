@@ -7870,3 +7870,93 @@ describe("a sentence that ends on a number the script spells out is cut in the p
     expect(cover.narrationEndSec!).toBeLessThanOrEqual(124.902);
   });
 });
+
+describe("round 14: where a picture starts against the sentences (jobs 413 and 414)", async () => {
+  const { applyPictureSplits, carrySentenceStarts, contextRuns, lastWordsSec, parseContextGroups } = await import("./shotList");
+
+  it("413 scene 33: the step keeps 'nowhere near a spark.', and the dead mowers get their own picture", () => {
+    // The check's split at "The downside is real" was refused: the words before it, ~1.5 s, finish
+    // the step "store it sealed," — so the sealed can stayed up 8 s over a line about dead mowers.
+    const scenes = [
+      pic(32, "store it sealed,", "the red gas can with its black cap screwed tight on a shelf in an outdoor shed", {
+        listCut: true,
+        audioDuration: 1.167,
+      }),
+      pic(
+        33,
+        "nowhere near a spark. The downside is real: some mowers are just done, and you’ll eat a couple of corpses learning to tell the difference.",
+        "the sealed red gas can standing alone on a shelf in an outdoor shed",
+        { audioDuration: 9.73 }
+      ),
+    ];
+    const r = applyPictureSplits(
+      scenes,
+      [{ id: 1, split: [{ from: "The downside is real", show: "a dead push mower with a seized engine in the back corner of a garage" }] }],
+      [],
+      s => s.audioDuration ?? 0,
+      () => 10.5
+    );
+    expect(r.scenes.map(s => s.scriptText)).toEqual([
+      "store it sealed, nowhere near a spark.",
+      "The downside is real: some mowers are just done, and you’ll eat a couple of corpses learning to tell the difference.",
+    ]);
+    expect(r.scenes[1].showSubject).toMatch(/dead push mower/);
+    // Unchanged: a lead that is its own sentence ("Pull up a stool.") is never handed back.
+    const stool = [
+      pic(14, "and the catch stated flat.", "the host looking at a worn tool", { listCut: true, audioDuration: 2.034 }),
+      pic(15, "Pull up a stool. One piece of housekeeping first: license rules change town by town,", "the host on the phone", {
+        audioDuration: 5.792,
+      }),
+    ];
+    const kept = applyPictureSplits(
+      stool,
+      [{ id: 1, split: [{ from: "One piece of housekeeping", show: "a town clerk's counter" }] }],
+      [],
+      s => s.audioDuration ?? 0,
+      () => 10.5
+    );
+    expect(kept.scenes).toEqual(stool);
+  });
+
+  it("414 scenes 28-29: 'Green wood splits' goes on to the cracked wall, timed on the voice", () => {
+    const words = [
+      ["favorite.", 152.79, 153.27], ["Green", 154.091, 154.391], ["wood", 154.431, 154.711], ["splits", 154.791, 155.271],
+    ].map(([word, start, end]) => ({ word: word as string, start: start as number, end: end as number }));
+    const trees = pic(
+      28,
+      "because a fresh log gives up its chips far easier than a seasoned one, and tall, straight tulip poplar was a favorite. Green wood splits",
+      "tall straight tulip poplar trees in the wooded felling area",
+      { shotGroup: 23, audioDuration: 11.649 }
+    );
+    const wall = pic(29, "and shifts as it dries, so a new wall opens small cracks its first year.", "a hewn log wall with small drying cracks", {
+      shotGroup: 24,
+      audioDuration: 7.142,
+    });
+    const range = { startSec: 143.655, endSec: 155.304 };
+    const r = carrySentenceStarts([trees, wall], s => s.audioDuration ?? 0, () => 21, (s, n) =>
+      s === trees ? lastWordsSec(words, range, n) : undefined
+    );
+    expect(r.scenes[0].scriptText).toMatch(/was a favorite\.$/);
+    expect(r.scenes[1].scriptText).toMatch(/^Green wood splits and shifts as it dries/);
+    // Unchanged: the shot list's own cut inside one beat.
+    expect(carrySentenceStarts([trees, { ...wall, shotGroup: 23 }], s => s.audioDuration ?? 0, () => 21).moved).toBe(0);
+  });
+
+  it("413 scene 15: 'Pull up a stool.' keeps the stool its own picture showed; the phone call stays the next line's", () => {
+    const scenes = [
+      pic(15, "Pull up a stool. One piece of housekeeping first: license rules change town by town,", "the host on a stool at the garage workbench, settling in", {
+        humanPresent: true,
+      }),
+      pic(16, "so before you charge a stranger a dime, spend two minutes on the phone with your city office.", "the host on the phone at the workbench calling the city office", {
+        humanPresent: true,
+      }),
+    ];
+    const answer = JSON.stringify({ groups: [{ ids: [0, 1], show: "the host on the phone at the workbench calling the city office" }] });
+    const groups = (list: StoryboardScene[]) =>
+      parseContextGroups(answer, contextRuns(list), i => list[i].showSubject, i => atWork(list[i]), i => list[i].scriptText);
+    expect(groups(scenes)).toEqual([]);
+    // Unchanged: as shipped, the lead-in line's own picture was the phone call already — one group.
+    const shipped = [{ ...scenes[0], showSubject: scenes[1].showSubject }, scenes[1]];
+    expect(groups(shipped)).toHaveLength(1);
+  });
+});

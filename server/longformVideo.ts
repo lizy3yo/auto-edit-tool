@@ -29,8 +29,10 @@ import { invokeClaude } from "./claude";
 import { invokeGemini } from "./gemini";
 import {
   applyShotPlan,
+  carrySentenceStarts,
   deriveContinuitySheet,
   HOST_HANDOFF_MIN_SEC,
+  lastWordsSec,
   LIST_SHOT_MIN_SEC,
   joinHookPictures,
   joinSameContext,
@@ -18171,6 +18173,33 @@ async function runUnifiedPipeline(
   }
   // Putting every item back can bring back an item the voice gives no time (the repeat heard once).
   foldUnseen("after the list check");
+  // A SENTENCE STARTS ON ITS OWN PICTURE (`carrySentenceStarts`): a beat cut a few words into a
+  // sentence hands those words on to the picture of that sentence — job 414's "Green wood splits"
+  // played over the trees and the cracked wall came up 1.2 s late. Before the line check, so it reads
+  // each line whole. Free: the same master re-sliced.
+  if (words && words.length > 0) {
+    const rangeOf = new Map(scenes.map((s, i) => [s, sceneRanges[i]]));
+    const starts = carrySentenceStarts(
+      scenes,
+      s => s.audioDuration ?? 0,
+      pictureLimitFor(scenes, masterDurationSec),
+      (s, n) => lastWordsSec(words, rangeOf.get(s), n)
+    );
+    if (starts.moved > 0) {
+      scenes = starts.scenes;
+      sceneRanges = assignSceneRanges(
+        scenes,
+        words,
+        masterDurationSec,
+        silences,
+        shortSilences,
+        newAlignmentReport()
+      );
+      console.log(
+        `[Longform ${jobId}] sentence starts: ${starts.moved} picture(s) now come up where their sentence begins`
+      );
+    }
+  }
   // SAY IT, SHOW IT, checked: every picture read beside its line, line by line, and any that shows
   // something the line is not about rewritten (`fitPicturesToLines` — Frederick's job 259 put the
   // smoke alarm on "Fires don't all behave the same way"); a line that names something new partway
