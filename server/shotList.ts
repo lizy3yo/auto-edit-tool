@@ -2211,7 +2211,7 @@ export const CONTINUITY_SYSTEM =
   "lit or unlit, clean or dirty, wet or dry, put away or set out — and never what is NOT there (no " +
   "\"half full of water\", \"lid open\", \"switched off\", \"nobody sitting in it\"): a look says how the " +
   "thing is BUILT, and each picture's own words say its state. Only a thing whose name says what it " +
-  "holds (a jar of buttons) keeps that in its look. " +
+  "holds (a jar of buttons), a kit, and a place's own fittings (a wall of hooks) keep that in the look. " +
   "The first line is the HOME setting (the workshop, kitchen, sewing room) " +
   "the video returns to. The SECOND line is the MAIN thing — the one physical thing the whole video " +
   "is about (what is made, used, sold or shown most) — written `MAIN name: look`. " +

@@ -2235,8 +2235,11 @@ export function sheetWithoutLight(sheet: string | undefined): string {
       const name = labelName(label);
       if (isWeatherName(name) || isLightName(name)) return line;
       const look = line.slice(at + 1).trim();
-      // The whole name, "of …" and all: what a "coffee can of scraps" holds is what it is.
-      const cut = lookWithoutState(lookWithoutLight(look), label.replace(/^(?:MAIN|HOME)\b[\s:-]*/i, ""));
+      // The whole name, "of …" and all: what a "coffee can of scraps" holds is what it is. A line
+      // labelled only "HOME" (49 of the stored lists) is the home setting, a place, never a thing with
+      // no name: with none, "HOME: a one-car garage, pegboard wall holding hand tools" lost its wall.
+      const thing = label.replace(/^MAIN\b[\s:-]*/i, "").replace(/^HOME\b[\s:–—-]*/i, "") || "home";
+      const cut = lookWithoutState(lookWithoutLight(look), thing);
       return cut === look ? line : `${line.slice(0, at + 1)}${cut ? ` ${cut}` : ""}`;
     })
     .join("\n");
@@ -2264,9 +2267,10 @@ export function sheetWithoutLight(sheet: string | undefined): string {
  * fold-down tray table, a reclining back, a wooden crate open at the top, a sealed alarm with no
  * battery door (a missing PART is how it is made), a lit screen (round 14 keeps a thing's own light);
  * what a thing holds when its NAME says so ("coffee can of scraps", "fabric scrap bin", "water
- * bottle": there the contents are what it is); and what a PLACE holds ("a narrow aisle lined with low
- * wooden shelves holding neat rows of greeting cards", job 409): that is how it is furnished — though
- * who is in it, and whether its doors are open, are each picture's own.
+ * bottle": there the contents are what it is), and what a kit holds; and what a PLACE holds ("a narrow
+ * aisle lined with low wooden shelves holding neat rows of greeting cards", job 409; a HOME line): that
+ * is how it is furnished — though who is in it, and whether its doors are open, are each picture's own.
+ * Only the state goes, never the thing it was said of: "a single nightstand lamp off" keeps its lamp.
  */
 /** Who sits, stands or rides in something: said to be absent, a moment of the story ("no passengers seated"). */
 const OCCUPANTS =
@@ -2337,13 +2341,34 @@ const PART_STATE_WORDS =
 // Describing words come between a determiner and the part ("both front doors locked", "a single
 // nightstand lamp off"), never a noun of the thing's own: "near the front with tray tables stowed" is
 // cut at "with", not at "front".
+const PART_ADJECTIVES = "(?:(?!(?:with|near|at|in|on|by|of|and|beside|under)\\b)[a-z'-]+\\s+){0,2}";
+const PART_ADVERB = "(?:(?:often|usually|always|still|sometimes|mostly|wide|all|half|[a-z]+ly)\\s+)?";
 const PART_STATE = new RegExp(
-  `^(?:(?:and|with)\\s+)?(?:(?:its|the|his|her|their|both|all|two|four|a|an)\\s+` +
-    `(?:(?!(?:with|near|at|in|on|by|of|and|beside|under)\\b)[a-z'-]+\\s+){0,2})?(?:${MOVING_PARTS})\\s+` +
-    `(?:(?:often|usually|always|still|sometimes|mostly|wide|all|half|[a-z]+ly)\\s+)?(?:${PART_STATE_WORDS})` +
-    STATE_END,
+  `^(?:(?:and|with)\\s+)?(?:(?:its|the|his|her|their|both|all|two|four|a|an)\\s+${PART_ADJECTIVES})?` +
+    `(?:${MOVING_PARTS})\\s+${PART_ADVERB}(?:${PART_STATE_WORDS})${STATE_END}`,
   "i"
 );
+/**
+ * A part the look BRINGS IN with "a" or a number, up to the part: one more thing it names, so only its
+ * state goes — "a single nightstand lamp (off)" (job 376's bedroom) took the lamp with it, "and a large
+ * sliding door (open to daylight)" (job 221's home) the door. Never a part said to be gone ("with a
+ * plastic lid removed", job 332's can): a lid that is off is not in the picture. A light that is off
+ * is still there.
+ */
+const NEW_PART = new RegExp(
+  `^(?:(?:and|with)\\s+)?(?:a|an|one|two|three|four)\\s+${PART_ADJECTIVES}(?<part>${MOVING_PARTS})(?=\\s)`,
+  "i"
+);
+const PART_GONE = new RegExp(`^\\s+${PART_ADVERB}(?:removed|lifted|off)\\b`, "i");
+const GIVES_LIGHT = /^(?:lamps?|lights?|tvs?|televisions?|monitors?|screens?)$/i;
+
+/** Where a part the look brings in ends in `rest`, a state said of it after (`NEW_PART`); else -1. */
+function newPartEnd(rest: string): number {
+  const m = NEW_PART.exec(rest);
+  if (!m || !PART_STATE.test(rest)) return -1;
+  const gone = PART_GONE.test(rest.slice(m[0].length)) && !GIVES_LIGHT.test(m.groups!.part);
+  return gone ? -1 : m[0].length;
+}
 /** Water on it for a moment: "condensation on the metal", "beaded with moisture". */
 const WET_SURFACE =
   /^(?:(?:and|with|some|light|a\s+film\s+of|a\s+few|beads?\s+of|drops?\s+of)\s+)*(?:condensation|(?:water\s+)?droplets|moisture)(?![\w-])|^(?:beaded|misted|fogged)\s+(?:with|over|up)\b/i;
@@ -2374,9 +2399,11 @@ const BURNS =
  * A state said as a describing word before its noun: "an empty row", "an unopened can", "a damp cloth",
  * "a small sealed foil-lined bag" (job 417's snack bags, opened in the pictures that hand them out).
  * Never one that is part of what the thing is: an empty or vacant lot, a wet bar, saw, suit or wipe, a
- * dirty-blonde or dirty-white colour, "open shelves", "a lit screen", "a sealed 10-year alarm unit".
+ * dirty-blonde or dirty-white colour, "open shelves", "a lit screen", "a sealed 10-year alarm unit" —
+ * nor one said of a look ("damp sheen", job 366's dog's nose, was left "sheen").
  */
-const NOT_STATE_NEXT = "lots?|plots?|land|bars?|saws?|suits?|wipes?|rooms?|vac|vacuum|erase|cells?|sanding|paper|look|stone|mop|nurse|sand|of|and|or|but|in|on|at|with";
+const NOT_STATE_NEXT =
+  "lots?|plots?|land|bars?|saws?|suits?|wipes?|rooms?|vac|vacuum|erase|cells?|sanding|paper|look|sheen|shine|gloss|stone|mop|nurse|sand|of|and|or|but|in|on|at|with";
 const STATE_WORD = new RegExp(
   "\\b(?:(?:empty|emptied|unoccupied|vacant|occupied|deserted|half-full|half-empty|unopened|unlit|stowed|" +
     "unwashed|spotless|wet|damp|soaked|soggy|dripping|steaming|smouldering|smoldering)" +
@@ -2437,10 +2464,12 @@ function stateOnly(rest: string, name: string | undefined): boolean {
 /**
  * Something a thing is put in or on, whose contents come and go: a cup, a can, a basket, a cart, a
  * table, a shelf. A door "filled with a fine crisscross lattice" (job 188's shoji door), a pillow
- * filled with down or a lamp's base full of oil are how those are made.
+ * filled with down or a lamp's base full of oil are how those are made — and so is a KIT, which is what
+ * it holds: job 282's "GLOSS KIT: compact white box holding a small tinted bottle and gloves" was left
+ * a white box.
  */
 const HOLDS_THINGS =
-  /\b(?:cups?|glass(?:es)?|mugs?|tumblers?|cans?|tins?|jars?|bottles?|bowls?|baskets?|bins?|box(?:es)?|bags?|sacks?|barrels?|buckets?|pails?|trays?|carts?|trolleys?|drawers?|crates?|chests?|totes?|pouch(?:es)?|cases?|pots?|pans?|kettles?|jugs?|pitchers?|vases?|shel(?:f|ves)|shelving|racks?|tables?|counters?|countertops?|desks?|(?:work)?bench(?:es)?|cabinets?|cupboards?|pockets?|purses?|wallets?|envelopes?|folders?|cartons?|packages?|packets?|dish(?:es)?|plates?|platters?|trunks?|suitcases?|backpacks?|fridges?|refrigerators?|coolers?|kits?|wagons?|wheelbarrows?)\b/i;
+  /\b(?:cups?|glass(?:es)?|mugs?|tumblers?|cans?|tins?|jars?|bottles?|bowls?|baskets?|bins?|box(?:es)?|bags?|sacks?|barrels?|buckets?|pails?|trays?|carts?|trolleys?|drawers?|crates?|chests?|totes?|pouch(?:es)?|cases?|pots?|pans?|kettles?|jugs?|pitchers?|vases?|shel(?:f|ves)|shelving|racks?|tables?|counters?|countertops?|desks?|(?:work)?bench(?:es)?|cabinets?|cupboards?|pockets?|purses?|wallets?|envelopes?|folders?|cartons?|packages?|packets?|dish(?:es)?|plates?|platters?|trunks?|suitcases?|backpacks?|fridges?|refrigerators?|coolers?|wagons?|wheelbarrows?)\b/i;
 
 /**
  * Whether what `held` names is held for a moment by key thing `name` (see above): a container or
@@ -2492,11 +2521,16 @@ export function lookWithoutState(look: string, name?: string): string {
       for (const m of Array.from(clause.matchAll(/\s+/g))) {
         if (AFTER_CAUSE.test(clause.slice(0, m.index!))) continue;
         if (stateOnly(clause.slice(m.index! + m[0].length), name)) {
-          cut = m.index!;
+          cut = m.index! + m[0].length;
           break;
         }
       }
     }
+    // A part the look brings in ("a single nightstand lamp off") keeps the part: only its state goes.
+    const part = cut >= 0 ? newPartEnd(clause.slice(cut)) : -1;
+    const partKept = part > 0;
+    if (partKept) cut += part;
+    else if (cut > 0) cut = clause.slice(0, cut).trimEnd().length;
     // What it holds may run on as a list after a comma: "holding a hand sander, clamps, and a square"
     // (job 328) — those clauses are what it holds too, up to the one that ends the list.
     if (cut >= 0 && CONTENTS.test(clause.slice(cut).trim())) c = heldListEnd(clauses, at);
@@ -2506,7 +2540,12 @@ export function lookWithoutState(look: string, name?: string): string {
     // What is left of a later clause after its state is only that state's subject ("fire (burning
     // inside)", "furniture piece (set out for pickup)", "tied (closed)"): the clause was the state. A
     // look joined to the state stays: "polished (and dry)", "calm (and empty of people)".
-    if (cut > 0 && at > 0 && x.split(/\s+/).length <= 2 && !/^\s*(?:and|or|but)\b/i.test(clause.slice(cut))) x = "";
+    if (cut > 0 && at > 0 && !partKept && x.split(/\s+/).length <= 2 && !/^\s*(?:and|or|but)\b/i.test(clause.slice(cut)))
+      x = "";
+    // A state said as a CONDITION is the whole clause's: "round silver 9-volt battery visible inside
+    // (when open)" (job 270's battery compartment) cut to its end would show the battery in every
+    // picture of a shut compartment.
+    if (cut > 0 && at > 0 && /^\s*(?:when|while|once)\b/i.test(clause.slice(cut))) x = "";
     // Whether the clause opened on a state said as a describing word ("damp nose that leads …").
     const led = !!x && x.replace(STATE_WORD, "\u0001").startsWith("\u0001");
     x = x && withoutStateWords(x, STATE_WORD).replace(HOW_FULL, " ").replace(/\s{2,}/g, " ").trim();

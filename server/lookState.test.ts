@@ -188,8 +188,56 @@ describe("what is built that way stays, byte for byte", () => {
       "a medium-sized tan and white dog with a short coat, floppy ears, and a dark nose that leads every greeting"
     ); // job 373
     expect(lookWithoutState("a dim still bedroom, bed with plain neutral bedding, closed door, a single nightstand lamp off", "bedroom")).toBe(
-      "a dim still bedroom, bed with plain neutral bedding, door"
+      "a dim still bedroom, bed with plain neutral bedding, door, a single nightstand lamp"
     ); // job 376
+  });
+});
+
+describe("only the state goes, never the thing it was said of", () => {
+  it("a part the look brings in with 'a' keeps the part; one said to be gone goes with its state", () => {
+    // Job 376's lamp and job 221's home door went whole with "off" and "open to daylight".
+    expect(lookWithoutState("a dim still bedroom, a single nightstand lamp off, dark blue shadows", "bedroom")).toBe(
+      "a dim still bedroom, a single nightstand lamp, dark blue shadows"
+    );
+    expect(
+      sheetWithoutLight(
+        "HOME: garage workshop with concrete floor, pale wood workbenches along one wall, and a large sliding door open to daylight, tools hung on a pegboard above the main bench."
+      )
+    ).toBe(
+      "HOME: garage workshop with concrete floor, pale wood workbenches along one wall, and a large sliding door, tools hung on a pegboard above the main bench."
+    );
+    expect(lookWithoutState("a wooden toolbox with a drawer open", "toolbox")).toBe("a wooden toolbox with a drawer");
+    // A lid that is off is not in the picture (job 332's can), and the box's own lid ("its") is no new thing.
+    expect(
+      lookWithoutState("squat silver metal can with a plastic lid removed, filled with small blackened wood offcuts", "coffee can of cedar scraps")
+    ).toBe("squat silver metal can, filled with small blackened wood offcuts");
+    expect(lookWithoutState("a small box with its lid open", "box")).toBe("a small box");
+  });
+
+  it("a state said as a condition takes its clause: job 270's battery is not seen in a shut compartment", () => {
+    expect(
+      lookWithoutState(
+        "small hinged plastic door on the back of an older alarm, round silver 9-volt battery visible inside when open.",
+        "battery compartment"
+      )
+    ).toBe("small hinged plastic door on the back of an older alarm.");
+  });
+
+  it("a kit is what it holds (job 282); a HOME line is a place, furnished with what it holds", () => {
+    const kit = "compact white box holding a small tinted bottle and gloves";
+    expect(lookWithoutState(`${kit}, sitting closed on the counter`, "GLOSS KIT")).toBe(kit);
+    expect(sheetWithoutLight("HOME: a one-car garage workshop, pegboard wall holding hand tools, concrete floor")).toBe(
+      "HOME: a one-car garage workshop, pegboard wall holding hand tools, concrete floor"
+    );
+    // A container keeps the rule: the same words under a plain cup's name still go.
+    expect(sheetWithoutLight("HOME: a one-car garage\nplastic cup: a clear plastic cup holding ice cubes")).toBe(
+      "HOME: a one-car garage\nplastic cup: a clear plastic cup"
+    );
+  });
+
+  it("a look said of a surface is no state of it (job 366's 'damp sheen')", () => {
+    const nose = "dark leather-textured snout, damp sheen, close against pant legs and shoes";
+    expect(lookWithoutState(nose, "dog's nose")).toBe(nose);
   });
 });
 
@@ -220,7 +268,10 @@ describe("the props call is told the rule", () => {
   it("a look says how the thing is built — never a state or what is not there — with neutral examples", () => {
     expect(CONTINUITY_SYSTEM).toContain("Nor a STATE it is in for a moment");
     expect(CONTINUITY_SYSTEM).toContain("a look says how the thing is BUILT, and each picture's own words say its state");
-    expect(CONTINUITY_SYSTEM).toContain("Only a thing whose name says what it holds (a jar of buttons) keeps that in its look");
+    // What the code keeps (`holdsForAMoment`): a name that says it, a kit, a place's fittings.
+    expect(CONTINUITY_SYSTEM).toContain(
+      "Only a thing whose name says what it holds (a jar of buttons), a kit, and a place's own fittings (a wall of hooks) keep that in the look"
+    );
     expect(CONTINUITY_SYSTEM).not.toMatch(/passenger|flight|cabin|airline|ice cube|soda|tray table/i);
   });
 });
