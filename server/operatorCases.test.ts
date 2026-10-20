@@ -7816,3 +7816,96 @@ describe("a card says what the voice says (round 14, Walter's job 411, Luca's jo
     expect(out.cues.map(c => c.id)).toEqual(["bird-count-hundred-years"]);
   });
 });
+
+describe("a checklist ticks a list the narrator says, and a chapter series is the parts the film counts (round 14, Gary's job 413)", () => {
+  // Two graphics of the same practice film. "THE USUAL CRIME" ticked "An afternoon of cleaning" and
+  // "A $2 gasket" — the fix the script names after a dash the voice read as a comma — as two more
+  // crimes; and the two parts the excerpt counts aloud lost their chapter labels because the kicker
+  // promised seventeen. Each run puts the cue the job stored (or planned) to the planner as its first
+  // answer, on the words and scenes the film had.
+  const words = (s: string) =>
+    s.split(" ").map(t => {
+      const [text, range] = t.split("@");
+      const [start, end] = range.split("-").map(Number);
+      return { text, start, end };
+    });
+  const scene = (index: number, a: number, b: number, extra: Record<string, unknown> = {}) => ({ index, narrationStartSec: a, narrationEndSec: b, scriptText: "", hostPresent: false, cta: false, split: false, hostOpener: false, ...extra });
+  type Cue = { id: string; template: string; start: string; startPad: number; end?: string; endPad?: number; durationSec?: number; props: Record<string, unknown> };
+  const plan = async (heard: ReturnType<typeof words>, scenes: ReturnType<typeof scene>[], first: Cue[], repair: Cue[] = []) => {
+    const { planGraphics } = await import("../graphics/src/plan/planner");
+    const { notAListAsSaid } = await import("./spokenLists");
+    let n = 0;
+    const ask = async () => JSON.stringify({ cues: [first, repair][n++] ?? [] });
+    const cuts = scenes.slice(1).map(s => s.narrationStartSec);
+    return planGraphics({ words: heard, cuts, film: { scenes }, ask, ensureIcon: async () => true, listCheck: notAListAsSaid });
+  };
+
+  it("413 (2:06): 'The usual crime' is refused at the script's dash; the opening's 'a loan, a lease, a logo, and a lawyer —' is a checklist that is placed", async () => {
+    const heard = words(
+      "$10,000.@4.413-5.173 A@5.473-5.633 loan,@6.353-6.753 a@7.013-7.053 lease,@7.113-7.433 a@7.733-7.753 logo,@7.813-8.313 and@8.434-8.534 a@8.574-8.594 lawyer,@8.654-9.014 all@9.554-9.694 before@9.734-10.034 the@10.054-10.154 first@10.234-10.474 customer@10.534-10.994 ever@11.234-11.394 shows@11.454-11.734 up.@11.894-11.974 " +
+        "Nine@125.03-125.21 times@125.25-125.49 out@125.55-125.65 of@125.69-125.73 ten,@125.81-126.13 the@126.19-126.27 crime@126.31-126.57 is@126.63-126.71 stale@126.77-127.11 fuel@127.19-127.53 and@127.57-127.65 a@127.67-127.71 gummed@127.77-128.03 up@128.07-128.19 carburetor,@128.23-128.85 an@129.27-129.33 afternoon@129.43-129.81 of@129.85-129.91 cleaning,@129.97-130.39 and@130.45-130.55 a@130.57-130.61 $2@130.83-131.11 gasket.@131.15-131.59 " +
+        "Fixed@132.25-132.49 and@132.53-132.61 washed.@132.65-133.01"
+    );
+    const scenes = [
+      scene(1, 0, 5.41, { hostPresent: true, scriptText: "Somewhere along the line, everybody agreed that starting a business costs ten thousand dollars." }),
+      scene(2, 5.41, 6.83, { scriptText: "A loan," }),
+      scene(3, 6.83, 7.55, { scriptText: "a lease," }),
+      scene(4, 7.55, 8.36, { scriptText: "a logo," }),
+      scene(5, 8.36, 9.39, { scriptText: "and a lawyer —" }),
+      scene(6, 9.39, 12.52, { scriptText: "all before the first customer ever shows up." }),
+      scene(26, 117.17, 124.86, { scriptText: "Every spring, Marketplace fills up with mowers listed as ran-last-season, priced twenty-five to seventy-five dollars." }),
+      scene(27, 124.86, 132.13, { scriptText: "Nine times out of ten the crime is stale fuel and a gummed-up carburetor — an afternoon of cleaning and a two-dollar gasket." }),
+      scene(28, 132.13, 136.95, { scriptText: "Fixed and washed, that same machine sells for a hundred fifty to three hundred." }),
+    ];
+    const crime: Cue = {
+      id: "usual-mower-crime",
+      template: "Checklist",
+      start: "the crime is stale fuel",
+      startPad: -0.15,
+      end: "and a $2 gasket",
+      endPad: 0.3,
+      props: {
+        title: "The usual crime",
+        items: [
+          { at: "@stale fuel", text: "Stale fuel" },
+          { at: "@a gummed up carburetor", text: "A gummed up carburetor" },
+          { at: "@an afternoon of cleaning", text: "An afternoon of cleaning" },
+          { at: "@a $2 gasket", text: "A $2 gasket" },
+        ],
+      },
+    };
+    const costs: Cue = {
+      id: "before-first-customer",
+      template: "Checklist",
+      start: "A loan, a lease, a",
+      startPad: -0.15,
+      end: "and a lawyer",
+      endPad: 0.3,
+      props: { title: "Before the first customer", items: ["A loan", "a lease", "a logo", "a lawyer"].map(x => ({ at: `@${x}`, text: x.charAt(0).toUpperCase() + x.slice(1), say: x })) },
+    };
+    // the repair keeps the cue that passed and drops the one refused
+    const out = await plan(heard, scenes, [costs, crime], [costs]);
+    expect(out.rounds[0].problems.find(p => p.cue === "usual-mower-crime")?.problem).toMatch(/^"The usual crime" is not a list the narrator says: row 3 \("an afternoon of cleaning"\) names no thing/);
+    expect(out.rounds[0].problems.find(p => p.cue === "before-first-customer")).toBeUndefined();
+    expect(out.cues.map(c => c.id)).toEqual(["before-first-customer"]);
+  });
+
+  it("413 (0:59, 1:51): 'Number one' and 'number two' keep their chapter labels, without the '…of 17' the excerpt never reaches", async () => {
+    const heard = words(
+      "Cheap@59.10-59.38 insurance.@59.44-60.02 Now,@60.80-61.02 number@61.59-61.83 one.@62.03-62.17 Number@63.17-63.41 one,@63.57-63.71 knife@64.37-64.65 and@64.79-64.89 tool@64.97-65.25 sharpening.@65.29-65.79 " +
+        "And@111.67-111.75 since@111.81-112.00 you're@112.02-112.19 already@112.24-112.58 sharpening@112.64-113.10 mower@113.14-113.40 blades,@113.44-113.80 meet@114.22-114.40 number@114.46-114.72 two,@114.76-115.04 lawn@115.66-115.94 mower@115.96-116.20 flipping.@116.26-116.64 " +
+        "grab@211.40-211.70 it@211.79-211.87 now@211.91-212.13 or@212.33-212.43 after@212.53-212.75 number@212.79-213.01 17,@213.05-213.61 same@213.91-214.18 book.@214.22-214.60"
+    );
+    const scenes = [
+      scene(17, 58.97, 66.54, { hostPresent: true, split: true, scriptText: "Cheap insurance. Now — number one.\n\nNumber one: knife and tool sharpening." }),
+      scene(18, 66.54, 70.33, { scriptText: "Every kitchen on your street has a drawer full of dull knives," }),
+      scene(25, 111.53, 117.17, { hostPresent: true, split: true, scriptText: "And since you’re already sharpening mower blades, meet number two: lawn mower flipping." }),
+      scene(26, 117.17, 124.86, { scriptText: "Every spring, Marketplace fills up with mowers." }),
+      scene(37, 197.96, 219.55, { cta: true, scriptText: "No deadline, no countdown — grab it now or after number seventeen, same book either way." }),
+    ];
+    const chapter = (id: string, start: string, number: number, title: string): Cue => ({ id, template: "ChapterLabel", start, startPad: -0.15, durationSec: 4.5, props: { kicker: `Garage businesses · ${number} of 17`, number, title } });
+    const out = await plan(heard, scenes, [chapter("chapter-one-sharpening", "Number one, knife and tool", 1, "Knife sharpening"), chapter("chapter-two-mower-flipping", "meet number two, lawn mower", 2, "Mower flipping")]);
+    expect(out.rounds.flatMap(r => r.problems).filter(p => /chapter/.test(p.cue + p.problem))).toEqual([]);
+    expect(out.cues.map(c => c.props.kicker)).toEqual(["Garage businesses · 1", "Garage businesses · 2"]);
+  });
+});

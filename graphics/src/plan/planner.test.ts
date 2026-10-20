@@ -3,7 +3,7 @@ import { resolveCues, tokens, type CueSpec, type ResolvedCue, type Word } from "
 import { TEMPLATES } from "../registry";
 import { FPS } from "../theme";
 import { notAListAsSaid } from "../../../server/spokenLists";
-import { ICON_REQUIRED, ROW_MAX_WORDS, STEP_MAX_WORDS, STEP_STRIP_MAX_PX, choiceSteps, inScriptSpelling, respellCue, stepStripMaxChars, fromAFoundList, iconsAsASet, keepObject, listsWhereGraphicsGo, malformedPhrase, missingListCues, namesTheDanger, noIcon, normalizePhrases, notTheHostsWords, objectCutOff, planGraphics, quotedInScript, restoreRowGrammar, stepCardLines, stepStripWidth, stepTextProblems, systemPrompt, uncoveredMoments, userPrompt, wordsSaidOver, type PlanMessage } from "./planner";
+import { ICON_REQUIRED, ROW_MAX_WORDS, STEP_MAX_WORDS, STEP_STRIP_MAX_PX, choiceSteps, countsSaidAloud, rowsAsWritten, withoutPromisedTotal, inScriptSpelling, respellCue, stepStripMaxChars, fromAFoundList, iconsAsASet, keepObject, listsWhereGraphicsGo, malformedPhrase, missingListCues, namesTheDanger, noIcon, normalizePhrases, notTheHostsWords, objectCutOff, planGraphics, quotedInScript, restoreRowGrammar, stepCardLines, stepStripWidth, stepTextProblems, systemPrompt, uncoveredMoments, userPrompt, wordsSaidOver, type PlanMessage } from "./planner";
 
 const W = (s: string, start: number, step = 0.3): Word[] => s.split(" ").map((text, i) => ({ text, start: start + i * step, end: start + i * step + 0.26 }));
 const scene = (index: number, a: number, b: number, extra: Record<string, unknown> = {}) => ({ index, narrationStartSec: a, narrationEndSec: b, scriptText: "", hostPresent: false, cta: false, split: false, hostOpener: false, ...extra });
@@ -1872,5 +1872,227 @@ describe("nothing on screen is the transcript's spelling of a script word (Walte
     const bare = { scenes: short.scenes.map(s => ({ ...s, scriptText: "" })) };
     expect(wordsSaidOver(bare, heard)[1]).toContain("ends in the word migratorious, which");
     expect(uncoveredMoments([], heard, bare).map(m => m.text).join(" ")).toContain("migratorious");
+  });
+});
+
+describe("a checklist is a list the narrator says, read at the script's own punctuation (round 13 review, Gary's job 413)", () => {
+  // Job 413 as heard, 1:57-2:17. The script: "Nine times out of ten the crime is stale fuel and a
+  // gummed-up carburetor — an afternoon of cleaning and a two-dollar gasket." The voice read the dash
+  // as a comma, and the checklist "The usual crime" ticked the fix and its cost as two more crimes.
+  const heard = T(
+    "Every@117.34-117.56 spring,@117.60-118.00 Marketplace@118.22-118.80 fills@118.88-119.18 up@119.26-119.34 with@119.40-119.52 mowers@119.60-119.94 listed@120.02-120.32 as@120.44-120.56 ran@120.82-121.08 last@121.14-121.42 season,@121.46-121.86 priced@122.10-122.70 $25@122.74-123.06 to@123.12-123.20 $75.@123.28-123.86" +
+      " " +
+      "Nine@125.03-125.21 times@125.25-125.49 out@125.55-125.65 of@125.69-125.73 ten,@125.81-126.13 the@126.19-126.27 crime@126.31-126.57 is@126.63-126.71 stale@126.77-127.11 fuel@127.19-127.53 and@127.57-127.65 a@127.67-127.71 gummed@127.77-128.03 up@128.07-128.19 carburetor,@128.23-128.85 an@129.27-129.33 afternoon@129.43-129.81 of@129.85-129.91 cleaning,@129.97-130.39 and@130.45-130.55 a@130.57-130.61 $2@130.83-131.11 gasket.@131.15-131.59" +
+      " " +
+      "Fixed@132.25-132.49 and@132.53-132.61 washed,@132.65-133.01 that@133.31-133.49 same@133.59-133.81 machine@133.85-134.27 sells@134.33-134.57 for@134.61-134.75 $150@134.89-135.15 to@135.41-136.09 $300.@136.15-136.50"
+  );
+  const crimeLine = "Nine times out of ten the crime is stale fuel and a gummed-up carburetor — an afternoon of cleaning and a two-dollar gasket.";
+  const film = {
+    scenes: [
+      scene(26, 117.17, 124.86, { scriptText: "Every spring, Marketplace fills up with mowers listed as ran-last-season, priced twenty-five to seventy-five dollars." }),
+      scene(27, 124.86, 132.13, { scriptText: crimeLine }),
+      scene(28, 132.13, 136.95, { scriptText: "Fixed and washed, that same machine sells for a hundred fifty to three hundred." }),
+    ],
+  };
+  const cuts = [124.86, 132.13];
+  // The checklist exactly as the job's saved plan has it.
+  const crime = (items: { at: string; text: string }[]): CueSpec => ({
+    id: "usual-mower-crime",
+    template: "Checklist",
+    start: "the crime is stale fuel",
+    startPad: -0.15,
+    end: "and a $2 gasket",
+    endPad: 0.3,
+    props: { title: "The usual crime", items },
+  });
+  const shipped = crime([
+    { at: "@stale fuel", text: "Stale fuel" },
+    { at: "@a gummed up carburetor", text: "A gummed up carburetor" },
+    { at: "@an afternoon of cleaning", text: "An afternoon of cleaning" },
+    { at: "@a $2 gasket", text: "A $2 gasket" },
+  ]);
+  const asking = (first: CueSpec[], repair: CueSpec[] = []) => {
+    let n = 0;
+    return async () => JSON.stringify({ cues: [first, repair][n++] ?? [] });
+  };
+
+  it("a heard row is read in the script's own words: a compound the voice split, a sign said as its word", () => {
+    expect(rowsAsWritten(["Stale fuel", "A gummed up carburetor", "An afternoon of cleaning", "A $2 gasket"], crimeLine)).toEqual([
+      "stale fuel",
+      "a gummed-up carburetor",
+      "an afternoon of cleaning",
+      "a two-dollar gasket",
+    ]);
+    // a dash written without spaces is no part of the word beside it; a row the script never says stays as heard
+    expect(rowsAsWritten(["a gummed up carburetor", "an afternoon"], "the crime is a gummed-up carburetor—an afternoon of work.")).toEqual(["a gummed-up carburetor", "an afternoon"]);
+    expect(rowsAsWritten(["A new mower"], crimeLine)).toEqual(["A new mower"]);
+    // a sign the script writes as a sign is found as heard
+    expect(rowsAsWritten(["a $2 gasket"], "and a $2 gasket.")).toEqual(["a $2 gasket"]);
+  });
+
+  it("job 413: 'The usual crime' is refused with the reason, and the repair is told what a checklist is", async () => {
+    const out = await planGraphics({ words: heard, cuts, film, ask: asking([shipped]), ensureIcon: async () => true, listCheck: notAListAsSaid });
+    expect(out.cues).toEqual([]);
+    expect(out.rounds[0].problems.find(p => p.cue === "usual-mower-crime")?.problem).toMatch(
+      /^"The usual crime" is not a list the narrator says: row 3 \("an afternoon of cleaning"\) names no thing \(a length of time\)\. A checklist ticks separate things he names one after another, every row one of what its title names/
+    );
+  });
+
+  it("job 413 without the time row: the gasket is on the other side of the script's dash, and is refused for it", async () => {
+    const three = crime([
+      { at: "@stale fuel", text: "Stale fuel" },
+      { at: "@a gummed up carburetor", text: "A gummed up carburetor" },
+      { at: "@a $2 gasket", text: "A $2 gasket" },
+    ]);
+    const out = await planGraphics({ words: heard, cuts, film, ask: asking([three]), ensureIcon: async () => true, listCheck: notAListAsSaid });
+    expect(out.cues).toEqual([]);
+    expect(out.rounds[0].problems.find(p => p.cue === "usual-mower-crime")?.problem).toMatch(
+      /^"The usual crime" is not a list the narrator says: "a gummed-up carburetor" and "a two-dollar gasket" are on two sides of the script's "—"/
+    );
+  });
+
+  it("a checklist of things said as a list is placed — a dash AFTER the last item turns nothing (the same film's opening, 0:05)", async () => {
+    const opening = T(
+      "$10,000.@4.413-5.173 A@5.473-5.633 loan,@6.353-6.753 a@7.013-7.053 lease,@7.113-7.433 a@7.733-7.753 logo,@7.813-8.313 and@8.434-8.534 a@8.574-8.594 lawyer,@8.654-9.014 all@9.554-9.694 before@9.734-10.034 the@10.054-10.154 first@10.234-10.474 customer@10.534-10.994 ever@11.234-11.394 shows@11.454-11.734 up.@11.894-11.974"
+    );
+    const costs = {
+      scenes: [
+        scene(1, 0, 5.41, { hostPresent: true, scriptText: "Somewhere along the line, everybody agreed that starting a business costs ten thousand dollars." }),
+        scene(2, 5.41, 6.83, { scriptText: "A loan," }),
+        scene(3, 6.83, 7.55, { scriptText: "a lease," }),
+        scene(4, 7.55, 8.36, { scriptText: "a logo," }),
+        scene(5, 8.36, 9.39, { scriptText: "and a lawyer —" }),
+        scene(6, 9.39, 12.52, { scriptText: "all before the first customer ever shows up." }),
+      ],
+    };
+    const checklist: CueSpec = {
+      id: "before-first-customer",
+      template: "Checklist",
+      start: "A loan, a lease, a",
+      startPad: -0.15,
+      end: "and a lawyer",
+      endPad: 0.3,
+      props: {
+        title: "Before the first customer",
+        items: [
+          { at: "@A loan", text: "A loan", say: "A loan" },
+          { at: "@a lease", text: "A lease", say: "a lease" },
+          { at: "@a logo", text: "A logo", say: "a logo" },
+          { at: "@a lawyer", text: "A lawyer", say: "a lawyer" },
+        ],
+      },
+    };
+    const calls: string[][] = [];
+    const listCheck = (script: string, rows: string[], opts?: { points?: boolean }) => {
+      calls.push(rows);
+      return notAListAsSaid(script, rows, opts);
+    };
+    const out = await planGraphics({ words: opening, cuts: [5.41, 6.83, 7.55, 8.36, 9.39], film: costs, ask: asking([checklist]), ensureIcon: async () => true, listCheck });
+    expect(out.rounds[0].problems).toEqual([]);
+    expect(out.cues.map(c => c.id)).toEqual(["before-first-customer"]);
+    expect(calls).toEqual([["A loan", "a lease", "a logo", "a lawyer"]]);
+  });
+
+  it("the catalogue holds a checklist to the list rules and says where a list ends", () => {
+    const prompt = systemPrompt({ kept: false });
+    expect(prompt).toContain('"items": [{"text" (≤5 words), "at": "@words", "say": "the item as said"}]');
+    expect(prompt).toContain("A list ends where the sentence turns at a dash or a colon");
+  });
+});
+
+describe("a chapter series is every part the film counts, not the total a kicker promises (round 13 review, Gary's job 413)", () => {
+  // Job 413 is a 3-minute excerpt of a script promising seventeen businesses. It counts "Number one"
+  // (0:59, over split scene 17) and "number two" (1:51, over split scene 25) aloud, and the book pitch
+  // points at "number 17" and "number 4". The planner labelled both counted parts "· N of 17", and the
+  // series was dropped whole for missing 3-17.
+  const heard = T(
+    "office.@58.04-58.36 Cheap@59.10-59.38 insurance.@59.44-60.02 Now,@60.80-61.02 number@61.59-61.83 one.@62.03-62.17 Number@63.17-63.41 one,@63.57-63.71 knife@64.37-64.65 and@64.79-64.89 tool@64.97-65.25 sharpening.@65.29-65.79" +
+      " " +
+      "Every@66.70-66.90 kitchen@66.96-67.30 on@67.36-67.44 your@67.48-67.62 street@67.68-68.00 has@68.06-68.20 a@68.24-68.26 drawer@68.32-68.62 full@68.68-68.88 of@68.92-68.98 dull@69.04-69.30 knives,@69.36-69.90" +
+      " " +
+      "And@111.67-111.75 since@111.81-112.00 you're@112.02-112.19 already@112.24-112.58 sharpening@112.64-113.10 mower@113.14-113.40 blades,@113.44-113.80 meet@114.22-114.40 number@114.46-114.72 two,@114.76-115.04 lawn@115.66-115.94 mower@115.96-116.20 flipping.@116.26-116.64" +
+      " " +
+      "Every@117.34-117.56 spring,@117.60-118.00 Marketplace@118.22-118.80 fills@118.88-119.18 up@119.26-119.34 with@119.40-119.52 mowers.@119.60-119.94" +
+      " " +
+      "grab@211.40-211.70 it@211.79-211.87 now@211.91-212.13 or@212.33-212.43 after@212.53-212.75 number@212.79-213.01 17,@213.05-213.61 same@213.91-214.18 book.@214.22-214.60 Back@215.40-215.60 to@215.90-216.00 the@216.04-216.12 list,@216.16-216.44 where@216.70-216.86 number@216.90-217.46 4@217.48-217.50 is@217.56-217.64 hiding.@217.70-218.10"
+  );
+  const film = {
+    scenes: [
+      scene(16, 53.41, 58.97, { scriptText: "so before you charge a stranger a dime, spend two minutes on the phone with your city office." }),
+      scene(17, 58.97, 66.54, { hostPresent: true, split: true, scriptText: "Cheap insurance. Now — number one.\n\nNumber one: knife and tool sharpening." }),
+      scene(18, 66.54, 70.33, { scriptText: "Every kitchen on your street has a drawer full of dull knives," }),
+      scene(25, 111.53, 117.17, { hostPresent: true, split: true, scriptText: "And since you’re already sharpening mower blades, meet number two: lawn mower flipping." }),
+      scene(26, 117.17, 124.86, { scriptText: "Every spring, Marketplace fills up with mowers." }),
+      scene(37, 197.96, 219.55, {
+        cta: true,
+        scriptText: "No deadline, no countdown — grab it now or after number seventeen, same book either way. Back to the list, where number four is hiding on every window of your house.",
+      }),
+    ],
+  };
+  const cuts = [58.97, 66.54, 111.53, 117.17, 197.96];
+  const chapter = (id: string, start: string, number: number, title: string, of = 17): CueSpec => ({
+    id,
+    template: "ChapterLabel",
+    start,
+    startPad: -0.15,
+    durationSec: 4.5,
+    props: { kicker: `Garage businesses · ${number} of ${of}`, number, title },
+  });
+  const one = chapter("chapter-one-sharpening", "Number one, knife and tool", 1, "Knife sharpening");
+  const two = chapter("chapter-two-mower-flipping", "meet number two, lawn mower", 2, "Mower flipping");
+  const once = (cues: CueSpec[]) => {
+    let n = 0;
+    return async () => JSON.stringify({ cues: n++ === 0 ? cues : [] });
+  };
+  const sorted = (s: Set<number>) => Array.from(s).sort((a, b) => a - b);
+
+  it("the counts a film says aloud: 'number N' and an ordinal a sentence opens on, never one in the call to action", () => {
+    expect(sorted(countsSaidAloud(heard, film))).toEqual([1, 2]);
+    // Frederick's label (job 393): ordinals a sentence opens on count; "a second bag" mid-sentence does not
+    const label = W("First thing on the label. The type. Second thing. Power. And the third one is interconnection. She bought a second bag.", 0);
+    expect(sorted(countsSaidAloud(label, { scenes: [scene(1, 0, 40)] }))).toEqual([1, 2, 3]);
+    // "the first customer" and "the spark plug wire first" are no counts
+    expect(sorted(countsSaidAloud(W("A lawyer, all before the first customer ever shows up. Pull the spark plug wire first, every time.", 0), { scenes: [scene(1, 0, 40)] }))).toEqual([]);
+  });
+
+  it("only the promised total leaves a kicker", () => {
+    expect(withoutPromisedTotal("Garage businesses · 1 of 17")).toBe("Garage businesses · 1");
+    expect(withoutPromisedTotal("Where to sell · 3 of 5")).toBe("Where to sell · 3");
+    expect(withoutPromisedTotal("Garage businesses")).toBe("Garage businesses");
+    expect(withoutPromisedTotal("Out of 10 tips · 1 of 10")).toBe("Out of 10 tips · 1");
+  });
+
+  it("job 413: both counted parts keep their labels, and the kicker no longer promises 17", async () => {
+    const out = await planGraphics({ words: heard, cuts, film, ask: once([one, two]), ensureIcon: async () => true });
+    expect(out.rounds.flatMap(r => r.problems)).toEqual([]);
+    expect(out.cues.map(c => [c.id, c.props.kicker])).toEqual([
+      ["chapter-one-sharpening", "Garage businesses · 1"],
+      ["chapter-two-mower-flipping", "Garage businesses · 2"],
+    ]);
+    expect(out.resolved.map(c => c.props.kicker)).toEqual(["Garage businesses · 1", "Garage businesses · 2"]);
+  });
+
+  it("a part the film DOES count aloud with no label still takes the series down; a series that keeps its promise keeps its total", async () => {
+    const three = [...heard, ...T("Number@140.00-140.30 three,@140.40-140.80 pressure@141.00-141.40 washing.@141.50-142.00")];
+    const longer = { scenes: [...film.scenes.slice(0, 5), scene(30, 136.95, 148.19, { scriptText: "Number three: pressure washing." }), film.scenes[5]] };
+    const out = await planGraphics({ words: three, cuts: [...cuts, 136.95, 148.19], film: longer, ask: once([one, two]), ensureIcon: async () => true });
+    expect(out.cues).toEqual([]);
+    expect(out.rounds[0].problems).toContainEqual({ cue: "chapter 3", problem: "chapter 3 of 3 is missing — label every counted part or none" });
+    // the film that counts two parts and promises two keeps "of 2"
+    const both = await planGraphics({
+      words: heard,
+      cuts,
+      film,
+      ask: once([chapter("c1", "Number one, knife and tool", 1, "Knife sharpening", 2), chapter("c2", "meet number two, lawn mower", 2, "Mower flipping", 2)]),
+      ensureIcon: async () => true,
+    });
+    expect(both.cues.map(c => c.props.kicker)).toEqual(["Garage businesses · 1 of 2", "Garage businesses · 2 of 2"]);
+  });
+
+  it("a label refused in the film takes its series down, as before: chapter 2 has no words to land on", async () => {
+    const lost = chapter("chapter-two", "number two is somewhere else", 2, "Mower flipping");
+    const out = await planGraphics({ words: heard, cuts, film, ask: once([one, lost]), ensureIcon: async () => true });
+    expect(out.cues).toEqual([]);
+    expect(out.rounds[0].problems.map(p => p.cue)).toEqual(expect.arrayContaining(["chapter-two", "chapter 2"]));
   });
 });

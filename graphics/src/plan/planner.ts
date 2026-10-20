@@ -71,6 +71,17 @@ export function stepStripMaxChars(n: number): number {
 /** The list windows: numbered rows, each standing for an item the narrator says. */
 const LIST_WINDOWS = new Set(["ListWindow", "HostListWindow"]);
 
+/**
+ * The graphics that show a LIST under a title, a row for each item said one after another — the list
+ * windows, and the checklist that ticks each row as it is said. Each is held to the rules every
+ * spoken list is found by (`listCheck`). Only the windows were: Gary's job 413 (2:06) ticked "THE
+ * USUAL CRIME: Stale fuel / A gummed up carburetor / An afternoon of cleaning / A $2 gasket", the last
+ * two the fix the script names after a dash. Not the side-by-side pills (IconLabels, which may name
+ * one thing or offer two), nor the crossed-out list (CrossedList, which dismisses states and choices
+ * as well as things: "not broken, not dead").
+ */
+const ROW_LISTS = new Set([...Array.from(LIST_WINDOWS), "Checklist"]);
+
 /** Noto Color Emoji (Apache-2.0), pinned: the image of an emoji, by its code points. */
 export const NOTO_PNG = "https://cdn.jsdelivr.net/gh/googlefonts/noto-emoji@v2.047/png/512";
 
@@ -193,10 +204,16 @@ Graphics with the picture in a window — they replace the picture with the foot
 On top of the footage:
 - TitleOverFootage — the video's topic line in its opening, over its first b-roll: {"kicker" (optional), "phrase": phrase (≤10 words), "emphasis"}
 - ChapterLabel — the script counts its parts aloud ("first thing…", "second…"): label EVERY counted part (all or none): {"kicker": "Topic · 1 of 3", "number": 1, "title": "1-3 words"}, "durationSec": 4.5 instead of "end"
+  (the "of 3" is how many parts THIS FILM counts aloud: when it promises more than it counts — "seventeen ideas",
+  with only "number one" and "number two" said — label the parts it counts, and the "of …" is left off)
 - StepLabels — describes 2-4 actions in order: {"steps": [{"text" (≤${STEP_MAX_WORDS} words, his own words as for StepCards), "at": "@words"}]} (a choice
   — "…, or …" — is part of the step before it, never the next step, as for StepCards; the labels sit side by side
   on ONE line, so all of them together hold at most ${stepStripMaxChars(3)} characters with three steps, ${stepStripMaxChars(4)} with four)
-- Checklist — lists 2-4 signs or things to check (each ticked as said) (over b-roll): {"title": "2-4 words", "items": [{"text" (≤5 words), "at": "@words"}]}
+- Checklist — lists 2-4 signs or things to check (each ticked as said) (over b-roll): {"title": "2-4 words", "items": [{"text" (≤5 words), "at": "@words", "say": "the item as said"}]}
+  (a list he says, held to the same rules as a ListWindow: every row is one of what the title names, said one after
+  another in the same run of the sentence. A list ends where the sentence turns at a dash or a colon, even when
+  the voice reads it as a comma: "the trouble is a worn belt, a loose pulley, and a dry bearing — an hour of work
+  and a ten-dollar part" ticks three troubles; the words after the dash are the fix and its cost, never more troubles)
 - CrossedList — dismisses 2-3 things ("not the bowl, not the house"), optionally then names the real one (over b-roll): {"items": [{"text" (≤3 words), "icon" (optional), "at": "@words", "keep": true only for the real one}]}
 - WarningLabel — names a danger or a mistake to avoid, in words that SAY it: read alone under its "WARNING"
   header, the line itself says what not to do or what goes wrong ("never", "don't", "not", "avoid", "too…",
@@ -1453,12 +1470,56 @@ export function fromAFoundList(rows: string[], lists: { items: string[] }[]): bo
   });
 }
 
-/** A list window's rows as said: each item's "say", else its shown text. */
+/** A list graphic's rows as said: each item's "say", else its shown text. */
 function listRows(items: unknown): string[] {
   if (!Array.isArray(items)) return [];
   return items.map(it => {
     const o = (it ?? {}) as { say?: unknown; text?: unknown };
     return String(typeof o.say === "string" && o.say.trim() ? o.say : (o.text ?? "")).trim();
+  });
+}
+
+/** The script's words with where each one is written: cut at white space and at a dash, which is
+ * no word, so a word never carries the dash beside it into a row ("carburetor—an"). */
+function writtenWords(script: string): Word[] {
+  return Array.from(script.matchAll(/[^\s—–]+/g), m => ({ text: m[0], start: m.index!, end: m.index! + m[0].length }));
+}
+
+/** A sign the transcriber writes on a number, as the words it stands for (`SIGNS_SAID`): "a $2
+ * gasket" is "a 2 dollars gasket", which the resolver's matcher finds in the script's "a two-dollar
+ * gasket" (a number in words, a plural, a compound split). */
+function signsAsWords(row: string): string {
+  const word = (sign: string) => SIGNS_SAID.find(([re]) => re.test(sign))?.[1] ?? "";
+  return row.replace(/([$£€])\s?(\d[\d,.]*)|(\d[\d,.]*)\s?([%°¢])/g, (_, pre?: string, a?: string, b?: string, post?: string) =>
+    pre ? `${a} ${word(pre)}` : `${b} ${word(post ?? "")}`
+  );
+}
+
+/**
+ * A LIST GRAPHIC'S ROWS IN THE SCRIPT'S OWN WORDS, so the list rules read them at the script's own
+ * punctuation. The rows are the HEARD words, and the voice may read the script's punctuation another
+ * way: Gary's job 413 (2:06) heard "the crime is stale fuel and a gummed up carburetor, an afternoon
+ * of cleaning, and a $2 gasket" where the script writes "…a gummed-up carburetor — an afternoon of
+ * cleaning and a two-dollar gasket". Matched word for word, "a gummed up carburetor" and "a $2 gasket"
+ * were nowhere in the script, so the rules — which refuse nothing they cannot find — passed a
+ * checklist that ticked the fix as two more crimes. Each row is looked for in `script`, in order, by
+ * the resolver's own matcher (`findVerbatim`: a number in words or digits, a compound split, one
+ * misheard word), as heard and then with a sign said as its word ("$2" is "2 dollars"), and is
+ * replaced by the whole written words it was found on, without the punctuation at its ends. A row
+ * not found stays as heard. Pure.
+ */
+export function rowsAsWritten(rows: string[], script: string): string[] {
+  const written = writtenWords(script);
+  const index = indexWords(written);
+  let from = 0;
+  return rows.map(row => {
+    const hits = findVerbatim(index, row, from) ?? findVerbatim(index, signsAsWords(row), from);
+    if (!hits) return row;
+    from = hits[hits.length - 1] + 1;
+    const a = written[index[hits[0]].word];
+    const b = written[index[hits[hits.length - 1]].word];
+    const text = script.slice(a.start, b.end).replace(/^[^A-Za-z0-9$£€]+|[^A-Za-z0-9%°¢]+$/g, "");
+    return text || row;
   });
 }
 
@@ -1471,6 +1532,73 @@ function scriptAround(film: FilmLayout, a: number, b: number): string {
     .slice(Math.max(0, over[0] - 1), over[over.length - 1] + 2)
     .map(s => (s.scriptText ?? "").trim())
     .join(" ");
+}
+
+/** An ordinal word as a count said aloud ("Second thing.", "And the third one…"). */
+const ORDINAL_COUNT: Record<string, number> = {
+  first: 1, second: 2, third: 3, fourth: 4, fifth: 5, sixth: 6, seventh: 7, eighth: 8, ninth: 9, tenth: 10,
+  eleventh: 11, twelfth: 12, thirteenth: 13, fourteenth: 14, fifteenth: 15, sixteenth: 16, seventeenth: 17,
+  eighteenth: 18, nineteenth: 19, twentieth: 20,
+};
+/** Words a sentence may open on before its ordinal count: "And the third…", "Now, second:". */
+const COUNT_OPENERS = new Set(["and", "so", "now", "then", "okay", "ok", "alright", "next", "the", "my", "our", "your"]);
+/** A word that ends a sentence (or turns it, as "Now — number one" does), so the next one opens. */
+const ENDS_SENTENCE = /[.!?:—–]["”’')\]]*$/;
+
+/**
+ * THE PARTS A FILM COUNTS ALOUD, outside its call to action: every "number N" ("Number one: knife
+ * and tool sharpening", "meet number two"), and every ordinal a sentence opens on ("Second thing.",
+ * "And the third one…"; "a second bag" mid-sentence is no count). A count said in the call to action
+ * is a pointer to the film, not a part of it: Gary's job 413 pitched the book with "grab it now or
+ * after number seventeen" and "number four is hiding on every window" — parts this excerpt never
+ * reaches. Pure.
+ */
+export function countsSaidAloud(words: Word[], film: FilmLayout): Set<number> {
+  const out = new Set<number>();
+  const inCta = (w: Word) => {
+    const mid = (w.start + w.end) / 2;
+    return film.scenes.some(s => s.cta && mid >= s.narrationStartSec && mid < s.narrationEndSec);
+  };
+  /** The tokens of the words outside the call to action, each with how many came before it in its sentence. */
+  const toks: { tok: string; inSentence: number }[] = [];
+  let inSentence = 0;
+  words.forEach((w, i) => {
+    if (i > 0 && ENDS_SENTENCE.test(words[i - 1].text.trim())) inSentence = 0;
+    if (inCta(w)) {
+      toks.push({ tok: "", inSentence: Infinity });
+      return;
+    }
+    for (const tok of tokens(w.text)) toks.push({ tok, inSentence: inSentence++ });
+  });
+  toks.forEach((t, i) => {
+    if (t.tok === "number") {
+      const next = toks[i + 1]?.tok ?? "";
+      const n = /^\d+$/.test(next) ? Number(next) : parseSpokenNumber(toks.slice(i + 1, i + 9).map(x => x.tok), 0)?.value;
+      if (n && n > 0) out.add(n);
+    }
+    const ordinal = ORDINAL_COUNT[t.tok];
+    if (ordinal && toks.slice(i - t.inSentence, i).every(x => COUNT_OPENERS.has(x.tok))) out.add(ordinal);
+  });
+  return out;
+}
+
+/** The "of N" a chapter kicker ends its count on: its last one ("Out of 10 tips · 1 of 10" is the
+ * second). */
+const lastPromise = (kicker: string) => {
+  const all = Array.from(kicker.matchAll(/\s+of\s+(\d+)\b/gi));
+  return all[all.length - 1];
+};
+
+/** The total a chapter label's kicker promises ("Garage businesses · 1 of 17" → 17), else 0. */
+const kickerTotal = (spec: CueSpec) => Number(lastPromise(String(spec.props?.kicker ?? ""))?.[1] ?? 0);
+
+/**
+ * A chapter kicker without the total it promises: "Garage businesses · 1 of 17" → "Garage businesses ·
+ * 1". Only the "of N" goes; the part's own number stays. Pure.
+ */
+export function withoutPromisedTotal(kicker: string): string {
+  const m = lastPromise(kicker);
+  return m ? (kicker.slice(0, m.index) + kicker.slice(m.index! + m[0].length)).trim() : kicker;
 }
 
 /**
@@ -1759,6 +1887,8 @@ export async function planGraphics(input: PlanInput): Promise<PlanResult> {
   // still reads every list, so a list said after a mid-roll CTA is located after it, not on an earlier
   // copy of its words.
   const offered = listsWhereGraphicsGo(words, film, lists);
+  /** The parts the film counts aloud, which a chapter series must label (`countsSaidAloud`). */
+  const countedAloud = countsSaidAloud(words, film);
 
   const validate = async (newSpecs: CueSpec[], final: boolean) => {
     const problems: PlanProblem[] = [];
@@ -1962,20 +2092,26 @@ export async function planGraphics(input: PlanInput): Promise<PlanResult> {
       // A LIST WINDOW is a list the narrator says (`listCheck`): Gideon's job 400 (1:41) numbered "1 Two
       // thousand years ago / 2 Seneca wrote a short / 3 Furious / 4 Loving essay" on ONE sentence,
       // the planner's own list. A list the pipeline found passed the same rules when it was found
-      // (`fromAFoundList`). Read around where it resolved.
-      if (LIST_WINDOWS.has(spec.template) && input.listCheck) {
-        const rows = listRows(spec.props.items);
-        const why =
-          rows.length && !fromAFoundList(rows, lists)
-            ? input.listCheck(scriptAround(film, mine.start, mine.contentEnd ?? mine.end), rows, { points: spec.template === "HostListWindow" })
-            : undefined;
+      // (`fromAFoundList`). So is a CHECKLIST (`ROW_LISTS`: job 413's "The usual crime" ticked the fix
+      // after the script's dash as two more crimes). Read around where it resolved, each row in the
+      // script's own words (`rowsAsWritten`), so a dash the voice read as a comma is still a dash.
+      if (ROW_LISTS.has(spec.template) && input.listCheck) {
+        const script = scriptAround(film, mine.start, mine.contentEnd ?? mine.end);
+        const rows = rowsAsWritten(listRows(spec.props.items), script);
+        const why = rows.length && !fromAFoundList(rows, lists) ? input.listCheck(script, rows, { points: spec.template === "HostListWindow" }) : undefined;
         if (why) {
           undo();
-          const title = typeof spec.props.title === "string" && spec.props.title.trim() ? `"${spec.props.title.trim()}"` : "The list window";
+          const checklist = spec.template === "Checklist";
+          const title = typeof spec.props.title === "string" && spec.props.title.trim() ? `"${spec.props.title.trim()}"` : checklist ? "The checklist" : "The list window";
           bad(
-            `${title} is not a list the narrator says: ${why}. A list window numbers separate things he names one after ` +
-              `another ("a pen, a notebook, and a lamp"), each row on that item's own words — never a sentence chopped at ` +
-              `its commas, a time or describing words. Show the line another way (a caption or a statement), or drop it`
+            checklist
+              ? `${title} is not a list the narrator says: ${why}. A checklist ticks separate things he names one after ` +
+                  `another, every row one of what its title names, said in the same run of the sentence — never a sentence chopped ` +
+                  `at its commas, and never the words after a dash or a colon (what it means, what it takes, what it costs). ` +
+                  `Show the line another way (a caption or a statement), or drop it`
+              : `${title} is not a list the narrator says: ${why}. A list window numbers separate things he names one after ` +
+                  `another ("a pen, a notebook, and a lamp"), each row on that item's own words — never a sentence chopped at ` +
+                  `its commas, a time or describing words. Show the line another way (a caption or a statement), or drop it`
           );
           continue;
         }
@@ -2106,19 +2242,40 @@ export async function planGraphics(input: PlanInput): Promise<PlanResult> {
     }
 
     // Chapter labels are a SERIES: "2 of 3" with no 1 or 3 is a broken promise on screen. A new
-    // series that came out incomplete is dropped; an approved one never is.
+    // series that came out incomplete is dropped; an approved one never is. COMPLETE means every part
+    // the FILM counts, not the total a kicker promises: Gary's job 413, a 3-minute excerpt of a script
+    // promising seventeen businesses, counted "Number one" and "number two" aloud; the planner labelled
+    // both "· 1 of 17" and "· 2 of 17", and the series was dropped whole for missing 3-17, which the
+    // film never says — so neither counted part had its title. The parts the film reaches: the highest
+    // label asked for (placed or refused) and the highest count it says aloud outside the call to
+    // action, up to the promised total (`countsSaidAloud`). A part below that with no label still drops
+    // the series; a promise past it leaves the kicker ("· 1 of 17" → "· 1"), so the screen never
+    // promises parts the film does not show.
     const chapters = placed.filter(p => p.spec.template === "ChapterLabel");
-    const total = Math.max(0, ...chapters.map(p => Number(/of\s+(\d+)/i.exec(String(p.spec.props.kicker ?? ""))?.[1] ?? 0)));
-    const have = new Set(chapters.map(p => Number(p.spec.props.number)));
-    const lost = Array.from({ length: total }, (_, i) => i + 1).filter(n => !have.has(n));
-    if (chapters.length && lost.length) {
-      for (const n of lost) problems.push({ cue: `chapter ${n}`, problem: `chapter ${n} of ${total} is missing — label every counted part or none` });
-      if (final) {
-        for (const p of chapters.filter(p => !p.kept)) {
-          problems.push({ cue: p.spec.id, problem: "dropped with its incomplete chapter series" });
-          placed.splice(placed.indexOf(p), 1);
+    if (chapters.length) {
+      const numberOf = (s: CueSpec) => Number(s.props?.number);
+      const promised = Math.max(0, ...chapters.map(p => kickerTotal(p.spec)));
+      const asked = [...kept0, ...newSpecs].filter(s => s.template === "ChapterLabel").map(numberOf);
+      const reached = Math.max(0, ...[...asked, ...Array.from(countedAloud).filter(n => n <= promised)].filter(n => Number.isInteger(n) && n > 0));
+      const have = new Set(chapters.map(p => numberOf(p.spec)));
+      const lost = Array.from({ length: reached }, (_, i) => i + 1).filter(n => !have.has(n));
+      if (lost.length) {
+        for (const n of lost) problems.push({ cue: `chapter ${n}`, problem: `chapter ${n} of ${reached} is missing — label every counted part or none` });
+        if (final) {
+          for (const p of chapters.filter(p => !p.kept)) {
+            problems.push({ cue: p.spec.id, problem: "dropped with its incomplete chapter series" });
+            placed.splice(placed.indexOf(p), 1);
+          }
+          resolved = placed.length ? resolveAll() : [];
         }
-        resolved = placed.length ? resolveAll() : [];
+      } else if (promised > reached) {
+        const was = chapters.map(p => p.spec.props.kicker);
+        for (const p of chapters) if (!p.kept && typeof p.spec.props.kicker === "string") p.spec.props.kicker = withoutPromisedTotal(p.spec.props.kicker);
+        try {
+          resolved = resolveAll();
+        } catch {
+          chapters.forEach((p, k) => (p.spec.props.kicker = was[k]));
+        }
       }
     }
     return { cues: placed.map(p => p.spec), resolved, problems, startsAt };
