@@ -200,6 +200,7 @@ import {
   MAX_HEAD_HOLD_SEC,
 } from "./sceneTiming";
 import { previewBookAssignments, ctaLabelMatches } from "../shared/ctaMarkers";
+import { checkScript, scriptRefusal } from "../shared/scriptCheck";
 import {
   buildTrackingUrl,
   stripTrackingParam,
@@ -239,6 +240,7 @@ import { voiceRedoRefusal } from "../shared/voiceTakes";
 import { summarizeHostSpend } from "../shared/hostSpend";
 import { jobPickFacts } from "../shared/jobPicks";
 import { planHostRedo } from "../shared/hostRedo";
+import { splitPanelsMissing } from "../shared/splitPanel";
 import { answerPoll } from "./pollRevision";
 import { lightVideoFor } from "./lightVideo";
 import { once } from "./requestOnce";
@@ -2481,6 +2483,14 @@ const longformVideoRouter = router({
           message: `CTA marker error: ${ctaMarkers.errors.join("; ")}`,
         });
       }
+      // Only narration may be voiced (`shared/scriptCheck.ts`): notes, headings and a second copy
+      // of the script pasted into the box are refused here, by line, before anything is paid for
+      // — production jobs 204/205 voiced "VERDICT: PASS" and the whole script twice. The generate
+      // dialog runs the same check, so this fires only for a caller that skipped it.
+      const scriptRefused = scriptRefusal(checkScript(input.script));
+      if (scriptRefused) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: scriptRefused });
+      }
       // A book assignment is keyed by BLOCK INDEX, so assigning one to a script with no marked
       // blocks would silently do nothing. Reject it here rather than render a film that quietly
       // ignored the operator's choice.
@@ -2860,6 +2870,14 @@ const longformVideoRouter = router({
           job.status === "processing" || !Array.isArray(rawScenes)
             ? []
             : auditStoryboardTimeline(rawScenes),
+        // Split screens that shipped as the host alone — the picture beside the host was never
+        // drawn (`shared/splitPanel.ts`). Read off the clips, so films rendered before the render
+        // path said so are found too. Drives the card's badge and its "Draw the pictures" banner;
+        // empty while a pass is running, like the timeline audit.
+        splitPanelsMissing:
+          job.status === "processing" || !Array.isArray(rawScenes)
+            ? []
+            : splitPanelsMissing(rawScenes),
         // The continuous master narration — the cut-room preview plays the exact slice under a
         // scene (seeking into this) so a moved cut previews with the right words, where the
         // per-scene `audioUrl` slice was cut at the ORIGINAL boundaries.

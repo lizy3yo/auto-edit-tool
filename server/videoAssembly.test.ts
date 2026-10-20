@@ -6,6 +6,7 @@ import {
   HOST_UPSCALE_SHARPEN,
   buildOverlayMuxArgs,
   buildSceneMuxArgs,
+  nameCardOnWindow,
   phoneLookFilter,
   buildConcatCopyArgs,
   buildAudioConcatFilterArgs,
@@ -676,6 +677,51 @@ describe("buildSceneMuxArgs QR overlay (CTA scenes)", () => {
   });
 });
 
+describe("nameCardOnWindow — when the name card is fully on", () => {
+  const on = (sec: number, fadeIn?: boolean, fadeOut?: boolean) => {
+    const w = nameCardOnWindow(sec, fadeIn, fadeOut);
+    return w && Object.fromEntries(Object.entries(w).map(([k, v]) => [k, Math.round(v * 1000) / 1000]));
+  };
+
+  it("a lone take with room gets the full edges: 0.5 s wait, 0.5 s in, 1.5 s or more held, 0.5 s out", () => {
+    expect(on(3, true, true)).toEqual({ on: 1, off: 2.5, delay: 0.5, fadeIn: 0.5, fadeOut: 0.5 });
+    // 403's and 406's introduction takes.
+    expect(on(4.82, true, true)).toEqual({ on: 1, off: 4.32, delay: 0.5, fadeIn: 0.5, fadeOut: 0.5 });
+    expect(on(10.44, true, true)?.on).toBe(1);
+  });
+
+  // The self-introduction takes the card was refused on, so it went elsewhere: 409's "My name is
+  // Gideon Grant, and this channel is for" (3.07 s; 2.97 s once the picker's 0.1 s margin is taken
+  // off), 410's "I'm Helena Hart, and I read the fine print" (2.51 s), 411's "I'm Walter, …" (2.62 s).
+  it("a short take keeps the 1.5 s hold: the wait goes first, then the fades shrink together", () => {
+    expect(on(2.975, true, true)).toEqual({ on: 0.975, off: 2.475, delay: 0.475, fadeIn: 0.5, fadeOut: 0.5 });
+    expect(on(2.51, true, true)).toEqual({ on: 0.51, off: 2.01, delay: 0.01, fadeIn: 0.5, fadeOut: 0.5 });
+    expect(on(2.41, true, true)).toEqual({ on: 0.455, off: 1.955, delay: 0, fadeIn: 0.455, fadeOut: 0.455 });
+    for (const sec of [2.975, 2.51, 2.41, 2.0]) {
+      const w = nameCardOnWindow(sec, true, true)!;
+      expect(w.off - w.on, String(sec)).toBeCloseTo(1.5, 9);
+    }
+    // Jobs 403 and 406: the one-photo cold opens of 2.33 s and 2.56 s, whose card was dropped, now
+    // show it.
+    expect(on(2.33, true, true)).toEqual({ on: 0.415, off: 1.915, delay: 0, fadeIn: 0.415, fadeOut: 0.415 });
+    expect(nameCardOnWindow(2.56, true, true)).toBeDefined();
+  });
+
+  it("never a fade under 0.2 s or a hold under 1.5 s: a lone take needs 1.9 s", () => {
+    expect(on(1.9, true, true)).toEqual({ on: 0.2, off: 1.7, delay: 0, fadeIn: 0.2, fadeOut: 0.2 });
+    expect(nameCardOnWindow(1.89, true, true)).toBeUndefined();
+    expect(nameCardOnWindow(1.4, false, false)).toBeUndefined();
+  });
+
+  it("inside a run, a scene needs only its own fade's share", () => {
+    expect(on(2.5, true, false)).toEqual({ on: 1, off: 2.5, delay: 0.5, fadeIn: 0.5, fadeOut: 0 });
+    expect(on(2.0, false, true)).toEqual({ on: 0, off: 1.5, delay: 0, fadeIn: 0, fadeOut: 0.5 });
+    expect(on(1.5, false, false)).toEqual({ on: 0, off: 1.5, delay: 0, fadeIn: 0, fadeOut: 0 });
+    expect(on(1.8, true, false)).toEqual({ on: 0.3, off: 1.8, delay: 0, fadeIn: 0.3, fadeOut: 0 });
+    expect(nameCardOnWindow(1.69, false, true)).toBeUndefined();
+  });
+});
+
 describe("buildSceneMuxArgs name card (host lower third)", () => {
   const base = {
     videoPath: "/tmp/v.mp4",
@@ -745,13 +791,30 @@ describe("buildSceneMuxArgs name card (host lower third)", () => {
     );
   });
 
-  it("drops the card when the fades leave no readable hold", () => {
+  // A take a little shorter than 410's "I'm Helena Hart, and I read the fine print" (2.51 s, whose
+  // wait shrinks to 0.01 s): at 2.41 s there is no time for any wait, so the card fades in from the
+  // cut over shorter fades and still holds 1.5 s before fading out into the next cut.
+  it("draws a short take's card with shorter edges, the hold kept", () => {
+    const f = filterOf(
+      buildSceneMuxArgs({
+        ...base,
+        durationSec: 2.41,
+        nameCard: { ...card, fadeIn: true, fadeOut: true },
+      })
+    );
+    expect(f).toContain(
+      "[2:v]format=rgba,fade=t=in:st=0.000:d=0.455:alpha=1," +
+        "fade=t=out:st=1.955:d=0.455:alpha=1[card]"
+    );
+  });
+
+  it("drops the card when even the shortest edges leave no readable hold", () => {
     const args = buildSceneMuxArgs({
       ...base,
-      durationSec: 2,
+      durationSec: 1.8,
       nameCard: { ...card, fadeIn: true, fadeOut: true },
     });
-    // 2s − 1.0 lead-in − 0.5 fade-out = 0.5s on screen: a flash, so no card at all.
+    // 1.8 s − 1.5 s held leaves 0.15 s for each fade, under the 0.2 s floor: no card at all.
     expect(args).not.toContain("/tmp/card.png");
     expect(args.filter(a => a === "-i")).toHaveLength(2);
     expect(filterOf(args)).not.toContain("[card]");

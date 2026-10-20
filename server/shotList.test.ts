@@ -1,8 +1,12 @@
 import { describe, expect, it } from "vitest";
 import type { StoryboardScene } from "@shared/types";
+import { assignSceneRanges } from "./narrationAlignment";
 import {
   applyShotPlan,
   foldSnappedFlashes,
+  foldUnseenBeats,
+  leadInBetweenItems,
+  UNSEEN_BEAT_SEC,
   joinHookPictures,
   joinSameContext,
   applyContextGroups,
@@ -21,6 +25,9 @@ import {
   settleVideoKind,
   shotListEligible,
   tokenSpans,
+  namesDevice,
+  sellingScreen,
+  showsScreen,
 } from "./shotList";
 
 const scene = (
@@ -104,6 +111,33 @@ describe("applyShotPlan", () => {
       { hostName: "Hank Hardwood" }
     );
     expect(withAfter.slice(0, -1)).toEqual([host]);
+  });
+
+  it("hands over after a name said by one word of the channel's name, never before it (job 407)", () => {
+    const SAM =
+      "I am Sam, and this one is for anybody who has wondered how a family got through a mountain winter on a woodlot.";
+    const host = scene(9, SAM, { hostPresent: true, hostIntro: true });
+    const plan = (hostUntil: string, from: string) => [
+      { scene: 9, hostUntil, shots: [{ from, show: "a snowed-in cabin at the edge of a woodlot" }] },
+    ];
+    // Matched as the whole name only, "Sawdust Sam" was never said, so every hand-off was refused.
+    const handed = applyShotPlan([host, after], plan("who has wondered", "how a family"), {
+      hostName: "Sawdust Sam",
+    }).scenes.slice(0, -1);
+    expect(handed.map(s => s.scriptText)).toEqual([
+      "I am Sam, and this one is for anybody who has wondered",
+      "how a family got through a mountain winter on a woodlot.",
+    ]);
+    expect(handed[0].hostPresent && handed[0].hostIntro).toBe(true);
+    // A hand-off that would take the name off the host is still refused.
+    const SAWDUST = "Folks call me by the shop, but I am Sam, and this one is for anybody who builds.";
+    const early = scene(9, SAWDUST, { hostPresent: true, hostIntro: true });
+    expect(
+      applyShotPlan([early, after], plan("by the shop, but", "I am Sam"), { hostName: "Sawdust Sam" }).scenes.slice(
+        0,
+        -1
+      )
+    ).toEqual([early]);
   });
 
   it("cuts a b-roll beat on the words that name each thing", () => {
@@ -425,6 +459,17 @@ describe("wordsAfterName", () => {
     const { wordsAfterName } = await import("./shotList");
     expect(wordsAfterName("I'm Hank Hardwood, and this one's for anybody", "Hank Hardwood")).toBe(5);
     expect(wordsAfterName("Out of 10 crochet projects", "Granny Mae")).toBe(5);
+  });
+
+  it("finds the name the way the introduction was found — by one word of it too (job 407)", async () => {
+    const { wordsAfterName } = await import("./shotList");
+    // Matched as the whole name only, every word of these lines counted as "after the name".
+    expect(wordsAfterName("I am Sam, and this one is for anybody", "Sawdust Sam")).toBe(6);
+    expect(wordsAfterName("I am Mae, and this is my table.", "Granny Mae")).toBe(5);
+    expect(wordsAfterName("My name is Gideon Grant, and this channel is for", "Gideon Grant")).toBe(5);
+    // The ordinary word half of a name, uncapitalised, is not the name.
+    expect(wordsAfterName("Sweep the sawdust here, before it spreads", "Sawdust Sam")).toBe(7);
+    expect(wordsAfterName("I am Sam, and this one is for anybody", undefined)).toBe(9);
   });
 });
 
@@ -894,6 +939,47 @@ describe("a video is only ever of something that moves by itself — never hands
     expect(videoKind("the sliding glass door opening onto the deck", "object")).toBe("object");
     expect(videoKind("fire burning in the wood stove", "camera")).toBe("object");
   });
+  it("a hand that names a thing is not hands: hand tools and a clock's hands may be in a video (job 406 scene 7)", async () => {
+    const { SHOWS_HANDS, videoKind } = await import("./shotList");
+    for (const thing of [
+      "hand tools hanging silent on a pegboard wall in the garage",
+      "a hand towel fluttering on the line in the breeze",
+      "a kitchen wall clock, its second hand sweeping past the twelve",
+      "the hands of the old wall clock near midnight",
+    ])
+      expect(SHOWS_HANDS.test(thing), thing).toBe(false);
+    expect(videoKind("a hand towel fluttering on the line in the breeze", "object")).toBe("object");
+    expect(videoKind("a kitchen wall clock, its second hand sweeping past the twelve", "object")).toBe("object");
+    // A hand on a body still never moves.
+    for (const hand of [
+      "a hand reaching for the hammer on the pegboard",
+      "hands sanding a board",
+      "hand-sewing the binding",
+      "a hand drill boring a hole into a small charred cedar block", // job 189 scene 36: a hand on the drill
+      "nine-patch crib quilt being pieced by hand at the work table", // job 144 scene 3
+    ]) {
+      expect(SHOWS_HANDS.test(hand), hand).toBe(true);
+      expect(videoKind(hand, "object"), hand).toBe("none");
+    }
+  });
+});
+
+describe("a planned shot of hand tools has nobody in it (round 11's review, job 406 scene 7)", () => {
+  it("does not mark the picture as a person at work; a shot of a hand on a tool does", async () => {
+    const { applyShotPlan } = await import("./shotList");
+    const beat = {
+      index: 7,
+      scriptText: "That one belief keeps more good tools hanging silent on more garage walls than rust ever has.",
+      showSubject: "x",
+      visualPrompt: "x",
+    } as StoryboardScene;
+    const plan = (show: string) => [{ scene: 7, hostUntil: null, shots: [{ from: "That one belief", show }] }];
+    const wall = applyShotPlan([{ ...beat }], plan("hand tools hanging silent on a pegboard wall in the garage")).scenes[0];
+    expect(wall.showSubject).toBe("hand tools hanging silent on a pegboard wall in the garage");
+    expect(wall.humanPresent).toBeUndefined();
+    const grip = applyShotPlan([{ ...beat }], plan("a hand lifting the hammer off the pegboard wall")).scenes[0];
+    expect(grip.humanPresent).toBe(true);
+  });
 });
 
 describe("a line naming something new keeps its own picture (Hank's job 258)", () => {
@@ -1005,6 +1091,103 @@ describe("what moves by itself is judged per picture, not from a word list (2026
     const { videoKind } = await import("./shotList");
     expect(videoKind("the sliding glass door opening onto the deck", "object", { selfMoving: false })).toBe("none");
     expect(videoKind("smoke rising from a smoldering mattress", "object", { selfMoving: true })).toBe("object");
+  });
+});
+
+describe("a thing someone pushes never moves by itself (job 417, 2026-10-19)", () => {
+  // The judge said yes to a cart "being pushed" and to a person-free split panel of a cart "rolling
+  // toward the rear": a real render would play a cart gliding down the aisle with nobody pushing it.
+  const PANEL_28 =
+    "Beverage cart positioned midway down the narrow aisle between passenger seat rows in an airline cabin, stocked with cups, cans, and bottles, rolling toward the rear.";
+  const PICTURE_3 =
+    "a stainless-steel airline beverage cart being pushed past a woman passenger sitting alone in an empty seat row near the front of the cabin";
+  const WING_13 = "the wing of an airliner, seen from a passenger's seat through the cabin window, climbing above clouds";
+
+  it("finds a cart, a stroller, luggage or a door on its way, whatever the words", async () => {
+    const { pushedThingMoves } = await import("./shotList");
+    for (const show of [
+      PANEL_28,
+      PICTURE_3,
+      "a flight attendant pushing the beverage cart back toward the galley past rows of passengers with drinks", // 417 #29
+      "beverage cart wheeled slowly down the narrow aisle", // 402 #2
+      "beverage cart with soda can on it wheeled down cabin aisle", // 402 #16, a moving cutaway
+      "the beverage cart rolling away down the aisle in the background", // 399, 410
+      "solid wood front door with brass handle swinging open, dog's nose waiting at the threshold", // 357 #10
+      "a wheelchair rolling down a hospital corridor",
+      "a stroller being pushed along the boardwalk",
+      "a wheelbarrow of soil trundling across the yard",
+      "an old bicycle coasting down a country lane",
+      "a suitcase moving across the station floor",
+      "a shopping cart rattling across the empty parking lot",
+      "someone wheeling a suitcase through the terminal",
+      "a kitchen drawer sliding open",
+    ])
+      expect(pushedThingMoves(show), show).toBe(true);
+  });
+
+  it("leaves alone what moves under its own power, a thing standing still, and what a carrier moves", async () => {
+    const { pushedThingMoves } = await import("./shotList");
+    for (const show of [
+      WING_13, // 417 #13: an engine, judged moving, stays
+      "an airplane climbing through clouds in flight", // 402 #11
+      "smoke rising from a smoldering mattress",
+      "a car driving down a wet road at dusk",
+      "a golf cart driving along the fairway",
+      "a motorbike speeding down the highway",
+      "a beverage cart parked in the galley, steam rising from a coffee pot on it",
+      "a rolling suitcase standing by the front door",
+      "a parked stroller beside a fountain, water splashing in the basin",
+      "a shopping cart left beside the stream, water moving over the stones",
+      "suitcases coming round the baggage carousel",
+      "a cart pulled by a horse down a country lane",
+      "a tractor pulling a hay wagon across the field",
+      "automatic doors sliding open at the shop entrance",
+      "the sliding glass door opening onto the deck",
+      // Stored storyboards (jobs 12, 242): a door with no swing in its words.
+      "A closed wooden door to a spare room, a rolled towel wedged tightly underneath its base, resting on worn floorboards.",
+      "A close view of pine wood at a door frame showing a split where the factory strike plate was pulled away from the frame",
+      // What really moves is named as the mover, right before the motion words or as its agent.
+      "a wagon pulled behind a tractor across the field",
+      "a wagon behind a tractor, moving across the field",
+      "a shopping cart in the lot, cars on the road speeding past",
+      "a horse in the field pulling a cart",
+      // "moving" naming the boxes, not saying the dolly moves.
+      "a dolly stacked with moving boxes in the hallway",
+    ])
+      expect(pushedThingMoves(show), show).toBe(false);
+  });
+
+  it("a plane, a train or a ferry the thing is IN is a place, not what moves it", async () => {
+    // Job 417's panel says "in an airline cabin"; worded "airplane cabin" the plane read as the
+    // mover and the cart escaped — on a channel whose carts are always inside a plane.
+    const { pushedThingMoves } = await import("./shotList");
+    for (const show of [
+      PANEL_28.replace("airline cabin", "airplane cabin"),
+      "a beverage cart in the aisle of a plane, rolling toward the galley",
+      "a beverage cart midway down the aisle of the airliner, rolling toward the rear",
+      "a luggage trolley on the train platform, rolling along",
+      "a stroller on the ferry deck rolling toward the rail",
+      "a hospital wheelchair in a corridor by the window, rain on the glass, rolling slowly forward",
+      "a flight attendant aboard the plane pushing the beverage cart down the aisle",
+    ])
+      expect(pushedThingMoves(show), show).toBe(true);
+  });
+
+  it("is never a video, and the judge's yes on it is overruled — a plane and steam keep theirs", async () => {
+    const { videoKind, applySelfMoving, parseSelfMoving } = await import("./shotList");
+    expect(videoKind(PANEL_28, "object", { selfMoving: true })).toBe("none");
+    expect(videoKind("beverage cart with soda can on it wheeled down cabin aisle", "object")).toBe("none");
+    expect(videoKind(WING_13, "object", { selfMoving: true })).toBe("object");
+    const scenes = [
+      scene(1, "a", { showSubject: PICTURE_3 }),
+      scene(2, "b", { showSubject: WING_13 }),
+      scene(3, "c", { hostPresent: true, splitVisual: PANEL_28 }),
+      scene(4, "d", { hostPresent: true, splitVisual: "steam curling up from a pot on the stove" }),
+    ];
+    const asked = [0, 1, 2, 3];
+    applySelfMoving(scenes, asked, parseSelfMoving('{"moving":["#0","#1","#2","#3"]}', asked));
+    expect(scenes.map(s => s.selfMoving)).toEqual([false, true, undefined, undefined]);
+    expect(scenes.map(s => s.splitSelfMoving)).toEqual([undefined, undefined, false, true]);
   });
 });
 
@@ -1165,6 +1348,123 @@ describe("a list without articles is recognised too — any channel", () => {
       ]
     );
     expect(scenes.map(s => !!s.listCut)).toEqual([true, true, true, false]);
+  });
+});
+
+describe("a list item is a thing (the audit's replay: jobs 351, 352, 357, 362, 400)", () => {
+  it("refuses numbers, lengths of time, labels, rates, set phrases and clauses — the items that were drawn", async () => {
+    const { notAThing } = await import("./shotList");
+    const refused: [string, string][] = [
+      ["six,", "only a number"], // job 352: "Mostly four, six, and eight inch widths."
+      ["twenty.", "only a number"], // job 351
+      ["six and a half", "only a number"],
+      ["One", "only a number"], // job 351: "One, two, three, four, all the way up to twelve."
+      ["round ten,", "a numbered label"], // job 351: "Round three, three a side, round ten, …"
+      ["and round twenty,", "a numbered label"],
+      ["three a side,", "a rate"],
+      ["two or three rounds apiece,", "a rate"],
+      ["a few weeks of evenings,", "a length of time"], // job 351
+      ["or a couple of months,", "a length of time"],
+      ["five minutes", "a length of time"], // job 11
+      ["Two thousand years ago,", "a length of time"], // job 400
+      ["give or take", "a set phrase or a pronoun"],
+      ["too", "a set phrase or a pronoun"],
+      ["and nowhere else.", "a set phrase or a pronoun"], // job 322
+      ["Hello", "a set phrase or a pronoun"], // job 220: "Hello, friend, and welcome to …"
+      ["tell me", "a set phrase or a pronoun"], // job 355
+      ["as rest,", "an aside or a preposition first"], // job 362, the model's list
+      ["through the pine", "an aside or a preposition first"],
+      ["A whole lot of folks wonder if that's rude,", "a clause"], // job 357
+      ["That's called joining,", "a clause"], // job 351
+      ["that still counts.", "a clause"],
+      ["the star looks fine right afterward,", "a clause"],
+      ["The word lives in your head and theirs", "a clause"], // job 322
+      ["a week later his club friends started messaging me", "a clause"],
+      // "all / every / more …" are judged on what follows: a time or a where is still no thing.
+      ["every single morning", "a time"],
+      ["all day long", "a time"],
+      ["all of them", "an aside or a preposition first"],
+      ["just for fun", "an aside or a preposition first"],
+      ["less than a dollar", "an aside or a preposition first"],
+    ];
+    for (const [item, why] of refused) expect([item, notAThing(item)]).toEqual([item, why]);
+    // Things stay things — the clean lists of the same replay, and the shapes the rule must not reach.
+    for (const item of [
+      "and eight inch widths.",
+      "Two slip nuts",
+      "one bucket",
+      "a dozen eggs",
+      "2 eggs,",
+      "a curtain that came down years ago", // job 106: a relative clause still names a thing
+      "the good half of a canvas drop cloth",
+      "quilted,", // jobs 159/174/178: "pieced from a few scraps, quilted, and bound" — three real stages
+      "and bound,",
+      "flicked into the dirt", // job 355
+      "carried off by a rat after dark",
+      "mother of pearl", // job 362: "Ivory, oat, a warm coral, mother of pearl."
+      "Drawer fronts", // job 352
+      "and some glue too.", // a trailing "too" is not what is named
+      "the round after that too",
+      "a quarter", // a coin, not a number
+      "two weekend bags", // a time word that names a thing
+      "the sounds of the market", // "sounds of" is a noun, not a verb
+      "nice even stitches",
+      // A model item may open on "all / every / more / just": one refused item drops its whole list.
+      "all the scraps you can find",
+      "every spool of thread",
+      "and more glue",
+      "just a pencil",
+      "the box it came in", // a clause with no "that" still names the box
+      "everyone's favorite pie", // whose, not "everyone is"
+    ])
+      expect([item, notAThing(item)]).toEqual([item, null]);
+  });
+
+  it("never splits or marks pieces that name nothing as list items", async () => {
+    const { looksLikeBareListItem, looksLikeListItem, splitListPieces } = await import("./shotList");
+    for (const t of ["twenty.", "give or take,", "too.", "and round twenty,"]) expect([t, looksLikeBareListItem(t)]).toEqual([t, false]);
+    for (const t of ["six and a half,", "three a side,", "a few weeks of evenings,", "the star looks fine right afterward,"])
+      expect([t, looksLikeListItem(t)]).toEqual([t, false]);
+    expect(looksLikeListItem("and eight inch widths.")).toBe(true);
+    expect(looksLikeBareListItem("quilted,")).toBe(true);
+    const one = scene(1, "six and a half, give or take,", { showSubject: "a clock on the wall" });
+    expect(splitListPieces([one])).toEqual([one]);
+    // Job 351: "Round three, three a side, round ten, ten a side, and round twenty, twenty." — every
+    // piece read as a list item, so each was marked and kept apart, and "and round twenty, twenty."
+    // was split in two: six pictures of one blanket. Now none is a list item, so they may join.
+    const b = scene(3, "Round three, three a side, round ten, ten a side, and round twenty, twenty.");
+    const { scenes } = applyShotPlan(
+      [b],
+      [
+        {
+          scene: 3,
+          shots: [
+            { from: "Round three", show: "the small star blanket after round three" },
+            { from: "three a side", show: "three stitches along one side" },
+            { from: "round ten", show: "the growing star blanket" },
+            { from: "ten a side", show: "ten stitches along one side" },
+            { from: "and round twenty", show: "a much larger star blanket" },
+          ],
+        },
+      ]
+    );
+    expect(scenes.map(s => [s.scriptText, !!s.listCut])).toEqual([
+      ["Round three,", false],
+      ["three a side,", false],
+      ["round ten,", false],
+      ["ten a side,", false],
+      ["and round twenty, twenty.", false],
+    ]);
+  });
+
+  it("a host line of clauses is not 'just a list' (job 106)", async () => {
+    const { spokenListItems } = await import("./shotList");
+    expect(spokenListItems("the hem went around once, the straps were four short seams, and the four squares finished it.")).toBeNull();
+    expect(spokenListItems("A bin in the hall closet, a bag in the garage, maybe a box under the bed.")).toEqual([
+      "A bin in the hall closet",
+      "a bag in the garage",
+      "a box under the bed",
+    ]);
   });
 });
 
@@ -1371,10 +1671,1018 @@ describe("a short piece is never merged into a list item (Dale's job 293)", () =
       ["craft fairs,", true],
     ]);
   });
-  it("leaves a flash alone when its only neighbours are list items", async () => {
+  it("a flash between two list items leads into the item after it, which keeps its own picture", async () => {
+    // Nothing is merged INTO an item by the longer-wins join (it was left as a 0.3 s picture until
+    // 2026-10-18); the item after it now says it first, with its own picture and list mark.
     const { foldSnappedFlashes } = await import("./shotList");
     const scenes = [p(1, "a saw,", { listCut: true }), p(2, "and", {}), p(3, "a drill,", { listCut: true })];
     const r = foldSnappedFlashes(scenes, s => (s.listCut ? 0.6 : 0.3));
+    expect(r.scenes.map(s => [s.scriptText, s.showSubject, !!s.listCut])).toEqual([
+      ["a saw,", "picture 1", true],
+      ["and a drill,", "picture 3", true],
+    ]);
+  });
+});
+
+describe("every beat can be seen (the audit's production snapshot, 2026-10-18)", () => {
+  /** Words laid end to end from `t0`, one every `per` seconds, as the transcriber returns them. */
+  const spoken = (text: string, t0: number, per = 0.32) =>
+    text
+      .split(/\s+/)
+      .filter(Boolean)
+      .map((word, k) => ({ word, start: t0 + k * per, end: t0 + k * per + per - 0.04 }));
+  const item = (index: number, text: string, subject: string) =>
+    scene(index, text, { listCut: true, wordCut: true, showSubject: subject, visualPrompt: subject });
+
+  it("production job 236 #79-#81: a word said three times and heard once is ONE item, not two unseen ones", () => {
+    const intro = "the wren sings three times in a row which birders remember as";
+    const scenes = [
+      scene(1, "Out back the loudest bird in the yard is the Carolina wren and"),
+      scene(2, intro),
+      item(3, "teakettle,", "a wren with its beak wide open on the fence post"),
+      item(4, "teakettle,", "a wren with its beak wide open on the fence post"),
+      item(5, "teakettle.", "a wren with its beak wide open on the fence post"),
+      scene(6, "If you hear that by the feeder you know who it is and you can stop looking for it."),
+    ];
+    const words = [
+      ...spoken("Out back the loudest bird in the yard is the Carolina wren and", 0),
+      ...spoken(intro, 4.2),
+      ...spoken("teakettle.", 8.1),
+      ...spoken("If you hear that by the feeder you know who it is and you can stop looking for it.", 9.4),
+    ];
+    // The aligner as it is: two of the three items get no time at all.
+    assignSceneRanges(scenes, words, 15, [], []);
+    expect(scenes.filter(s => (s.audioDuration ?? 0) <= UNSEEN_BEAT_SEC)).toHaveLength(2);
+    const r = foldUnseenBeats(scenes, s => s.audioDuration);
+    expect(r.joined).toBe(2);
+    expect(r.unplaced).toEqual([]);
+    assignSceneRanges(r.scenes, words, 15, [], []);
+    const one = r.scenes.find(s => /teakettle/.test(s.scriptText ?? ""));
+    expect(one?.scriptText).toBe("teakettle, teakettle, teakettle.");
+    expect(one?.listCut).toBe(true);
+    expect(one?.audioDuration).toBeCloseTo(1.3, 1);
+    expect(r.scenes.every(s => (s.audioDuration ?? 0) > UNSEEN_BEAT_SEC)).toBe(true);
+    expect(r.scenes.map(s => s.index)).toEqual([1, 2, 3, 4]);
+  });
+
+  it("production job 215 #191/#192: the unseen 'piano,' joins the same words before it, not the next item", () => {
+    const scenes = [
+      item(190, "a violin,", "a violin"),
+      { ...item(191, "piano,", "an upright piano"), audioDuration: 0.054 },
+      { ...item(192, "piano,", "an upright piano"), audioDuration: 0 },
+      { ...item(193, "and a cello.", "a cello"), audioDuration: 0.9 },
+    ];
+    scenes[0].audioDuration = 0.6;
+    const r = foldUnseenBeats(scenes, s => s.audioDuration);
+    expect(r.scenes.map(s => [s.scriptText, s.showSubject, s.audioDuration])).toEqual([
+      ["a violin,", "a violin", 0.6],
+      ["piano, piano,", "an upright piano", 0.054],
+      ["and a cello.", "a cello", 0.9],
+    ]);
+  });
+
+  it("only a MEASURED zero: a short beat, or one not measured yet, is left to the other folds", () => {
+    const scenes = [
+      { ...scene(1, "The first coat goes on thin,"), audioDuration: 2 },
+      { ...scene(2, "slowly,"), audioDuration: 0.05 },
+      { ...scene(3, "and then"), audioDuration: undefined },
+      { ...scene(4, "the second coat goes on after an hour."), audioDuration: 3 },
+    ];
+    const r = foldUnseenBeats(scenes, s => s.audioDuration);
     expect(r.changed).toBe(false);
+    expect(r.scenes).toHaveLength(4);
+  });
+
+  it("a QR, cover or asset beat is never folded, and nothing is folded INTO one or the release beat", () => {
+    const qr = { ...scene(2, "Scan the code on your screen now."), qrHero: true, cta: true, ctaIndex: 0, audioDuration: 0 };
+    const kept = foldUnseenBeats(
+      [{ ...scene(1, "Here is the guide."), cta: true, ctaIndex: 0, audioDuration: 4 }, qr],
+      s => s.audioDuration
+    );
+    expect(kept.changed).toBe(false);
+    expect(kept.unplaced).toEqual([qr]);
+    // A closing word after the scan window: the QR beat holds the block's release words.
+    const after = { ...scene(3, "Goodnight."), audioDuration: 0 };
+    const closing = foldUnseenBeats(
+      [{ ...scene(1, "Scan it, the guide is yours."), qrHero: true, qrTail: true, cta: true, ctaIndex: 0, audioDuration: 6 }, after],
+      s => s.audioDuration
+    );
+    expect(closing.changed).toBe(false);
+    expect(closing.unplaced).toEqual([after]);
+    // Never across a CTA edge either: the picture after it takes the words instead.
+    const edge = foldUnseenBeats(
+      [
+        { ...scene(1, "Now the guide itself."), hostPresent: true, cta: true, ctaIndex: 0, audioDuration: 3 },
+        { ...scene(2, "Anyway,"), audioDuration: 0 },
+        { ...scene(3, "back to the porch light."), audioDuration: 3 },
+      ],
+      s => s.audioDuration
+    );
+    expect(edge.scenes.map(s => s.scriptText)).toEqual(["Now the guide itself.", "Anyway, back to the porch light."]);
+  });
+
+  it("an unseen host beat's roles stay with the host take that takes its words", () => {
+    const r = foldUnseenBeats(
+      [
+        { ...scene(1, "Hello there, friends."), hostPresent: true, hostOpener: true, audioDuration: 3 },
+        { ...scene(2, "I'm the host."), hostPresent: true, hostIntro: true, hostProtected: true, audioDuration: 0 },
+        { ...scene(3, "a porch light on a timer"), audioDuration: 3 },
+      ],
+      s => s.audioDuration
+    );
+    expect(r.scenes).toHaveLength(2);
+    expect(r.scenes[0]).toMatchObject({ scriptText: "Hello there, friends. I'm the host.", hostIntro: true, hostProtected: true });
+  });
+
+  it("production job 200 #184: 'So tonight,' between two items leads into the next item, which keeps its picture", () => {
+    const scenes = [
+      { ...item(183, "check the lock on the back window,", "a window latch"), audioDuration: 2.1 },
+      { ...scene(184, "So tonight,", { wordCut: true, showSubject: "a dark porch" }), audioDuration: 0.8 },
+      { ...item(185, "walk over to that front door,", "a front door from the hallway"), audioDuration: 1.6 },
+      { ...item(186, "and test the deadbolt.", "a deadbolt"), audioDuration: 1.4 },
+    ];
+    const r = foldSnappedFlashes(scenes, s => s.audioDuration ?? 0);
+    expect(r.scenes.map(s => [s.scriptText, s.showSubject, !!s.listCut])).toEqual([
+      ["check the lock on the back window,", "a window latch", true],
+      ["So tonight, walk over to that front door,", "a front door from the hallway", true],
+      ["and test the deadbolt.", "a deadbolt", true],
+    ]);
+  });
+
+  it("a lead-in at its floor, before a list, or across a CTA edge is not led into an item", () => {
+    const lead = (over: Partial<StoryboardScene>, sec: number) =>
+      ({ ...scene(2, "So tonight,", { wordCut: true, showSubject: "a dark porch" }), audioDuration: sec, ...over }) as StoryboardScene;
+    const items = (l: StoryboardScene) => [
+      { ...item(1, "check the back window,", "a latch"), audioDuration: 2 },
+      l,
+      { ...item(3, "walk to the front door,", "a door"), audioDuration: 2 },
+    ];
+    // At its floor: left alone.
+    expect(foldSnappedFlashes(items(lead({}, 1.3)), s => s.audioDuration ?? 0).changed).toBe(false);
+    // Inside a CTA block while the items are not: left alone.
+    expect(foldSnappedFlashes(items(lead({ cta: true, ctaIndex: 0 }, 0.8)), s => s.audioDuration ?? 0).changed).toBe(false);
+    expect(leadInBetweenItems(items(lead({}, 0.8)), 1)).toBe(true);
+    // Before a list's first item it still joins the picture before it (Dale's job 293).
+    const before = [
+      { ...scene(1, "The place just wasn't built for that piece.", { wordCut: true, shotGroup: 2 }), audioDuration: 4 },
+      { ...scene(2, "Today I'm ranking", { wordCut: true, shotGroup: 4 }), audioDuration: 1 },
+      { ...item(3, "Etsy,", "a shop page"), audioDuration: 0.4 },
+      { ...item(4, "craft fairs,", "a fair"), audioDuration: 0.8 },
+    ];
+    expect(leadInBetweenItems(before, 1)).toBe(false);
+    const r = foldSnappedFlashes(before, s => s.audioDuration ?? 0);
+    expect(r.scenes.map(s => s.scriptText)).toEqual([
+      "The place just wasn't built for that piece. Today I'm ranking",
+      "Etsy,",
+      "craft fairs,",
+    ]);
+  });
+});
+
+describe("a screen is a device, and it sells only when its own words say so (the audit's grid screens)", () => {
+  it("a screen word with no device in the picture is no screen", () => {
+    // Job 151: a crooked afghan "listing to one side"; job 342's split panel "ready for an online
+    // shop photograph"; job 154: a hand-written page "listing items".
+    expect(
+      showsScreen("Finished lace shell afghan, the afghan angled and listing to one side of the table's center.")
+    ).toBe(false);
+    expect(showsScreen("walnut cutting board displayed flat on a plain background, ready for an online shop photograph.")).toBe(false);
+    expect(showsScreen("Close view of a hand-written page or chart listing items")).toBe(false);
+    expect(namesDevice("a screen-printed tee and a screen door")).toBe(false);
+    // With the device named it is a screen, whatever it shows.
+    expect(showsScreen("a phone screen showing a listing of the walnut bookcase")).toBe(true);
+    expect(showsScreen("a laptop screen showing the shop page with the board listed")).toBe(true);
+    expect(showsScreen("close-up of a phone screen showing a seat map")).toBe(true);
+  });
+
+  it("only a screen whose words ask for things for sale, and name nothing else on it, sells", () => {
+    expect(sellingScreen("a phone showing a buy-and-sell app with handmade listings")).toBe(true);
+    expect(sellingScreen("a phone showing Facebook Marketplace listings of dressers")).toBe(true);
+    expect(sellingScreen("a phone showing her Etsy shop")).toBe(true);
+    // "setting" alone is a place, not a settings page.
+    expect(sellingScreen("a phone showing a buy-and-sell app with listings, in a plain kitchen setting")).toBe(true);
+    // Production job 271 (Dale): a message INSIDE the selling app is a message screen.
+    expect(
+      sellingScreen(
+        "a smartphone in hand showing a buy-and-sell app message screen Smartphone held at chest height displaying an open messaging app with incoming customer inquiries"
+      )
+    ).toBe(false);
+    // Production jobs 310 / 235 (Helena), 260 (Lance), job 103 (Mae), job 345 (Dale's shop settings).
+    expect(sellingScreen("close-up of a phone screen showing a seat map with a price on a chosen seat")).toBe(false);
+    expect(sellingScreen("mobile phone on the kitchen table showing an airline app screen")).toBe(false);
+    expect(sellingScreen("hands holding black smartphone changing password in camera app settings")).toBe(false);
+    expect(sellingScreen("A smartphone on a kitchen table, its screen showing blurred hands moving quickly through stitches")).toBe(false);
+    expect(sellingScreen("close-up of a phone screen showing a shop settings page with an on-off toggle")).toBe(false);
+    // The LINE is never read: a hand tapping a phone under "Subscribe to…" has no selling words.
+    expect(sellingScreen("a hand tapping a phone screen in a hallway beneath a ceiling smoke alarm")).toBe(false);
+  });
+
+  it("an app LISTING names, a rental listing and a thing 'listed' are no page of things for sale", () => {
+    // Production job 332: the network scanner app "listing manufacturer names" kept the grid while
+    // its neighbours ("app list") did not; the rental listing came back as a grid of bags.
+    expect(
+      sellingScreen(
+        "phone screen close on the scanner app listing manufacturer names, with the host's hands at work on it Close view of a smartphone screen showing a network scanner app list with manufacturer names and device types"
+      )
+    ).toBe(false);
+    expect(sellingScreen("a phone held showing a rental listing screen A slim black smartphone displaying a vacation rental listing with photos and details")).toBe(false);
+    expect(sellingScreen("a phone showing a notes app listing the three checks")).toBe(false);
+    expect(sellingScreen("a laptop screen with the three checks listed")).toBe(false);
+    // …while the noun "listing" still sells, whatever follows it.
+    expect(sellingScreen("a phone on the workbench showing a buy-and-sell app listing, a close-up of one detail")).toBe(true);
+    expect(sellingScreen("Bare hands holding a smartphone displaying an app listing screen, framed close.")).toBe(true);
+    expect(sellingScreen("a phone displaying an app listing with an editable price box")).toBe(true);
+    expect(sellingScreen("a smartphone on the workbench showing a listing screen with dimensions noted")).toBe(true);
+    expect(sellingScreen("a laptop showing the shop page listing the walnut board")).toBe(true);
+    expect(sellingScreen("a phone showing a coffee table listing on a marketplace")).toBe(true);
+  });
+
+  it("a marketplace search is still a page of things for sale (production job 244)", () => {
+    expect(
+      sellingScreen(
+        "phone search bar listing results of wooden dressers Phone screen showing a marketplace search results grid, listings of wooden dressers displayed in thumbnail photos."
+      )
+    ).toBe(true);
+    // A search with nothing for sale in it is not.
+    expect(sellingScreen("a laptop showing search results for flights home")).toBe(false);
+  });
+
+  it("a thing made FOR a device is no device", () => {
+    expect(namesDevice("a walnut phone stand ready for its listing photo")).toBe(false);
+    expect(showsScreen("a tablet holder and a computer desk photographed for an online listing")).toBe(false);
+    // The device itself, in its stand or charging, still is.
+    expect(showsScreen("a phone resting in a walnut phone stand, its screen showing a listing")).toBe(true);
+    expect(showsScreen("a phone charging on the counter, its screen showing a listing")).toBe(true);
+  });
+});
+
+describe("a picture shows WHO does WHAT, the STATE and the COUNT its line makes the point with (2026-10-18)", () => {
+  it("tells the line check those are WRONG when left out — keeping the planner's exceptions", async () => {
+    const { FIT_SYSTEM } = await import("./shotList");
+    // 218-113: "Put on gloves and a mask and open the window." planned as "host opening the bedroom
+    // window wide"; 292-163: "one box per cat plus one extra" planned as a single box.
+    expect(FIT_SYSTEM).toMatch(/still WRONG when it leaves out what the line makes its point with/);
+    expect(FIT_SYSTEM).toMatch(/WHO is doing WHAT/);
+    expect(FIT_SYSTEM).toMatch(/the STATE the line describes/);
+    expect(FIT_SYSTEM).toMatch(/COUNT the line makes the point of/);
+    // Never for: a comparison (rule 4), a bare number (rule 5), someone only mentioned (6a — 144-99's
+    // "they go to women setting up a kitchen" shows the cloths), a warning (6b — 153-296's soaked,
+    // wadded rags are shown spread out safely), or what the line says does not happen (148-313's
+    // "not one buyer ever asked", 293-34's "strangers aren't walking through your house").
+    expect(FIT_SYSTEM).toMatch(/a comparison that only says what\s+something costs or is like/);
+    expect(FIT_SYSTEM).toMatch(/a bare number, price or length of time/);
+    expect(FIT_SYSTEM).toMatch(/only sells to, tells, helps or mentions, who does nothing/);
+    expect(FIT_SYSTEM).toMatch(/show the safe way, never the danger/);
+    expect(FIT_SYSTEM).toMatch(/does NOT happen or is NOT there \(never draw it happening\)/);
+    // The person a rewrite adds is named, so it is never drawn as the host.
+    expect(FIT_SYSTEM).toMatch(/set other to who they are/);
+    expect(FIT_SYSTEM).toMatch(/"other":null/);
+    // No channel's own things in the wording.
+    expect(FIT_SYSTEM).not.toMatch(/padlock|bobbin|neighbor across|driveway|gloves and a mask|litter|\bcats?\b/i);
+  });
+
+  // Hank's job 171 scene 248: "That changes right here, and my neighbor across the street watched the
+  // whole thing from his driveway." planned as "an empty driveway across the street from the workshop".
+  const NEIGHBOUR_LINE =
+    "That changes right here, and my neighbor across the street watched the whole thing from his driveway.";
+
+  it("reads who the rewrite shows: a person, nobody (null), or no answer at all", async () => {
+    const { parsePictureFixes } = await import("./shotList");
+    const scenes = [
+      scene(1, NEIGHBOUR_LINE, { showSubject: "an empty driveway across the street from the workshop garage" }),
+      scene(2, "Then I swept up.", { showSubject: "a broom" }),
+      scene(3, "And it sold.", { showSubject: "a piece" }),
+    ];
+    const fixes = parsePictureFixes(
+      JSON.stringify({
+        pictures: [
+          {
+            id: 0,
+            about: "the neighbour watching",
+            shows_it: false,
+            show: "an older neighbour standing at the end of his driveway across the street, watching",
+            thing: null,
+            stage: null,
+            other: "an older neighbour",
+          },
+          { id: 1, about: "sweeping", shows_it: false, show: "the host's hands sweeping sawdust", other: null },
+          { id: 2, about: "the sale", shows_it: false, show: "the piece wrapped for a buyer" },
+        ],
+      }),
+      scenes
+    );
+    expect(fixes[0].other).toBe("an older neighbour");
+    expect(fixes[1].other).toBeNull();
+    expect("other" in fixes[2]).toBe(false);
+    // The host or the viewer is never "someone else".
+    const host = parsePictureFixes(
+      JSON.stringify({ pictures: [{ id: 0, about: "x", shows_it: false, show: "the host at the bench", other: "the host" }] }),
+      scenes
+    );
+    expect(host[0].other).toBeNull();
+  });
+
+  it("draws the person a rewrite adds as that person, never as the host", async () => {
+    const { applyPictureFixes } = await import("./shotList");
+    const { markHostBroll } = await import("./hostLook");
+    const scenes = [scene(1, NEIGHBOUR_LINE, { showSubject: "an empty driveway across the street from the workshop garage" })];
+    applyPictureFixes(
+      scenes,
+      [{ id: 0, show: "an older neighbour standing in the driveway across the street, watching", other: "an older neighbour" }],
+      undefined
+    );
+    expect(scenes[0].humanPresent).toBe(true);
+    expect(scenes[0].otherPerson).toBe("an older neighbour");
+    markHostBroll(scenes, { hostLook: "a grey-bearded man in a plaid shirt" }, "https://x/host.png");
+    expect(scenes[0].brollHostLook).toBeUndefined();
+    expect(scenes[0].brollHostRef).toBeUndefined();
+  });
+
+  it("an answer of nobody else clears the old person; no answer keeps it while someone is still there", async () => {
+    const { applyPictureFixes } = await import("./shotList");
+    const make = () => [
+      scene(1, "and buyers liked picking out their favorite.", {
+        showSubject: "a woman customer picking out her favorite holder at the table",
+        humanPresent: true,
+        otherPerson: "a woman customer",
+      }),
+    ];
+    const cleared = make();
+    applyPictureFixes(cleared, [{ id: 0, show: "the host's hands setting the holders out", other: null }], undefined);
+    expect(cleared[0].otherPerson).toBeUndefined();
+    expect(cleared[0].humanPresent).toBe(true); // the host's hands
+    const kept = make();
+    applyPictureFixes(kept, [{ id: 0, show: "a woman picking up one holder from the table" }], undefined);
+    expect(kept[0].otherPerson).toBe("a woman customer");
+    const nobody = make();
+    applyPictureFixes(nobody, [{ id: 0, show: "the holders laid out on the table" }], undefined);
+    expect(nobody[0].otherPerson).toBeUndefined();
+    expect(nobody[0].humanPresent).toBeUndefined();
+  });
+
+  it("a split's new picture takes only the person the check named, never the line's old one", async () => {
+    const { applyPictureSplits, parsePictureFixes } = await import("./shotList");
+    const line =
+      "My aunt picked one up at the table and turned it over, the kind of thing you see in an old farmhouse kitchen.";
+    const s = scene(1, line, {
+      showSubject: "an older aunt turning a bowl over at the table",
+      humanPresent: true,
+      otherPerson: "an older aunt",
+      wordCut: true,
+    });
+    const plain = applyPictureSplits([s], [{ id: 0, split: [{ from: "the kind of thing", show: "an old farmhouse kitchen" }] }], []);
+    expect(plain.split).toBe(1);
+    expect(plain.scenes[0].otherPerson).toBe("an older aunt");
+    expect(plain.scenes[1].otherPerson).toBeUndefined();
+    expect(plain.scenes[1].humanPresent).toBeUndefined();
+    const fixes = parsePictureFixes(
+      JSON.stringify({
+        pictures: [
+          {
+            id: 0,
+            about: "x",
+            shows_it: true,
+            split: [{ from: "the kind of thing", show: "a woman cooking in an old farmhouse kitchen", other: "a farm woman" }],
+          },
+        ],
+      }),
+      [s]
+    );
+    const named = applyPictureSplits([s], fixes, []);
+    expect(named.scenes[1].otherPerson).toBe("a farm woman");
+    expect(named.scenes[1].humanPresent).toBe(true);
+  });
+
+  it("a joined picture carries the person too", async () => {
+    const { applyPictureJoins } = await import("./shotList");
+    const pic = (index: number, scriptText: string, showSubject: string) =>
+      ({ index, scriptText, showSubject, visualPrompt: showSubject, wordCut: true, audioDuration: 3 }) as StoryboardScene;
+    const r = applyPictureJoins(
+      [pic(1, "My neighbor stopped by", "a porch"), pic(2, "to buy two of them.", "two bowls")],
+      [{ id: 1, join: true, show: "an older neighbour on the porch holding two bowls", other: "an older neighbour" }],
+      undefined,
+      s => s.audioDuration ?? 0,
+      () => 12
+    );
+    expect(r.joined).toBe(1);
+    expect(r.scenes[0].otherPerson).toBe("an older neighbour");
+    expect(r.scenes[0].humanPresent).toBe(true);
+  });
+});
+
+describe("a typed redo prompt owns the picture (job 383 scenes 20, 33 and 40)", () => {
+  const things = [
+    { name: "smoke alarm", look: "round white ceiling alarm", main: true as const },
+    { name: "smoke detector box", look: "small rectangular cardboard box" },
+  ];
+
+  it("reads what typed words say is NOT there as naming nothing", async () => {
+    const { withoutNegatedPhrases } = await import("./shotList");
+    expect(withoutNegatedPhrases("one round white smoke alarm on a counter, no box, no packaging")).toBe(
+      "one round white smoke alarm on a counter, ,"
+    );
+    expect(withoutNegatedPhrases("a pen over a blank sticky note… no writing of any kind anywhere")).toBe(
+      "a pen over a blank sticky note…"
+    );
+    expect(withoutNegatedPhrases("a jar without a lid and a spoon beside it")).toBe("a jar and a spoon beside it");
+    expect(withoutNegatedPhrases("it isn't plugged in, the cord coiled")).toBe("it , the cord coiled");
+    // A count stays.
+    expect(withoutNegatedPhrases("no more than three jars on the shelf")).toBe("no more than three jars on the shelf");
+  });
+
+  it("scene 20: the typed alarm replaces the planner's box — subject, key thing, soft print", async () => {
+    const { ownTypedPicture } = await import("./shotList");
+    const old = "close-up of the front label of a small rectangular cardboard smoke detector box held in one hand";
+    const s = scene(20, "First thing on the label.", {
+      showSubject: old,
+      visualPrompt: old,
+      keyThing: "smoke detector box",
+      buildStage: "done",
+      blurPrint: true,
+    });
+    const typed =
+      "A quick ordinary phone photo: one round white smoke alarm lying face up on a wooden kitchen counter in plain daylight, no box, no packaging";
+    expect(ownTypedPicture(s, typed, things)).toBe(true);
+    expect(s.showSubject).toBe(typed);
+    expect(s.keyThing).toBe("smoke alarm");
+    expect(s.otherKeyThings).toBeUndefined(); // "no box" names no box
+    expect(s.buildStage).toBeUndefined();
+    expect(s.blurPrint).toBeUndefined();
+  });
+
+  it("scene 40: a blank sticky note with 'no writing of any kind' keeps no soft print and no detector", async () => {
+    const { ownTypedPicture } = await import("./shotList");
+    const old = "detector back panel close up showing battery compartment and date area";
+    const s = scene(40, "That number surprises people more than anything else I've mentioned tonight. That's the job.", {
+      showSubject: old,
+      visualPrompt: old,
+      keyThing: "smoke alarm",
+      blurPrint: true,
+      pictureText: "10 years",
+      namedLook: "smoke alarm back panel: a round white plastic back with a battery door",
+      partOf: "smoke alarm",
+    });
+    ownTypedPicture(
+      s,
+      "his hand holding a pen over a small BLANK yellow sticky note on the counter, no writing of any kind anywhere",
+      things
+    );
+    expect(s.blurPrint).toBeUndefined();
+    expect(s.pictureText).toBeUndefined();
+    expect(s.keyThing).toBeUndefined();
+    expect(s.partOf).toBeUndefined();
+    expect(s.namedLook).toBeUndefined();
+  });
+
+  it("keeps what the typed words still name — the key thing, its stage, the said words", async () => {
+    const { ownTypedPicture } = await import("./shotList");
+    const s = scene(33, "At 10 years the unit is finished.", {
+      showSubject: "the date area on the back of the smoke alarm",
+      visualPrompt: "the date area on the back of the smoke alarm",
+      keyThing: "smoke alarm",
+      buildStage: "done",
+      pictureText: "10 years",
+    });
+    ownTypedPicture(s, "the back of the smoke alarm at arm's length, its label reading 10 years, soft", things);
+    expect(s.keyThing).toBe("smoke alarm");
+    expect(s.buildStage).toBe("done");
+    expect(s.pictureText).toBe("10 years");
+    expect(s.blurPrint).toBeUndefined(); // the words are said, so printed exactly
+  });
+
+  // Job 383 as it was stored: its real key things, lines, typed prompts and planner fields.
+  const STORED = [
+    { name: "smoke detector", look: "round white plastic disc", main: true as const },
+    { name: "smoke detector box", look: "small rectangular cardboard box with a printed label" },
+    { name: "detector back panel", look: "the disc turned over to show a battery compartment and date area" },
+  ];
+  const HOST_LOOK = "A sturdy man in his fifties with a short grey-flecked beard, in a navy crew-neck t-shirt";
+
+  it("stored scene 20: 'no hands, no readable writing' drops the planner's person and its words", async () => {
+    const { ownTypedPicture } = await import("./shotList");
+    const s = scene(20, "or dual sensor,", {
+      showSubject: "close-up of the front label of a small rectangular cardboard smoke detector box held in one hand",
+      visualPrompt: "close-up of the front label of a small rectangular cardboard smoke detector box held in one hand",
+      keyThing: "smoke detector box",
+      pictureText: "Dual Sensor",
+      humanPresent: true,
+      brollHostLook: HOST_LOOK,
+      listCut: true,
+    });
+    const typed =
+      "A quick ordinary phone photo: one round white smoke alarm lying face up on a wooden kitchen counter in plain " +
+      "daylight, a second small grey sensor window beside its vents, no box, no packaging, no hands, no readable " +
+      "writing anywhere";
+    expect(ownTypedPicture(s, typed, STORED)).toBe(true);
+    expect(s.showSubject).toBe(typed);
+    expect(s.keyThing).toBeUndefined(); // the box is said to be left out, and no other key thing is named
+    expect(s.pictureText).toBeUndefined(); // "no readable writing anywhere"
+    expect(s.blurPrint).toBeUndefined();
+    expect(s.humanPresent).toBeUndefined(); // "no hands": the host is not drawn into it
+  });
+
+  it("stored scene 40: the typed hand keeps the person; 'his face not shown' and 'no writing' name nothing", async () => {
+    const { ownTypedPicture } = await import("./shotList");
+    const s = scene(40, "That number surprises people more than anything else I've mentioned tonight. That's the job.", {
+      showSubject: "detector back panel turned over showing battery compartment and date area",
+      visualPrompt: "detector back panel turned over showing battery compartment and date area",
+      keyThing: "detector back panel",
+      blurPrint: true,
+      humanPresent: true,
+      brollHostLook: HOST_LOOK,
+    });
+    ownTypedPicture(
+      s,
+      "A quick ordinary phone photo taken from behind a man's shoulder at a kitchen table: his hand holding a pen " +
+        "over a small BLANK yellow sticky note, an old yellowed smoke alarm lying FACE UP beside it showing only its " +
+        "smooth vented front, his face not shown, plain daylight, no writing of any kind anywhere",
+      STORED
+    );
+    expect(s.humanPresent).toBe(true);
+    expect(s.brollHostLook).toBe(HOST_LOOK);
+    expect(s.keyThing).toBeUndefined();
+    expect(s.blurPrint).toBeUndefined();
+  });
+
+  it("stored scene 33: typed soft print on the back labels stays soft print; the part it no longer names goes", async () => {
+    const { ownTypedPicture } = await import("./shotList");
+    const s = scene(33, "At 10 years the unit is finished.", {
+      showSubject: "close-up of the printed date area on the flat gray back of a turned-over round white smoke detector",
+      visualPrompt: "close-up of the printed date area on the flat gray back of a turned-over round white smoke detector",
+      keyThing: "detector back panel",
+      otherKeyThings: ["smoke detector"],
+      partOf: "detector back panel",
+      blurPrint: true,
+    });
+    ownTypedPicture(
+      s,
+      "A quick ordinary phone photo from arm's length: two smoke alarms lying on a wooden workbench turned over to " +
+        "show their back panels, the left one old and yellow-brown with age, the right one clean and white and new; " +
+        "the small printing on both back labels soft, blurred and impossible to read, plain daylight, no hands",
+      STORED
+    );
+    expect(s.blurPrint).toBe(true);
+    expect(s.partOf).toBeUndefined();
+    expect(s.keyThing).toBeUndefined();
+    expect(s.otherKeyThings).toBeUndefined();
+    expect(s.humanPresent).toBeUndefined(); // there was none, and none is added
+  });
+
+  it("only words that really say nobody take the person out", async () => {
+    const { ownTypedPicture } = await import("./shotList");
+    const person = (typed: string) => {
+      const s = scene(1, "and I sanded it smooth.", {
+        showSubject: "the host's hands sanding a board",
+        visualPrompt: "the host's hands sanding a board",
+        humanPresent: true,
+        brollHostLook: HOST_LOOK,
+      });
+      ownTypedPicture(s, typed, undefined);
+      return s.humanPresent;
+    };
+    expect(person("a smooth maple board on the bench, nobody in the shot")).toBeUndefined();
+    expect(person("a smooth maple board on the bench without any people")).toBeUndefined();
+    // The typed words show a person themselves: kept.
+    expect(person("her hands sanding the board, no other people in the room")).toBe(true);
+    // "no one thing" is not "no one".
+    expect(person("a board where no one thing stands out")).toBe(true);
+    // Saying nothing about people leaves the picture's person as it was.
+    expect(person("a smooth maple board lying on the bench")).toBe(true);
+  });
+
+  it("a hyphened name is a kind of thing, never its absence", async () => {
+    const { ownTypedPicture, withoutNegatedPhrases } = await import("./shotList");
+    expect(withoutNegatedPhrases("a no-sew fleece blanket folded on the couch")).toBe(
+      "a no-sew fleece blanket folded on the couch"
+    );
+    expect(withoutNegatedPhrases("a never-ending scarf on a chair")).toBe("a never-ending scarf on a chair");
+    expect(withoutNegatedPhrases("a jar whose lid cannot close, on the shelf")).toBe("a jar whose lid , on the shelf");
+    const s = scene(5, "This no-sew blanket takes an afternoon.", {
+      showSubject: "the no-sew fleece blanket laid flat",
+      visualPrompt: "the no-sew fleece blanket laid flat",
+      keyThing: "no-sew fleece blanket",
+      namedLook: "no-sew fleece blanket: two layers of fleece knotted along every edge",
+    });
+    ownTypedPicture(s, "a no-sew fleece blanket folded over the arm of a couch", [
+      { name: "no-sew fleece blanket", look: "two layers of fleece knotted along every edge", main: true },
+    ]);
+    expect(s.keyThing).toBe("no-sew fleece blanket");
+    expect(s.namedLook).toBe("no-sew fleece blanket: two layers of fleece knotted along every edge");
+  });
+
+  it("a plain regenerate, which sends the picture's own prompt back, changes nothing", async () => {
+    const { ownTypedPicture } = await import("./shotList");
+    // Job 397 scene 14, "Coasters,": regenerated with the card's own prompt.
+    const s = scene(14, "Coasters,", {
+      showSubject: "round maple and walnut coasters stacked on the workbench",
+      visualPrompt: "Round maple and walnut coasters stacked in a neat pile on the workbench.",
+      keyThing: "coaster",
+    });
+    expect(
+      ownTypedPicture(s, "  Round maple and walnut coasters stacked in a neat pile on the workbench.  ", undefined)
+    ).toBe(false);
+    expect(s.showSubject).toBe("round maple and walnut coasters stacked on the workbench");
+    expect(s.keyThing).toBe("coaster");
+  });
+});
+
+describe("a general head before its examples is not a list item (job 400 at 0:47)", () => {
+  // "…usually in some ordinary place, a waiting room, a church pew, the kitchen table at two in the
+  // morning…": "some ordinary place" only says what kind of place the others are. It was item 1 — a
+  // picture of its own (a woman at a sink) and row 1 of the list graphic.
+  const LINE =
+    "Most people past sixty have — usually in silence, usually in some ordinary place, a waiting room, a church pew, the kitchen table at two in the morning when the house is too quiet.";
+
+  it("knows a head from a thing", async () => {
+    const { generalHead } = await import("./shotList");
+    for (const t of [
+      "some ordinary place,",
+      "Somewhere",
+      "something small",
+      "someone you trust",
+      "any old thing",
+      "some other way",
+      "a certain kind of wood",
+      "any sort of place",
+      "everything",
+    ])
+      expect([t, generalHead(t)]).toEqual([t, true]);
+    for (const t of [
+      "some glue",
+      "some scrap pine",
+      "some kind of glue", // "some kind of glue, a clamp, and a rag" is three things to get
+      "somebody's barn",
+      "anybody with a porch", // job 110: "…to anybody with a porch, a patio, or a houseplant habit"
+      "a quiet place",
+      "the kitchen table",
+      "some people",
+      "a waiting room",
+    ])
+      expect([t, generalHead(t)]).toEqual([t, false]);
+  });
+
+  it("drops the head only in front of two or more examples, never when the next item is a head too", async () => {
+    const { withoutGeneralHead, ledByGeneralHead } = await import("./shotList");
+    expect(withoutGeneralHead(["some ordinary place", "a waiting room", "a church pew"])).toEqual(["a waiting room", "a church pew"]);
+    const one = ["some quiet spot", "a porch"];
+    expect(withoutGeneralHead(one)).toBe(one);
+    expect(ledByGeneralHead(one)).toBe(true);
+    const three = ["Something sweet", "something salty", "something to drink"];
+    expect(withoutGeneralHead(three)).toBe(three);
+    const things = ["a saw", "a drill", "something to clamp it with"];
+    expect(withoutGeneralHead(things)).toBe(things);
+  });
+
+  it("a host line of a head and its examples is a list of the examples", async () => {
+    const { spokenListItems } = await import("./shotList");
+    expect(spokenListItems("Some ordinary place, a waiting room, a church pew.")).toEqual(["a waiting room", "a church pew"]);
+    expect(spokenListItems("Some quiet spot, a porch swing.")).toBeNull();
+    // A real thing first stays an item.
+    expect(spokenListItems("Some glue, a clamp, and a rag.")).toEqual(["Some glue", "a clamp", "a rag"]);
+  });
+
+  it("a picture of the head and its examples is cut per example, the head leading the first", async () => {
+    const { splitListPieces } = await import("./shotList");
+    const split = splitListPieces([scene(8, "some ordinary place, a waiting room, a church pew,", { showSubject: "quiet places" })]);
+    expect(split.map(s => [s.scriptText, s.showSubject, !!s.listCut])).toEqual([
+      ["some ordinary place, a waiting room,", "a waiting room", true],
+      ["a church pew,", "a church pew", true],
+    ]);
+    // A head with one example is no list: the picture is left whole.
+    const one = scene(8, "some quiet spot, a porch swing,", { showSubject: "a porch swing" });
+    expect(splitListPieces([one])).toEqual([one]);
+    // Unchanged: a real first thing is its own picture.
+    expect(splitListPieces([scene(3, "some glue, a clamp, a rag,", { showSubject: "shop things" })]).map(s => s.scriptText)).toEqual([
+      "some glue,",
+      "a clamp,",
+      "a rag,",
+    ]);
+  });
+
+  it("the shot list's own cut never marks the head a list item", () => {
+    const b = scene(7, LINE);
+    const { scenes } = applyShotPlan(
+      [b],
+      [
+        {
+          scene: 7,
+          shots: [
+            { from: "Most people past sixty", show: "an older man alone on a chair against a pale wall" },
+            { from: "some ordinary place", show: "a woman at a sink by a window" },
+            { from: "a waiting room", show: "a row of waiting room chairs" },
+            { from: "a church pew", show: "a church pew seen from the side" },
+            { from: "the kitchen table", show: "a kitchen table at night" },
+          ],
+        },
+      ]
+    );
+    expect(scenes.map(s => [s.scriptText, !!s.listCut])).toEqual([
+      ["Most people past sixty have — usually in silence, usually in", false],
+      ["some ordinary place,", false],
+      ["a waiting room,", true],
+      ["a church pew,", true],
+      ["the kitchen table at two in the morning when the house is too quiet.", false],
+    ]);
+  });
+});
+
+describe("describing words in front of ONE thing are never list items (job 400 at 1:41)", () => {
+  // "Two thousand years ago, a man named Lucius Annaeus Seneca wrote a short, furious, loving essay to
+  // a man named Paulinus…" was cut "Two thousand years ago," / "…wrote a short," / "furious," — three
+  // pictures and a list graphic for one essay.
+  const ESSAY =
+    "Two thousand years ago, a man named Lucius Annaeus Seneca wrote a short, furious, loving essay to a man named Paulinus, the official in charge of Rome’s grain supply — busy, important, and worn down to the rims.";
+
+  it("one describing word, and a time a sentence opens on, name nothing", async () => {
+    const { notAThing } = await import("./shotList");
+    for (const [t, why] of [
+      ["furious,", "a describing word"], // job 400
+      ["busy,", "a describing word"], // job 400: "— busy, important, and worn down to the rims"
+      ["important,", "a describing word"],
+      ["coziest", "a describing word"],
+      ["and careless", "a describing word"],
+      ["Two thousand years ago,", "a length of time"], // job 400
+      ["Years ago,", "a length of time"],
+      ["a century ago", "a length of time"],
+      ["months later", "a length of time"],
+      ["Long ago,", "a time"],
+      ["that night,", "a time"],
+      ["the next morning", "a time"],
+      ["last summer", "a time"],
+      ["back in 1850", "a time"],
+      ["ago", "a time"],
+    ])
+      expect([t, notAThing(t)]).toEqual([t, why]);
+    // Things stay things: a material, a food, a stage of making (jobs 159/174/178), an amount, a word
+    // that is as often a thing ("cooler", "light"), a colour, and a thing with its own describing word.
+    for (const t of ["oak", "flour", "quilted", "bound", "handful", "cooler", "light", "Ivory", "forest", "harvest", "a short", "a warm coral", "a night out", "a weekend bag", "this spring", "a second bag of pretzels", "back"])
+      expect([t, notAThing(t)]).toEqual([t, null]);
+  });
+
+  it("finds the commas inside a run of describing words, and only those", async () => {
+    const { seriesCommas } = await import("./shotList");
+    const at = (s: string) => Array.from(seriesCommas(s)).map(c => s.slice(0, c).split(/\s+/).pop());
+    expect(at(ESSAY)).toEqual(["short", "furious"]);
+    expect(at("The tea tray, a plain, low serving tray, and it only moved up this list once I started putting names on it.")).toEqual(["plain"]); // Hank's script
+    expect(at("It sells for $120 to $170, mostly to folks who want a real, honest quilt without paying heirloom prices.")).toEqual(["real"]); // Ruth's
+    // More from the practice scripts, and a degree word or a describing word of the run itself.
+    for (const [s, want] of [
+      ["a solid, matte, uniform shade", ["solid", "matte"]],
+      ["my two biggest, coziest things", ["biggest"]],
+      ["the slow, smoldering fire", ["slow"]],
+      ["a long, wet night", ["long"]],
+      ["a really long, very slow walk", ["long"]],
+      ["a nice, pretty, little house", ["nice", "pretty"]],
+    ] as [string, string[]][])
+      expect([s, at(s)]).toEqual([s, want]);
+    // Lists of things, and words that only look like the start of a run.
+    for (const s of [
+      "standing in a garage with a saw, a drill, and a stack of sandpaper,",
+      "You need a hammer, nails, and wood glue.",
+      "The batting, backing, and thread run about $28",
+      "Matte black, dull tarnish, heavy dark wood, all of those take it away.",
+      "Bring something warm, dry socks, and a hat.",
+      "Simple, warm, and impossible to argue with.",
+      "One short, check the other end.",
+    ])
+      expect([s, at(s)]).toEqual([s, []]);
+  });
+
+  it("a piece that is one describing word is no bare list item; 'flour,' still is", async () => {
+    const { looksLikeBareListItem } = await import("./shotList");
+    expect(looksLikeBareListItem("furious,")).toBe(false);
+    expect(looksLikeBareListItem("Years ago,")).toBe(false);
+    expect(looksLikeBareListItem("flour,")).toBe(true);
+    expect(looksLikeBareListItem("and wood glue.")).toBe(true);
+  });
+
+  it("a picture of one described thing is never split into items; 'a saw, a drill,' still is", async () => {
+    const { splitListPieces } = await import("./shotList");
+    const essay = scene(22, "a short, heartfelt, loving essay", { showSubject: "an essay on a desk" });
+    expect(splitListPieces([essay])).toEqual([essay]);
+    expect(splitListPieces([scene(3, "a saw, a drill,", { showSubject: "tools on the workbench" })]).map(s => s.scriptText)).toEqual(["a saw,", "a drill,"]);
+  });
+
+  it("pieces cut at those commas are never marked as list items; a real run still is", async () => {
+    const { markListPieces } = await import("./shotList");
+    const cut = [
+      scene(1, "a man wrote a short,", { shotGroup: 1 }),
+      scene(2, "heartfelt,", { shotGroup: 1 }),
+      scene(3, "loving essay to his friend.", { shotGroup: 1 }),
+    ];
+    expect(markListPieces(cut)).toBe(0);
+    expect(cut.map(s => !!s.listCut)).toEqual([false, false, false]);
+    const tools = [scene(1, "a saw,", { shotGroup: 2 }), scene(2, "a drill,", { shotGroup: 2 }), scene(3, "and a plane.", { shotGroup: 2 })];
+    expect(markListPieces(tools)).toBe(3);
+  });
+});
+
+describe("a run of describing words starts only where one can (review of job 400's describing-run rule)", () => {
+  const at = async (s: string) => {
+    const { seriesCommas } = await import("./shotList");
+    return Array.from(seriesCommas(s)).map(c => s.slice(0, c).split(/\s+/).pop());
+  };
+
+  it("never after a verb: the words say what something IS, and the comma separates nothing", async () => {
+    // Job 400's own script, and another practice script: "too" after "is" read as "a REALLY long, …".
+    for (const s of [
+      "Everyone complains that life is too short, Seneca says.",
+      "The title says lost, which is too strong, since folk schools still teach plenty of these.",
+      "That's too short, my doctor says.",
+      "It's simple, folks tell me.",
+    ])
+      expect([s, await at(s)]).toEqual([s, []]);
+    // A degree word that itself stands where a run may start still leads one.
+    expect(await at("a really long, very slow walk")).toEqual(["long"]);
+    expect(await at("Very long, dull meetings wear everyone out.")).toEqual(["long"]);
+    expect(await at("Grandma's old, worn quilt")).toEqual(["old"]);
+  });
+
+  it("a describing word that is a whole piece starts the next thing; one after 'and' never continues a run", async () => {
+    // "and warm," used to be pulled into a run starting at "blanket", which joined the blanket and the
+    // socks into one item and lost a list of three.
+    expect(await at("Pack a flashlight, a blanket, and warm, dry socks.")).toEqual(["warm"]);
+    expect(await at("They hewed green, right after felling, and tall, straight tulip poplar was a favorite.")).toEqual(["tall"]); // a practice script
+    expect(await at("A big, heavy, and sturdy table")).toEqual(["big", "heavy"]);
+    // Still no run where nothing describes ("Pilot holes, long screws, snug." / "busy, important, and worn down").
+    expect(await at("Pilot holes, long screws, snug.")).toEqual([]);
+    expect(await at("the official in charge of the grain supply — busy, important, and worn down to the rims.")).toEqual([]);
+  });
+
+  it("a thing ending in -ous is still a thing", async () => {
+    const { describingWord, notAThing } = await import("./shotList");
+    for (const w of ["couscous", "rendezvous", "bayous"]) {
+      expect([w, describingWord(w)]).toEqual([w, false]);
+      expect([w, notAThing(w)]).toEqual([w, null]);
+    }
+    expect(describingWord("furious")).toBe(true);
+    expect(describingWord("generous")).toBe(true);
+  });
+});
+
+describe("a picture that repeats the words before it gets its own view past the limit (job 399 scenes 20-21)", () => {
+  // Job 399 (a 202.5 s film): the planner wrote the identical shot for two storyboard beats of one
+  // sentence, unmarked. 11.7 s + 6.3 s at 1:36 is past the second quarter's 15 s, so they could not
+  // join — and with no view of its own the second went to the picture model with the same words and
+  // came back a tighter crop of the first: the same bag on screen for 18 s.
+  const BAG = "several closed small liquor bottles tucked inside an open carry-on bag on a seat";
+  const BAG_PROMPT = "Several unopened small liquor bottles tucked inside an open carry-on bag placed on an aircraft seat.";
+  const CLOSE = ", a close-up of one detail of it filling the frame";
+  const FILM_SEC = 202.47;
+  const film = () => [
+    scene(19, "One more thing about drinks, because it catches good people off guard.", {
+      wordCut: true,
+      hostPresent: true,
+      showSubject: "a small liquor bottle standing closed on the beverage cart tray",
+      splitVisual: "A small unopened liquor bottle standing on the galley beverage cart during flight service.",
+      keyThing: "small liquor bottle",
+      audioDuration: 4.1519,
+    }),
+    scene(
+      20,
+      "On a U. S. airline, the only alcohol you're allowed to drink is alcohol the airline serves you, so the little bottles tucked in your carry-on stay closed. That's in the federal aviation rules,",
+      { wordCut: true, showSubject: BAG, visualPrompt: BAG_PROMPT, keyThing: "small liquor bottle", audioDuration: 11.6667 }
+    ),
+    scene(21, "section one twenty-one point five seventy-five, and it doesn't care how good your intentions were.", {
+      wordCut: true,
+      showSubject: BAG,
+      visualPrompt: BAG_PROMPT,
+      keyThing: "small liquor bottle",
+      audioDuration: 6.332,
+    }),
+    scene(
+      22,
+      "That takes care of your thirst. Now for the rumble that shows up somewhere over the middle of the country.",
+      {
+        wordCut: true,
+        showSubject: "the pretzel basket sitting on the beverage cart in the cabin aisle",
+        keyThing: "pretzel basket",
+        audioDuration: 13.821,
+      }
+    ),
+  ];
+  const START: Record<number, number> = { 19: 92.12, 20: 96.27, 21: 107.94, 22: 114.27 };
+  const limit = (s: StoryboardScene) => pictureMaxSecAt(START[s.index] ?? 0, FILM_SEC);
+
+  it("gives the later picture the next view when the two cannot join", () => {
+    expect(limit(film()[1])).toBeCloseTo(15);
+    const r = joinSameContext(film(), s => s.audioDuration ?? 0, limit);
+    expect(r.changed).toBe(true);
+    expect(r.scenes).toHaveLength(4);
+    expect(r.scenes[1].showSubject).toBe(BAG); // the first keeps its look
+    expect(r.scenes[1].visualPrompt).toBe(BAG_PROMPT);
+    expect(r.scenes[2].showSubject).toBe(`${BAG}${CLOSE}`);
+    expect(r.scenes[2].visualPrompt).toBe(`${BAG_PROMPT.replace(/\.$/, "")}${CLOSE}`);
+    // The next topic and the split are left alone.
+    expect(r.scenes[3].showSubject).toBe("the pretzel basket sitting on the beverage cart in the cabin aisle");
+    expect(r.scenes[0].showSubject).toBe("a small liquor bottle standing closed on the beverage cart tray");
+  });
+
+  it("does nothing more on the pipeline's next pass", () => {
+    const r = joinSameContext(film(), s => s.audioDuration ?? 0, limit);
+    const again = joinSameContext(r.scenes, s => s.audioDuration ?? 0, limit);
+    expect(again.changed).toBe(false);
+    expect(again.scenes.map(s => s.showSubject)).toEqual(r.scenes.map(s => s.showSubject));
+  });
+
+  it("still plays the same pair as ONE picture when it fits the limit", () => {
+    // Later in a film the limit is 18 s: 11.7 + 6.3 fits, so the line keeps the first picture.
+    const r = joinSameContext(film(), s => s.audioDuration ?? 0, () => 18);
+    expect(r.scenes).toHaveLength(3);
+    expect(r.scenes[1].showSubject).toBe(BAG);
+    expect(r.scenes[1].scriptText).toContain("good your intentions were.");
+  });
+
+  it("a third repeat takes the view after the second's, never back to the first's", () => {
+    const three = [20, 21, 22].map(i =>
+      scene(i, `line ${i}`, { wordCut: true, showSubject: BAG, visualPrompt: BAG_PROMPT, audioDuration: 7 })
+    );
+    const r = joinSameContext(three, s => s.audioDuration ?? 0, () => 10.5);
+    expect(r.scenes.map(s => s.showSubject)).toEqual([
+      BAG,
+      `${BAG}${CLOSE}`,
+      `${BAG}, seen from much further back with the whole place around it`,
+    ]);
+  });
+
+  it("words that already repeat a view are moved to the next one", () => {
+    const both = [20, 21].map(i => scene(i, `line ${i}`, { wordCut: true, showSubject: `${BAG}${CLOSE}`, audioDuration: 9 }));
+    const r = joinSameContext(both, s => s.audioDuration ?? 0, () => 10.5);
+    expect(r.scenes[0].showSubject).toBe(`${BAG}${CLOSE}`);
+    expect(r.scenes[1].showSubject).toBe(`${BAG}, seen from much further back with the whole place around it`);
+  });
+
+  it("leaves alone a picture with its own words, its own view, or beside a split", () => {
+    // Different words past the limit: two pictures already.
+    const other = film();
+    other[2].showSubject = "a printed page of aviation rules beside a closed carry-on bag";
+    const r1 = joinSameContext(other, s => s.audioDuration ?? 0, limit);
+    expect(r1.changed).toBe(false);
+    expect(r1.scenes[2].showSubject).toBe("a printed page of aviation rules beside a closed carry-on bag");
+    // A view of its own already (a split topic's later part): not touched again.
+    const viewed = film();
+    viewed[2].showSubject = `${BAG}, seen from the other side`;
+    const r2 = joinSameContext(viewed, s => s.audioDuration ?? 0, limit);
+    expect(r2.scenes[2].showSubject).toBe(`${BAG}, seen from the other side`);
+    // The same words as a split host beat: the split is never joined and its panel is drawn from its
+    // own description, so the picture after it keeps its words.
+    const besideSplit = film();
+    besideSplit[1].showSubject = besideSplit[0].showSubject;
+    const r3 = joinSameContext(besideSplit, s => s.audioDuration ?? 0, limit);
+    expect(r3.scenes[1].showSubject).toBe("a small liquor bottle standing closed on the beverage cart tray");
+  });
+});
+
+describe("a picture that already has a view, split in two, never says that view twice (job 341 scenes 3-4)", () => {
+  // Job 341: the join gave the cutting board's continuation "a close-up" (scene 2 was the board, plain),
+  // then the plan gate split that 12.2 s picture in two — and the second part came back with the SAME
+  // words, "…unsold, a close-up of one detail of it filling the frame", drawn as one photo twice.
+  // Jobs 302, 307, 310 and 352 each shipped the same pair. The parts count on from the picture's view.
+  const CLOSE = ", a close-up of one detail of it filling the frame";
+  const BACK = ", seen from much further back with the whole place around it";
+  const SIDE = ", seen from the other side";
+  const BOARD = "two-tone walnut and maple cutting board leaning against the garage wall, unsold";
+  const LINE =
+    "That happens to everybody who sells what they build, and it's fixable, because the board usually isn't the problem. The place you tried to sell it just wasn't built for that piece. Today I'm ranking";
+  const board = (showSubject: string) =>
+    scene(3, LINE, {
+      wordCut: true,
+      showSubject,
+      visualPrompt: "Close-up of the smooth oiled surface of a two-tone walnut and maple cutting board.",
+      keyThing: "walnut and maple cutting board",
+    });
+
+  it("gives the second part the view AFTER the picture's own", () => {
+    const parts = splitPicture(board(`${BOARD}${CLOSE}`), 2);
+    expect(parts).toHaveLength(2);
+    expect(parts[0].showSubject).toBe(`${BOARD}${CLOSE}`); // the first part keeps the picture
+    expect(parts[0].visualPrompt).toBe("Close-up of the smooth oiled surface of a two-tone walnut and maple cutting board.");
+    expect(parts[1].showSubject).toBe(`${BOARD}${BACK}`);
+    expect(parts[1].visualPrompt).toBe(`${BOARD}${BACK}`);
+  });
+
+  it("keeps rotating over three parts, and wraps from the last view to the first", () => {
+    const three = splitPicture(board(`${BOARD}${CLOSE}`), 3).map(p => p.showSubject);
+    expect(three).toEqual([`${BOARD}${CLOSE}`, `${BOARD}${BACK}`, `${BOARD}${SIDE}`]);
+    const fromSide = splitPicture(board(`${BOARD}${SIDE}`), 2).map(p => p.showSubject);
+    expect(fromSide).toEqual([`${BOARD}${SIDE}`, `${BOARD}${CLOSE}`]);
+    // A trailing full stop on the view is still read as that view.
+    expect(splitPicture(board(`${BOARD}${CLOSE}.`), 2)[1].showSubject).toBe(`${BOARD}${BACK}`);
+  });
+
+  it("a picture with no view of its own splits exactly as before", () => {
+    const plain = splitPicture(board(BOARD), 4).map(p => p.showSubject);
+    expect(plain).toEqual([BOARD, `${BOARD}${CLOSE}`, `${BOARD}${BACK}`, `${BOARD}${SIDE}`]);
+    // Only the description's END names its view: "a close-up" inside the words is not one.
+    const inside = "a close-up of the board's oiled edge on the garage shelf";
+    expect(splitPicture(board(inside), 2)[1].showSubject).toBe(`${inside}${CLOSE}`);
+  });
+
+  it("no two neighbouring parts ever share their words", () => {
+    for (const own of ["", CLOSE, BACK, SIDE])
+      for (const n of [2, 3, 4]) {
+        const words = splitPicture(board(`${BOARD}${own}`), n).map(p => p.showSubject);
+        for (let k = 1; k < words.length; k++) expect(words[k]).not.toBe(words[k - 1]);
+      }
   });
 });

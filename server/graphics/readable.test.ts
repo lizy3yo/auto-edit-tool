@@ -1,0 +1,312 @@
+import { describe, expect, it, vi } from "vitest";
+import type { ResolvedCue } from "../../graphics/src/cueResolve";
+import type { Place } from "../../graphics/src/components";
+import { MIN_COLOUR, MIN_WHITE } from "../../graphics/src/legibility";
+import { themeFor } from "../../graphics/src/palette";
+
+/**
+ * The readability fixes (G2). Hank's job 390 left out its "6 hours" number over dimmed b-roll as
+ * "text not readable on the picture (colour 4.0:1)" after every fix: a number over the picture
+ * cannot move, so nothing was left to try. The last fix draws its coloured words in the plain text
+ * colour, judged like any white words, and never touches when the graphic shows.
+ */
+
+// Small frames, served by name: the film under the graphic and each drawing of it.
+const W = 200, H = 100;
+const frames = new Map<string, Uint8Array>();
+vi.mock("./media", () => ({
+  FRAME_W: 200,
+  FRAME_H: 100,
+  grabFrame: vi.fn(async (file: string) => {
+    const f = frames.get(file);
+    if (!f) throw new Error(`no frame for ${file}`);
+    return f;
+  }),
+}));
+
+const { makeReadable, measureCue, placeAndRead, plainInkMayHelp, describe: describeReading } = await import("./readable");
+type PlaceIo = import("./readable").PlaceIo;
+type ReadableIo = import("./readable").ReadableIo;
+type Reading = import("./readable").Reading;
+
+// Job 390's theme (from its host photo) and its left-out graphic, as the plan had it.
+const theme = { bg: "#221710", accent: "#eb9046" };
+const lattice = (over: Partial<ResolvedCue> = {}): ResolvedCue => ({
+  id: "lattice-six-hours",
+  template: "BigNumberOverlay",
+  start: 19.4,
+  end: 22.6,
+  startFrame: 582,
+  endFrame: 678,
+  props: { durationSec: 3.2, kicker: "Lattice panel", value: 6, unit: "hours", at: 0.9, countSec: 0.6, theme },
+  sync: [{ element: "value", word: "6", wordStart: 20.3 }],
+  conformed: { start: false, end: true, held: true },
+  ...over,
+});
+const timing = (c: ResolvedCue) => ({ start: c.start, end: c.end, startFrame: c.startFrame, endFrame: c.endFrame, conformed: c.conformed, sync: c.sync });
+const box = { x0: 160, y0: 170, x1: 900, y1: 640 };
+
+/** A fake finishing step: every drawing is a new file, each measured by `read` from its props. */
+function fakeIo(read: (p: Record<string, unknown>) => Reading) {
+  const drawn: Record<string, unknown>[] = [];
+  const measured: Record<string, unknown>[] = [];
+  const io: ReadableIo = {
+    render: async c => {
+      drawn.push({ ...c.props });
+      return `gfx-${drawn.length}.mov`;
+    },
+    measure: async c => {
+      measured.push({ ...c.props });
+      return read(c.props);
+    },
+    calmest: async () => ({ h: "right", v: "top" }),
+  };
+  return { io, drawn, measured };
+}
+
+/** Job 390's readings: every fix short of the coloured words' minimum, the best "colour 4.0:1". */
+const job390 = (plain: Reading) => (p: Record<string, unknown>): Reading =>
+  p.plain === true ? plain : { colour: p.lift ? 4.0 : p.shade === 1 ? 3.6 : p.shade === 0.5 ? 3.4 : 3.1, pass: false, box };
+
+describe("the last readability fix: the coloured words in the plain text colour", () => {
+  it("job 390: tried after every other fix, on the most readable drawing, and kept when it reads", async () => {
+    const c = lattice();
+    const before = timing(c);
+    const { io, drawn } = fakeIo(job390({ white: 9.1, pass: true, box }));
+    const attempts: string[] = [];
+    const made = await makeReadable(c, false, "gfx-designed.mov", io, attempts);
+    expect(made.r.pass).toBe(true);
+    expect(made.file).toBe("gfx-4.mov");
+    expect(made.steps).toEqual([
+      "as designed: colour 3.1:1",
+      "darker behind the words (0.5): colour 3.4:1",
+      "darker behind the words (1): colour 3.6:1",
+      "lighter shade of the coloured words: colour 4.0:1",
+      "coloured words in the plain text colour: white 9.1:1",
+    ]);
+    // Built on the best drawing so far (darkest, lifted), with only the ink changed.
+    expect(drawn[3]).toMatchObject({ shade: 1, lift: 1, plain: true });
+    expect(c.props).toMatchObject({ shade: 1, lift: 1, plain: true, value: 6, unit: "hours", kicker: "Lattice panel" });
+    // WHEN it shows is untouched, so no other graphic's timing (or drawing) changes.
+    expect(timing(c)).toEqual(before);
+    expect(attempts).toEqual(["gfx-1.mov", "gfx-2.mov", "gfx-3.mov", "gfx-4.mov"]);
+  });
+
+  it("job 390: still unreadable in the plain colour, it is left out as before", async () => {
+    const c = lattice();
+    const { io, drawn } = fakeIo(job390({ white: 5.8, pass: false, box }));
+    const made = await makeReadable(c, false, "gfx-designed.mov", io, []);
+    expect(made.r.pass).toBe(false);
+    expect(drawn).toHaveLength(4);
+    // The best attempt is what the left-out reason names (the lifted colour scored higher here).
+    expect(describeReading(made.r)).toBe("colour 4.0:1");
+    expect(c.props.plain).toBeUndefined();
+  });
+
+  it("is not drawn when the white words already fail there (the plain colour would too)", async () => {
+    const c = lattice();
+    const { io, drawn } = fakeIo(() => ({ white: 5.2, colour: 4.0, pass: false, box }));
+    const made = await makeReadable(c, false, "gfx-designed.mov", io, []);
+    expect(made.r.pass).toBe(false);
+    expect(drawn.some(p => p.plain)).toBe(false);
+    expect(made.steps.at(-1)).toBe("lighter shade of the coloured words: white 5.2:1, colour 4.0:1");
+  });
+
+  it("is not drawn for a graphic that reads, or one with no coloured words failing", async () => {
+    const reads = lattice();
+    const a = fakeIo(p => (p.shade === 0.5 ? { white: 8.2, colour: 5.1, pass: true, box } : { colour: 3.9, pass: false, box }));
+    const ok = await makeReadable(reads, false, "gfx-designed.mov", a.io, []);
+    expect(ok.r.pass).toBe(true);
+    expect(a.drawn).toEqual([expect.objectContaining({ shade: 0.5 })]);
+    expect(reads.props.plain).toBeUndefined();
+
+    const whiteOnly = lattice({ id: "white-only", template: "HostCaption" });
+    const b = fakeIo(() => ({ white: 6.1, pass: false, box }));
+    await makeReadable(whiteOnly, false, "gfx-designed.mov", b.io, []);
+    expect(b.drawn.some(p => p.plain)).toBe(false);
+  });
+
+  it("a movable graphic is moved first; the plain colour builds on the best drawing, not a worse move", async () => {
+    const c = lattice({ id: "caption", template: "DimCaption" });
+    const { io, drawn } = fakeIo(p =>
+      p.plain === true ? { white: 7.6, pass: true, box } : p.place ? { colour: 2.0, pass: false, box } : { colour: p.lift ? 4.2 : 3.9, pass: false, box }
+    );
+    const made = await makeReadable(c, true, "gfx-designed.mov", io, []);
+    expect(made.steps.map(s => s.split(":")[0])).toEqual([
+      "as designed",
+      "darker behind the words (0.5)",
+      "darker behind the words (1)",
+      "lighter shade of the coloured words",
+      "moved to the calmest part of the picture",
+      "coloured words in the plain text colour",
+    ]);
+    expect(drawn.at(-1)).toMatchObject({ shade: 1, lift: 1, plain: true });
+    expect(drawn.at(-1)!.place).toBeUndefined();
+    expect(made.r.pass).toBe(true);
+  });
+
+  it("plainInkMayHelp: only when the coloured words fail and the white words (if any) read", () => {
+    expect(plainInkMayHelp({ colour: 4.0, pass: false })).toBe(true); // job 390's left-out reading
+    expect(plainInkMayHelp({ colour: 4.0, white: MIN_WHITE, pass: false })).toBe(true);
+    expect(plainInkMayHelp({ colour: 4.0, white: 5.2, pass: false })).toBe(false);
+    expect(plainInkMayHelp({ white: 6.1, pass: false })).toBe(false);
+    expect(plainInkMayHelp({ colour: MIN_COLOUR, pass: true })).toBe(false);
+  });
+});
+
+describe("the plain colour is judged as white words", () => {
+  const rgb = (h: string) => [1, 3, 5].map(k => parseInt(h.slice(k, k + 2), 16));
+  /** The graphic as the template draws it with these props: a bar of its accent on the dim ground. */
+  const drawing = (props: Record<string, unknown>, scrim = 0.6) => {
+    const g = new Uint8Array(W * H * 4);
+    for (let i = 0; i < W * H; i++) g.set([5, 10, 18, Math.round(scrim * 255)], i * 4);
+    const ink = rgb(themeFor(props).accent);
+    for (let y = 40; y < 60; y++) for (let x = 40; x < 160; x++) g.set([...ink, 255], (y * W + x) * 4);
+    return g;
+  };
+  const measureOn = async (picture: number, props: Record<string, unknown>) => {
+    const cue = lattice();
+    cue.props = { ...cue.props, ...props };
+    frames.set("film.mp4", new Uint8Array(W * H * 3).fill(picture));
+    frames.set("gfx.mov", drawing(cue.props));
+    return measureCue("film.mp4", "gfx.mov", cue, []);
+  };
+
+  it("the same number, lifted orange under the minimum, reads in white on the same picture", async () => {
+    const lifted = await measureOn(200, { lift: 1 });
+    expect(lifted.white).toBeUndefined();
+    expect(lifted.colour!).toBeLessThan(MIN_COLOUR);
+    const plain = await measureOn(200, { lift: 1, plain: true });
+    expect(plain.colour).toBeUndefined();
+    expect(plain.white!).toBeGreaterThanOrEqual(MIN_WHITE);
+    expect(plain.pass).toBe(true);
+  });
+
+  it("held to the white minimum, it cannot overreach: on a brighter picture it still fails", async () => {
+    const plain = await measureOn(240, { lift: 1, plain: true });
+    expect(plain.white!).toBeLessThan(MIN_WHITE);
+    expect(plain.pass).toBe(false);
+  });
+});
+
+describe("a graphic with places of its own goes clear of the picture's subject, and still reads (round 14)", () => {
+  // Job 413's price pair (2:02-2:05) sat bottom-left on the phone whose listing it priced; clear of
+  // the subject it goes bottom-right, on the shirt beside the phone.
+  const pair = (): ResolvedCue => ({
+    id: "marketplace-price-range",
+    template: "NumberLabel",
+    start: 121.967,
+    end: 124.867,
+    startFrame: 3659,
+    endFrame: 3746,
+    props: { durationSec: 2.9, kicker: "Listed on Marketplace", a: { label: "From", value: "$25", at: 0.83 }, b: { label: "To", value: "$75", at: 1.35 }, theme },
+    sync: [],
+    conformed: { start: false, end: true },
+  });
+  const choice = (moved: boolean) => ({
+    place: moved ? ({ h: "right", v: "bottom" } as const) : ({ h: "left", v: "bottom" } as const),
+    from: { h: "left", v: "bottom" } as const,
+    moved,
+    scores: [
+      { place: { h: "left", v: "bottom" } as const, on: 0.317 },
+      { place: { h: "right", v: "bottom" } as const, on: 0.113 },
+    ],
+  });
+  const placeIo = (read: (p: Record<string, unknown>) => Reading, clear: PlaceIo["clear"]) => {
+    const { io, drawn } = fakeIo(read);
+    return { io: { ...io, clear } as PlaceIo, drawn };
+  };
+
+  it("moved to the corner clear of the phone, drawn and judged there", async () => {
+    const c = pair();
+    const before = timing(c);
+    const { io, drawn } = placeIo(() => ({ white: 12.4, pass: true, box }), async () => choice(true));
+    const attempts: string[] = [];
+    const made = await placeAndRead(c, false, "gfx-designed.mov", io, attempts);
+    expect(made.r.pass).toBe(true);
+    expect(made.file).toBe("gfx-1.mov");
+    expect(drawn).toEqual([expect.objectContaining({ place: { h: "right", v: "bottom" } })]);
+    expect(c.props.place).toEqual({ h: "right", v: "bottom" });
+    expect(made.steps[0]).toBe("clear of the picture's subject: bottom left → bottom right (on the subject: bottom left 0.32, bottom right 0.11)");
+    expect(attempts).toEqual(["gfx-1.mov"]);
+    expect(timing(c)).toEqual(before); // WHEN it shows never changes
+  });
+
+  it("not readable where it was moved, it goes back where it was designed rather than be left out", async () => {
+    const c = pair();
+    const { io } = placeIo(p => (p.place ? { white: 5.0, pass: false, box } : { white: 9.0, pass: true, box }), async () => choice(true));
+    const made = await placeAndRead(c, false, "gfx-designed.mov", io, []);
+    expect(made.r.pass).toBe(true);
+    expect(made.file).toBe("gfx-designed.mov");
+    expect(c.props.place).toBeUndefined();
+    expect(made.steps).toContain("not readable clear of the subject — back where it was designed:");
+  });
+
+  it("where it is designed is clear: nothing is drawn again (the readability fixes as before)", async () => {
+    const c = pair();
+    const { io, drawn } = placeIo(() => ({ white: 12.4, pass: true, box }), async () => choice(false));
+    const made = await placeAndRead(c, false, "gfx-designed.mov", io, []);
+    expect([made.file, made.steps]).toEqual(["gfx-designed.mov", ["as designed: white 12.4:1"]]);
+    expect(drawn).toEqual([]);
+    expect(c.props.place).toBeUndefined();
+  });
+
+  it("a subject that cannot be judged (a frame that will not read) keeps it as designed", async () => {
+    const c = pair();
+    const { io } = placeIo(() => ({ white: 12.4, pass: true, box }), async () => {
+      throw new Error("no frame");
+    });
+    const made = await placeAndRead(c, false, "gfx-designed.mov", io, []);
+    expect([made.r.pass, made.file]).toEqual([true, "gfx-designed.mov"]);
+  });
+});
+
+describe("where a graphic goes is judged only on the pictures its words are up over (round 14 review)", () => {
+  // A label-only MYTH stamp put on "A few people, half awake…" and drawn on "call it revenge" (job 412,
+  // up at 33.13 s, drawn at 36.07 s): had the picture changed between, the shot before its words would
+  // have been judged as one it covers, though nothing of it is drawn there.
+  const stamp = (over: Partial<ResolvedCue> = {}): ResolvedCue => ({
+    id: "revenge-myth",
+    template: "MythStamp",
+    start: 30,
+    end: 35,
+    startFrame: 900,
+    endFrame: 1050,
+    props: { durationSec: 5, at: 2.55, label: "Myth" },
+    sync: [],
+    conformed: { start: true, end: false },
+    ...over,
+  });
+  const cuts = [30, 32, 38];
+
+  it("a shot it has left before its words show is not judged", async () => {
+    const { sampleTimes, shownTimes } = await import("./readable");
+    expect(sampleTimes(stamp({ shownAt: 32.6 }), cuts)).toEqual([31.65, 34.65]);
+    expect(shownTimes(stamp({ shownAt: 32.6 }), cuts)).toEqual([34.65]);
+  });
+
+  it("a graphic whose words show from its start is judged on every shot, as before", async () => {
+    const { shownTimes } = await import("./readable");
+    expect(shownTimes(stamp(), cuts)).toEqual([31.65, 34.65]);
+  });
+
+  it("words drawn after the last moment judged still leave that moment", async () => {
+    const { shownTimes } = await import("./readable");
+    expect(shownTimes(stamp({ shownAt: 34.8 }), cuts)).toEqual([34.65]);
+  });
+
+  it("the subject step reads the film only where its words are up", async () => {
+    const { clearOfSubject } = await import("./readable");
+    const { grabFrame } = await import("./media");
+    const drawing = new Uint8Array(W * H * 4);
+    for (let y = 10; y < 30; y++) for (let x = 140; x < 190; x++) drawing[(y * W + x) * 4 + 3] = 220;
+    frames.set("stamp.mov", drawing);
+    frames.set("cat-film.mp4", new Uint8Array(W * H * 3).fill(90));
+    const spots = { places: [{ h: "right", v: "top" }, { h: "left", v: "top" }] as Place[], box: (p: Place) => (p.h === "right" ? { x0: 140, y0: 10, x1: 190, y1: 30 } : { x0: 10, y0: 10, x1: 60, y1: 30 }) };
+    vi.mocked(grabFrame).mockClear();
+    const choice = await clearOfSubject("cat-film.mp4", "stamp.mov", stamp({ shownAt: 32.6 }), cuts, spots);
+    expect(choice?.moved).toBe(false);
+    const filmTimes = vi.mocked(grabFrame).mock.calls.filter(([f]) => f === "cat-film.mp4").map(([, t]) => t);
+    expect(filmTimes).toEqual([34.65]);
+  });
+});

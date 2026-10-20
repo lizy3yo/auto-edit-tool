@@ -55,6 +55,15 @@ export const LAYOUT = {
   titleSafeY: 108,
   actionSafeX: 96,
   actionSafeY: 54,
+  /**
+   * The highest a graphic over a host take may start: below the chin. Our hosts are framed closer
+   * than the reference's (chins at ~0.61-0.66 of the height, Steve's ~0.5), so a label at the
+   * reference's chest height lands on the beard — job 407's chapter label (scene 21) cut across the
+   * host's beard, which ends at ~690 px. 790 clears every host photo we have, the seven new
+   * channels' (jobs 401-407) included. A split's host panel is the host take cropped, not scaled,
+   * so the chin is at the same height there.
+   */
+  belowChinY: 790,
 };
 
 /** Type scale (px). Measured off the 1080p reference frames. */

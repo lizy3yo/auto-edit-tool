@@ -6,28 +6,131 @@ import path from "node:path";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import type { JobGraphics, LongformInputParams, StoryboardScene } from "@shared/types";
 import type { CueSpec } from "../../graphics/src/cueResolve";
-import type { FilmLayout } from "../../graphics/src/plan/rules";
+import type { FilmLayout, HostPanel } from "../../graphics/src/plan/rules";
+import type { Readability } from "../../graphics/src/plan/qa";
+import { pictureOf } from "../../graphics/src/plan/pictures";
+import { HEIGHT, WIDTH } from "../../graphics/src/theme";
+import { splitPanelMissing } from "@shared/splitPanel";
 import { getChannelConfig } from "../db";
-import { addGraphics } from "./finish";
+import { resolveSplitLayout } from "../videoAssembly";
+import { addGraphics, themeOf, type GraphicsRecord } from "./finish";
 
 /** App-wide off switch: GRAPHICS=0. */
 export const graphicsEnabled = () => process.env.GRAPHICS !== "0";
 
-/** The film's layout for the rules: each scene's span on the film, and what is on screen. */
-export function filmLayoutOf(scenes: StoryboardScene[]): FilmLayout {
+/**
+ * The accent the film's graphics are drawn in, for the host name card: the one the last graphics run
+ * saved on the job, else read off the same host photo the same way (`themeOf`). Jobs 405 and 407
+ * opened on a grey card while every graphic after it carried the channel's colour. Undefined (the
+ * theme's default) when neither can be had; never throws.
+ */
+export async function graphicsAccent(
+  params: Pick<LongformInputParams, "graphics" | "faceImageUrl">
+): Promise<string | undefined> {
+  return params.graphics?.theme?.accent ?? (await themeOf(params.faceImageUrl))?.accent;
+}
+
+/** At most this many problems (and offered sentences) per round, and readability fixes, are kept on
+ * the job — it rides inputParams on every save; the render log still prints them all. */
+export const MAX_KEPT_PER_ROUND = 60;
+const MAX_PROBLEM_CHARS = 200;
+const MAX_ID_CHARS = 80;
+const MAX_OFFERED_CHARS = 80;
+const clip = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
+
+/**
+ * The planner's rounds as kept on the job. Before this, every refusal went only to the render log:
+ * across the 12 films made with graphics (jobs 385-398) the rows held one left-out graphic and no
+ * refusal, so three bare moments of Dale's job 397 ("Smalls, about $10 to $40." at 0:49, which the
+ * rules accept a graphic on) could not be explained. The fill round's offered sentences ride along
+ * (cut short), so "offered, never asked" shows apart from "asked and refused". Pure.
+ */
+export function plannerForJob(planner: GraphicsRecord["planner"], at: string): JobGraphics["planner"] {
+  if (!planner) return undefined;
   return {
+    model: planner.model,
+    at,
+    rounds: planner.rounds.map(r => {
+      const problems = r.problems.slice(0, MAX_KEPT_PER_ROUND).map(p => ({ cue: clip(p.cue, MAX_ID_CHARS), problem: clip(p.problem, MAX_PROBLEM_CHARS) }));
+      const offered = r.offered?.slice(0, MAX_KEPT_PER_ROUND).map(o => ({
+        at: Math.round(o.from * 100) / 100,
+        text: clip(o.text, MAX_OFFERED_CHARS),
+        asked: o.asked.map(id => clip(id, MAX_ID_CHARS)),
+        placed: o.placed,
+      }));
+      return {
+        step: r.step,
+        asked: r.asked,
+        kept: r.kept,
+        problems,
+        ...(r.problems.length > problems.length ? { truncated: r.problems.length - problems.length } : {}),
+        ...(offered ? { offered } : {}),
+        ...(r.offered && offered && r.offered.length > offered.length ? { offeredTruncated: r.offered.length - offered.length } : {}),
+        ...(r.error ? { error: clip(r.error, MAX_PROBLEM_CHARS) } : {}),
+      };
+    }),
+  };
+}
+
+/**
+ * The readability results worth keeping: only the graphics the check had to work on (their first
+ * measure failed). One that passed as designed has nothing to explain, and one that never passed is
+ * also in `dropped` — its steps say what was tried (job 390: "colour 4.0:1" after every fix). Pure.
+ */
+export function readabilityForJob(readability: Readability[]): JobGraphics["readability"] {
+  const fixed = readability
+    .filter(r => !r.pass || r.steps.length > 1)
+    .slice(0, MAX_KEPT_PER_ROUND)
+    .map(r => ({ id: clip(r.id, MAX_ID_CHARS), pass: r.pass, summary: clip(r.summary, MAX_PROBLEM_CHARS), steps: r.steps.map(s => clip(s, MAX_PROBLEM_CHARS)) }));
+  return fixed.length ? fixed : undefined;
+}
+
+/**
+ * Whether a scene plays as a split in the film. A split whose picture was never put beside the host
+ * plays the bare host take full frame (`splitPanelMissing`): a caption squeezed into a panel that is
+ * not there would sit off to one side of the host for nothing.
+ */
+const playsSplit = (s: StoryboardScene) => !!s.splitRightUrl && !splitPanelMissing(s);
+
+/** Where a split's host panel is on the graphics' frame — resolved by the same function the
+ * compositor drew it with, so a seam the operator dragged, or the host turned to the right, is
+ * where the caption goes. */
+export const splitHostPanel = (s: StoryboardScene): HostPanel =>
+  (({ hostX, hostW }) => ({ x: hostX, w: hostW }))(resolveSplitLayout(WIDTH, HEIGHT, s.splitLayout));
+
+/**
+ * The film's layout for the rules: each scene's span on the film, and what is on screen — for a
+ * b-roll picture, whether it is a still or a video, a list item's own picture, and what it shows.
+ * `nameCardScenes` are the `StoryboardScene.index` values assembly drew the host name card on
+ * (`nameCardSceneIndices`; `[]` when the film has none): the rules then keep host graphics off
+ * exactly those scenes, wherever the card went — the self-introduction take now, not always the
+ * cold open. Unset ⇒ the rules' own guess (`nameTagRange`).
+ */
+export function filmLayoutOf(scenes: StoryboardScene[], nameCardScenes?: number[]): FilmLayout {
+  return {
+    ...(nameCardScenes ? { nameCardScenes } : {}),
     scenes: scenes
       .filter(s => typeof s.narrationStartSec === "number" && typeof s.narrationEndSec === "number")
-      .map(s => ({
-        index: s.index,
-        narrationStartSec: s.narrationStartSec as number,
-        narrationEndSec: s.narrationEndSec as number,
-        scriptText: s.scriptText,
-        hostPresent: !!s.hostPresent,
-        cta: !!s.cta,
-        split: !!s.splitRightUrl,
-        hostOpener: !!s.hostOpener,
-      })),
+      .map(s => {
+        const split = playsSplit(s);
+        return {
+          index: s.index,
+          narrationStartSec: s.narrationStartSec as number,
+          narrationEndSec: s.narrationEndSec as number,
+          scriptText: s.scriptText,
+          hostPresent: !!s.hostPresent,
+          cta: !!s.cta,
+          split,
+          // The split's layout passed through: a caption over this scene is drawn inside the host's
+          // panel (`hostPanelFor`), as the lab's composite always did — job 400 scene 27 had none.
+          ...(split ? { hostPanel: splitHostPanel(s) } : {}),
+          hostOpener: !!s.hostOpener,
+          // What a b-roll picture is and shows, for the planner and its checks (`pictureOf`): it
+          // read only "B-ROLL", and put job 409's "Paulinus" label on the picture of Seneca, job
+          // 408's Versus card over a whole video, job 410's step card over all three step pictures.
+          ...pictureOf(s),
+        };
+      }),
   };
 }
 
@@ -39,9 +142,17 @@ export type GraphicsHooks = {
 
 /**
  * The assembled film WITH its graphics (or as it was, when they are off or fail). Updates
- * `params.graphics` in place; the caller saves `params` with the film.
+ * `params.graphics` in place; the caller saves `params` with the film. `nameCardScenes`: the
+ * scenes assembly drew the host name card on (`filmLayoutOf`).
  */
-export async function withGraphics(jobId: number, film: Buffer, scenes: StoryboardScene[], params: LongformInputParams, hooks: GraphicsHooks): Promise<Buffer> {
+export async function withGraphics(
+  jobId: number,
+  film: Buffer,
+  scenes: StoryboardScene[],
+  params: LongformInputParams,
+  hooks: GraphicsHooks,
+  nameCardScenes?: number[]
+): Promise<Buffer> {
   const prior: JobGraphics = params.graphics ?? {};
   const skip = (why: string): Buffer => {
     params.graphics = { ...prior, skipped: why, replan: false };
@@ -63,10 +174,11 @@ export async function withGraphics(jobId: number, film: Buffer, scenes: Storyboa
       jobId,
       filmPath,
       outPath,
-      film: filmLayoutOf(scenes),
+      film: filmLayoutOf(scenes, nameCardScenes),
       hostPhotoUrl: params.faceImageUrl,
       savedPlan: (prior.plan as CueSpec[] | undefined) ?? undefined,
       replan: !!prior.replan,
+      lists: params.spokenLists,
       onProgress: hooks.phase,
       log: hooks.log,
     });
@@ -78,6 +190,11 @@ export async function withGraphics(jobId: number, film: Buffer, scenes: Storyboa
       theme: record.theme,
       qa: { pass: record.qa.pass, lines: record.qa.lines, failures: record.qa.failures },
       replan: false,
+      // A Reassemble that reuses the saved plan makes no model call and has no rounds of its own:
+      // the rounds that wrote that plan are carried over, or the first Reassemble would wipe them.
+      planner: record.planner ? plannerForJob(record.planner, record.at) : prior.planner,
+      // Measured again on every assembly, so this film's own.
+      readability: readabilityForJob(record.readability),
     };
     hooks.log(`graphics QA: ${record.qa.pass ? "PASS" : "FAIL"} — ${record.qa.lines.join(" | ")}`);
     if (!record.qa.pass) hooks.warn(`Motion graphics: ${record.qa.failures.join("; ")}`);

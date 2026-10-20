@@ -7,6 +7,8 @@ import {
   buildBookCtaTemplate,
   CTA_MARKER_TEMPLATE,
   CTA_TEMPLATE_PLACEHOLDER,
+  spokenScriptLines,
+  stripCtaMarkerLines,
 } from "../shared/ctaMarkers";
 import { parseCtaMarkers, extractSpokenScript } from "./longformVideo";
 
@@ -286,5 +288,57 @@ describe("Windows line endings", () => {
     expect(r.spans[0].label).toBe("Nothing New for a Year");
     expect(r.script).not.toContain("===");
     expect(r.script).not.toContain("\r");
+  });
+});
+
+describe("spokenScriptLines (the spoken text, numbered by the pasted lines)", () => {
+  const nonBlank = (raw: string) =>
+    spokenScriptLines(raw).filter(l => l.text.trim());
+
+  it("counts past a stripped template preamble", () => {
+    const raw = [
+      "Host (an older woodworker): calm and warm",
+      "* plain shop light",
+      "",
+      "Welcome back to the shop.",
+      "Today, three boxes from one board.",
+      "",
+      "Let's start with the first cut.",
+    ].join("\n");
+    expect(nonBlank(raw)).toEqual([
+      { line: 4, text: "Welcome back to the shop." },
+      { line: 5, text: "Today, three boxes from one board." },
+      { line: 7, text: "Let's start with the first cut." },
+    ]);
+  });
+
+  it("names the line inside the frame, never a copy of it kept above the frame", () => {
+    const raw = [
+      "Welcome back to the shop.",
+      "=== SCRIPT ===",
+      "Welcome back to the shop.",
+      "=== END SCRIPT ===",
+      "VERDICT: PASS",
+    ].join("\r\n");
+    expect(nonBlank(raw)).toEqual([
+      { line: 3, text: "Welcome back to the shop." },
+    ]);
+  });
+
+  it("is the same lines the voice reads, once markers and directions are removed", () => {
+    const raw = [
+      "[warmly] Welcome back.",
+      "===START CTA===",
+      "The book is linked below.",
+      "===END CTA===",
+      "[laughs]",
+      "See you next time.",
+    ].join("\n");
+    const lines = spokenScriptLines(raw);
+    expect(lines.map(l => l.line)).toEqual([1, 2, 3, 4, 5, 6]);
+    expect(lines.map(l => l.text).join("\n")).toBe(extractSpokenScript(raw));
+    expect(stripCtaMarkerLines(extractSpokenScript(raw))).toBe(
+      "Welcome back.\nThe book is linked below.\nSee you next time."
+    );
   });
 });

@@ -15,12 +15,30 @@
  * rides into the image prompt (`namedLookClause`) and the still checker (`scanStillDefects`'
  * exact-look question, on a stronger model); a part is drawn as a close-up of that part from its
  * thing's memory (`PART_VIEW`). Nothing here names a channel or a craft. Any failure changes nothing.
+ *
+ * A SPECIALISED TOOL IS A NAMED KIND TOO (2026-10-18, job 408 scenes 23-24): "A toilet auger, the
+ * short kind made for toilets, can sometimes hook it out" was drawn as a plain bent rod on a
+ * screwdriver handle, under an on-screen label naming the tool. The props list wrote a generic look
+ * ("a slim metal rod with a curved tip and plastic handle"), the shot list took a "hooked tip" from
+ * the verb, and this step wrote looks only for varieties and left out "everyday things" — a tool made
+ * for one job fell between the two, so no exact look was written and the checker held the picture to
+ * its own wrong words. Such a tool now gets its look here as it is really built, by its parts.
  */
-import type { KeyThing, StoryboardScene } from "@shared/types";
+import type { KeyThing, RecurringPerson, StoryboardScene } from "@shared/types";
 import { invokeClaude } from "./claude";
+import { NOTHING_CUT_OPEN_RULE, withoutCutaway } from "./cutOpen";
+import { lookGaps } from "./followedPeople";
 import { safeParseJSON } from "./jsonRepair";
-import { SHOWS_PERSON } from "./hostLook";
-import { blurredPrint, matchKeyThing, planningEffort, settleVideoKind } from "./shotList";
+import { namedPeople, personKey, showsPerson } from "./hostLook";
+import {
+  blurredPrint,
+  matchKeyThing,
+  parseViewerPerson,
+  PERSON_LOOK_RULE,
+  planningEffort,
+  settleVideoKind,
+  TOOL_SHAPE_NOT_VERB,
+} from "./shotList";
 
 const NAMED_LOOK_MODEL = () => process.env.NAMED_LOOK_MODEL || "claude-opus-5-5";
 
@@ -31,6 +49,21 @@ export interface NamedKind {
 export interface NamedLookAnswer {
   kinds: NamedKind[];
   pictures: { id: number; kind?: string; partOf?: string; show?: string; text?: string }[];
+  /** The look written for "you" when the message asked for one (`ViewerLookAsk`), as answered. */
+  viewer?: { name: string; look: string };
+}
+
+/**
+ * "You" drawn as someone else with no look yet (`viewerAsk` in hostLook.ts, job 417): the pictures
+ * that show it, the roles "you" can be in them, and what the look must differ from — so this call,
+ * made for every film anyway, writes the one look instead of a call of its own.
+ */
+export interface ViewerLookAsk {
+  ids: number[];
+  roles: string[];
+  hostLook?: string;
+  hostName?: string;
+  people?: RecurringPerson[];
 }
 
 /** What the script says is shown on a thing: "the box's label: Photoelectric, 10-Year Sealed Battery…". */
@@ -99,10 +132,20 @@ not know the names of specific kinds of things. You read the pictures, one per l
 1. NAMED KINDS. Find every specific NAMED KIND a picture is about — a named variety whose look a
 picture maker could not draw from its name alone, or would draw wrong: a quilt block or pattern, a
 stitch, a knot, a weave, a joint, a braid or haircut, a breed, a plant variety, a dish, a style of
-furniture or building. Not everyday things (a saw, a bowl, a chair). For each, write its LOOK
-exactly enough to draw it without knowing the name: the shapes, how many of each, how they are
-arranged, which parts are light and which dark, its size. Correct any planned description that gets
-it wrong. Leave out a kind when you are not sure how it looks — never invent.
+furniture or building. Not everyday things any picture maker knows (a saw, a bowl, a chair). For
+each, write its LOOK exactly enough to draw it without knowing the name: the shapes, how many of
+each, how they are arranged, which parts are light and which dark, its size. Correct any planned
+description that gets it wrong. Leave out a kind when you are not sure how it looks — never invent.
+
+A SPECIALISED TOOL OR PIECE OF EQUIPMENT a picture is about — one made for one job, which a picture
+maker given only its name draws as a plain rod, handle or box (a pipe wrench, a seam ripper, a grease
+gun), not an everyday one it knows (a hammer, a screwdriver, a broom) — is a named kind too. Its LOOK
+is the tool as it is really built: its one exact kind (never two kinds mixed into one), then each
+PART that makes it that tool — its shape, material and size, and what it is joined to. Correct a
+planned description or a key thing's look that gives it another build: ${TOOL_SHAPE_NOT_VERB}. A
+picture of it in use keeps the hands and shows its parts working the way the tool really works. Give
+it only to a picture about the tool — in use, held, or shown on its own — never to one where it only
+lies beside what the picture is about.
 
 A REAL, RECOGNISABLE thing the LINE names — an app, a website, a store, a market or fair, a product
 line — is a named kind too, even when the planned picture calls it something generic ("a buy-and-sell
@@ -116,6 +159,9 @@ A BODY PART NEVER LOOKS CUT OFF: hair, a hand, a foot or a face is shown on the 
 2. A PART OF A KEY THING. When a picture's line is about ONE PART or detail of a key thing (one block
 on the quilt, a knob on the stove, one joint of the frame), name that key thing as part_of: the
 picture is then a close-up of just that part, never the whole thing again.
+
+${NOTHING_CUT_OPEN_RULE} A part hidden inside is never a close-up of its inside: its "show" is where
+it opens or comes out.
 
 3. For every picture you name a kind or a part for, write "show": a short, plain description of the
 picture — what fills the frame, close up when it is a part — using the exact look, one thing only.
@@ -131,9 +177,60 @@ list: it is part_of a key thing only when it is a physical PART of that one thin
 quilt, one drawer of the dresser); items that are separate things of their own (a board, a sign, a
 box — even when the key thing names them as a group or pile) are never part_of anything.
 
+5. THE VIEWER — only when the message has a THE VIEWER block. The pictures it lists are on lines
+spoken to "you" and show someone other than the host. When "you" — the viewer the lines speak to —
+is one of the people they show, as someone the host's work serves (a passenger, a patient, a guest),
+add "viewer": {"name": the plain role those pictures give "you" (the passenger), "look": …} — the
+look is the person every picture of "you" shows: ${PERSON_LOOK_RULE}Everyday clothes for that role,
+never the host's uniform, badge or work clothes, and clearly different from THE HOST and from every
+person already written. Leave viewer out when "you" does the host's own kind of work, or when the
+people shown are ones "you" serves, sells to or deals with.
+
 Answer with JSON only:
 {"kinds":[{"name":"…","look":"…"}],"pictures":[{"id":<number>,"kind":"<a kind's name or omit>","part_of":"<a key thing or omit>","show":"…","text":"<exact script words or omit>"}]}
-{"kinds":[],"pictures":[]} when nothing applies.`;
+{"kinds":[],"pictures":[]} when nothing applies. With a THE VIEWER block, "viewer":{"name":"…","look":"…"} beside them, or no viewer key.`;
+
+/**
+ * The THE VIEWER block of the message (`ViewerLookAsk`): which pictures show "you", who is in them,
+ * and the host and the people already written, whom the look must not repeat. Pure.
+ */
+export function viewerLookBlock(scenes: StoryboardScene[], ask: ViewerLookAsk): string {
+  const shown = ask.ids
+    .filter(i => scenes[i]?.otherPerson)
+    .map(i => `#${i} ${scenes[i].otherPerson}`)
+    .join("; ");
+  return (
+    `THE VIEWER: these pictures are on lines spoken to "you" and show someone other than the host — ${shown}. ` +
+    // Only the roles no line names as someone else (`viewerAsk`): the crew beside "you" in 417's
+    // pictures is listed above, and must never read as a role "you" may take.
+    `"You" has no look yet; in these pictures "you" can only be: ${ask.roles.join(", ")}.\n` +
+    (ask.hostLook?.trim() ? `THE HOST (never "you"): ${ask.hostLook.trim()}\n` : "") +
+    (ask.people?.length ? `PEOPLE ALREADY WRITTEN: ${ask.people.map(p => `${p.name}: ${p.look}`).join(" | ")}\n` : "")
+  );
+}
+
+/**
+ * The look written for "you" (`NamedLookAnswer.viewer`), kept only when it can be one person in every
+ * picture of "you": a name the props list's VIEWER rules accept (`parseViewerPerson`: not the host,
+ * not a group, a look of three words or more) whose role is one "you" can be (`ask.roles`, never one
+ * a line names as someone else — 417's crew) and is nobody already written, and a look that says man
+ * or woman and leaves out at most one of an age and the hair (`lookGaps`). Undefined otherwise —
+ * "you" is then drawn as before. Pure.
+ */
+export function acceptViewerLook(
+  answer: NamedLookAnswer["viewer"],
+  ask: ViewerLookAsk
+): RecurringPerson | undefined {
+  if (!answer?.name || !answer.look) return undefined;
+  const viewer = parseViewerPerson(`VIEWER ${answer.name}: ${answer.look}`, { hostName: ask.hostName });
+  if (!viewer) return undefined;
+  const role = namedPeople(viewer.name)?.people.find(p => p.kind === "role")?.noun;
+  if (!role || !ask.roles.includes(role)) return undefined;
+  if ((ask.people ?? []).some(p => personKey(p.name) === personKey(viewer.name))) return undefined;
+  const gaps = lookGaps(viewer.look);
+  if (gaps.includes("man or woman") || gaps.length > 1) return undefined;
+  return viewer;
+}
 
 /** The pictures the step reads: every drawn cutaway (not the host, a cover or an operator's asset). */
 export function namedLookCandidates(scenes: StoryboardScene[]): number[] {
@@ -162,7 +259,12 @@ export function parseNamedLooks(text: string): NamedLookAnswer | null {
       text: p?.text ? String(p.text).trim() : undefined,
     }))
     .filter(p => Number.isInteger(p.id));
-  return { kinds, pictures };
+  const v = (d as { viewer?: { name?: unknown; look?: unknown } }).viewer;
+  const viewer =
+    v && typeof v === "object" && String(v.name ?? "").trim() && String(v.look ?? "").trim()
+      ? { name: String(v.name).trim(), look: String(v.look).trim() }
+      : undefined;
+  return { kinds, pictures, ...(viewer ? { viewer } : {}) };
 }
 
 /**
@@ -190,12 +292,12 @@ export function applyNamedLooks(
     const kind = p.kind ? lookOf.get(p.kind.toLowerCase()) : undefined;
     // A picture of someone at work keeps the person: it is never made a close-up of a part, and a
     // rewrite that drops the person is not used (only the exact look is kept).
-    const atWork = !!s.humanPresent || SHOWS_PERSON.test(s.showSubject ?? s.visualPrompt ?? "");
+    const atWork = !!s.humanPresent || showsPerson(s.showSubject ?? s.visualPrompt ?? "");
     // A list item may be a PART of one thing ("a churn dash here" on the quilt — Ruth's job 298 drew
     // the whole quilt when this was refused); separate things in a list are kept apart by the model's
     // own rule above and by memory, which never draws an item from the item before it.
     const part = p.partOf && !atWork ? matchKeyThing(p.partOf, things ?? []) : null;
-    if (atWork && p.show && !SHOWS_PERSON.test(p.show)) p.show = undefined;
+    if (atWork && p.show && !showsPerson(p.show)) p.show = undefined;
     // Words the SCRIPT says this part shows: readable and exact on it (Frederick's job 329: "First
     // thing on the label. The type." drew a stack of plain boxes).
     if (p.text && inScript(p.text)) {
@@ -213,7 +315,7 @@ export function applyNamedLooks(
       s.visualPrompt = p.show;
       s.visualPromptSeed = undefined;
       s.brollVisual = undefined;
-      s.humanPresent = SHOWS_PERSON.test(p.show) ? true : undefined;
+      s.humanPresent = showsPerson(p.show) ? true : undefined;
       // Writing the line does not say is shown soft and unreadable, like every other rewrite.
       s.blurPrint = !s.pictureText && blurredPrint(p.show) ? true : undefined;
       // Judged again on the new description (`judgeSelfMoving`), like any rewritten picture.
@@ -237,9 +339,14 @@ export async function describeNamedLooks(
     /** The whole script: what it says is shown on things, and the check on every picture's text. */
     script?: string;
     facts?: ShownFact[];
+    /**
+     * "You" drawn as someone else with no look (`viewerAsk`): asked in the first batch holding one of
+     * those pictures, and in each later one until a look is accepted (`acceptViewerLook`).
+     */
+    viewer?: ViewerLookAsk;
     ask?: (system: string, user: string) => Promise<string>;
   } = {}
-): Promise<{ kinds: number; pictures: number; parts: number }> {
+): Promise<{ kinds: number; pictures: number; parts: number; viewer?: RecurringPerson }> {
   const ask =
     opts.ask ??
     (async (system: string, user: string) =>
@@ -248,6 +355,7 @@ export async function describeNamedLooks(
   const BATCH = 150;
   let kinds = 0;
   let pictures = 0;
+  let viewer: RecurringPerson | undefined;
   for (let from = 0; from < all.length; from += BATCH) {
     const ids = all.slice(from, from + BATCH);
     const lines = ids.map(i => {
@@ -255,6 +363,8 @@ export async function describeNamedLooks(
       const said = (s.scriptText ?? "").trim().replace(/\s+/g, " ");
       return `#${i}${s.listCut ? " (list item)" : ""}: said "${said}" | shows: ${s.showSubject ?? s.visualPrompt ?? ""}`;
     });
+    const asking = !viewer && opts.viewer ? opts.viewer.ids.filter(i => ids.includes(i)) : [];
+    const askViewer = asking.length ? { ...opts.viewer!, ids: asking } : undefined;
     try {
       const answer = parseNamedLooks(
         await ask(
@@ -264,23 +374,32 @@ export async function describeNamedLooks(
             (opts.facts?.length
               ? `WHAT THE SCRIPT SAYS IS SHOWN: ${opts.facts.map(f => `${f.thing}: ${f.words.map(w => `"${w}"`).join(", ")}`).join(" | ")}\n`
               : "") +
+            (askViewer ? viewerLookBlock(scenes, askViewer) : "") +
             `\n${lines.join("\n")}\n\nJSON:`
         )
       );
       if (!answer) continue;
+      if (askViewer) viewer = acceptViewerLook(answer.viewer, askViewer);
       kinds += answer.kinds.length;
       pictures += applyNamedLooks(scenes, ids, answer, opts.keyThings, opts.script);
     } catch {
       /* a failed call changes nothing */
     }
   }
-  return { kinds, pictures, parts: scenes.filter(s => s.partOf).length };
+  return { kinds, pictures, parts: scenes.filter(s => s.partOf).length, ...(viewer ? { viewer } : {}) };
 }
 
-/** The image-prompt line that carries a picture's exact look. Empty when it has none. */
+/**
+ * The image-prompt line that carries a picture's exact look. Empty when it has none. A look that asks
+ * for a cut view loses those words (`withoutCutaway`): "draw it exactly like this" would otherwise
+ * win over the rule that nothing is drawn cut open (job 403). It settles the thing's BUILD (a
+ * specialised tool's parts, job 408), never "its parts": `SUBJECT_OVER_LOOK` right after it says
+ * that when the picture's own words name a particular part, that part is shown, and "whatever any
+ * other words say about its parts" would have contradicted it in the next sentence.
+ */
 export function namedLookClause(scene: StoryboardScene): string {
   return scene.namedLook
-    ? ` EXACT LOOK — ${scene.namedLook}. Draw it exactly like this, whatever any other words say about its pattern or shape.${SUBJECT_OVER_LOOK}`
+    ? ` EXACT LOOK — ${withoutCutaway(scene.namedLook)}. Draw it exactly like this, whatever any other words say about its pattern, shape or build.${SUBJECT_OVER_LOOK}`
     : "";
 }
 
@@ -293,8 +412,8 @@ export function namedLookClause(scene: StoryboardScene): string {
  * look settles how the kind looks; what this picture shows OF it is the picture's own.
  */
 export const SUBJECT_OVER_LOOK =
-  " That look settles how this kind of thing looks in general — its pattern, shapes, colours and " +
-  "style. WHAT this picture shows of it is as the picture's own words say: when they name a " +
+  " That look settles how this kind of thing looks in general — its pattern, shapes, build, " +
+  "colours and style. WHAT this picture shows of it is as the picture's own words say: when they name a " +
   "particular part, page or screen of it, a stage of the work, or something done or added to it, " +
   "show exactly that, in this look's colours and style.";
 

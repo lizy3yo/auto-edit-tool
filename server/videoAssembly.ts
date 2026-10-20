@@ -212,13 +212,56 @@ export const HOST_INTRO_TRIM_SEC = 1.0;
 /**
  * Host name-card edge animation, seconds: the card waits `DELAY` into the FIRST scene of its run,
  * ramps up over `FADE`, sits still across every internal cut, and ramps back down over the last
- * `FADE` of the LAST scene — hitting zero exactly on the cut out of the cold open.
+ * `FADE` of the LAST scene — hitting zero exactly on the cut out of its run.
  * `MIN_WINDOW` is the shortest fully-on hold worth rendering; below it the card would flash, so
  * that scene gets none.
  */
 export const NAME_CARD_DELAY_SEC = 0.5;
 export const NAME_CARD_FADE_SEC = 0.5;
 export const NAME_CARD_MIN_WINDOW_SEC = 1.5;
+/** The shortest fade a short take's card is given (6 frames): still a fade, never a pop. */
+export const NAME_CARD_MIN_FADE_SEC = 0.2;
+
+/** When the name card is fully on in one scene (`on` → `off`, seconds into it), and its edges: the
+ * wait before it fades in (`delay`) and the two fades (`fadeIn` / `fadeOut`, 0 where it has none). */
+export type NameCardWindow = { on: number; off: number; delay: number; fadeIn: number; fadeOut: number };
+
+/**
+ * When the name card is fully on in one scene of its run, seconds into the scene — or undefined
+ * when the scene cannot hold it fully on for `NAME_CARD_MIN_WINDOW_SEC` and draws no card. `fadeIn`
+ * on the run's first scene, `fadeOut` on its last (both on a run of one). The ONE rule:
+ * `buildSceneMuxArgs` draws by it and `nameCardSceneIndices` picks the scenes by it, so the card is
+ * never put on a take too short to show it (jobs 403 and 406: a lone 2.3-2.6 s cold open took the
+ * card and drew none).
+ *
+ * The 1.5 s readable hold never shrinks; on a SHORT take the edges do — the wait first, then the two
+ * fades together, never under `NAME_CARD_MIN_FADE_SEC` — so a lone take needs 1.9 s, not 3 s.
+ * Self-introduction takes are short by design (the host hands over to a picture a few words after
+ * the name): job 409's "My name is Gideon Grant, and this channel is for" was 3.07 s, job 410's
+ * "I'm Helena Hart, and I read the fine print" 2.51 s, job 411's "I'm Walter, …" 2.62 s. Each was
+ * refused for the fixed 0.5 s wait and fades, and the card went 11 s before the name (409), a minute
+ * after it on an unrelated line (410) and onto the opening line half a minute before it (411). Pure.
+ */
+export function nameCardOnWindow(
+  durationSec: number,
+  fadeIn?: boolean,
+  fadeOut?: boolean
+): NameCardWindow | undefined {
+  const fades = (fadeIn ? 1 : 0) + (fadeOut ? 1 : 0);
+  // The time the edges may take beside the hold.
+  const room = durationSec - NAME_CARD_MIN_WINDOW_SEC;
+  if (!(room >= -1e-9)) return undefined;
+  let delay = fadeIn ? NAME_CARD_DELAY_SEC : 0;
+  let fade = NAME_CARD_FADE_SEC;
+  if (room < delay + fades * fade) {
+    delay = Math.max(0, room - fades * fade);
+    if (fades && delay === 0) fade = Math.max(0, room) / fades;
+  }
+  if (fades && fade < NAME_CARD_MIN_FADE_SEC - 1e-9) return undefined;
+  const fin = fadeIn ? fade : 0;
+  const fout = fadeOut ? fade : 0;
+  return { on: delay + fin, off: durationSec - fout, delay, fadeIn: fin, fadeOut: fout };
+}
 
 /**
  * Output pixel dimensions for a given aspect ratio (1080p class).
@@ -1332,10 +1375,11 @@ export function buildSceneMuxArgs(opts: {
    * Added as another `-loop 1 -i` input AFTER the QR, so the two can coexist.
    *
    * Default is STATIC — on in frame 0, unchanged throughout, gone on the cut — which is what
-   * every scene INSIDE the cold-open run wants: nothing moves at the seams, so the run reads as
+   * every scene INSIDE the card's run wants: nothing moves at the seams, so the run reads as
    * one continuous card. `fadeIn` is set only on the FIRST scene of the run (card waits
    * `NAME_CARD_DELAY_SEC`, then ramps up over `NAME_CARD_FADE_SEC`) and `fadeOut` only on the
-   * LAST (ramps down over the final `NAME_CARD_FADE_SEC`, zero exactly on the cut).
+   * LAST (ramps down over the final `NAME_CARD_FADE_SEC`, zero exactly on the cut) — both shorter
+   * on a take too short for them (`nameCardOnWindow`).
    */
   nameCard?: { imagePath: string; fadeIn?: boolean; fadeOut?: boolean };
   /**
@@ -1357,14 +1401,15 @@ export function buildSceneMuxArgs(opts: {
 
   // Name-card timing: when is it fully on? Drop it entirely if that hold is too brief to read —
   // a flash is worse than no card.
-  // ponytail: the guard is per scene, so a first scene too short to hold the card just means the
-  // card starts hard-on at the next cut instead of fading in. Only reachable under ~2.5s.
+  // ponytail: the guard is per scene, so in a run of two or more a first scene too short to hold
+  // the card just means the card starts hard-on at the next cut instead of fading in. A run that
+  // cannot show it at all is never given the card (`nameCardSceneIndices` asks the same rule).
   const nc = opts.nameCard;
-  const ncOnStart = nc?.fadeIn ? NAME_CARD_DELAY_SEC + NAME_CARD_FADE_SEC : 0;
-  const ncOnEnd = nc?.fadeOut
-    ? opts.durationSec - NAME_CARD_FADE_SEC
-    : opts.durationSec;
-  const ncOn = !!nc && ncOnEnd - ncOnStart >= NAME_CARD_MIN_WINDOW_SEC;
+  const ncWindow = nc
+    ? nameCardOnWindow(opts.durationSec, nc.fadeIn, nc.fadeOut)
+    : undefined;
+  const ncOn = !!nc && !!ncWindow;
+  const ncOnEnd = ncWindow?.off ?? opts.durationSec;
 
   // Inputs: video=0, audio=1, then whichever overlays are present, in this order.
   const qrIdx = 2;
@@ -1441,16 +1486,17 @@ export function buildSceneMuxArgs(opts: {
       });
     }
   }
-  if (ncOn) {
+  if (ncOn && ncWindow) {
     // The PNG is `-loop 1`, so a bare overlay covers frame 0 → cut with no timing at all. The
     // alpha fades bound it instead of an `enable` window: `fade=t=in` leaves every frame before
-    // `st` fully transparent, and `fade=t=out` stays transparent through the cut.
+    // `st` fully transparent, and `fade=t=out` stays transparent through the cut. The edges are the
+    // window's own: the full 0.5 s wait and fades where the take has room, shorter on a short one.
     const fades = [
       nc.fadeIn
-        ? `,fade=t=in:st=${NAME_CARD_DELAY_SEC.toFixed(3)}:d=${NAME_CARD_FADE_SEC}:alpha=1`
+        ? `,fade=t=in:st=${ncWindow.delay.toFixed(3)}:d=${+ncWindow.fadeIn.toFixed(3)}:alpha=1`
         : "",
       nc.fadeOut
-        ? `,fade=t=out:st=${ncOnEnd.toFixed(3)}:d=${NAME_CARD_FADE_SEC}:alpha=1`
+        ? `,fade=t=out:st=${ncOnEnd.toFixed(3)}:d=${+ncWindow.fadeOut.toFixed(3)}:alpha=1`
         : "",
     ].join("");
     overlays.push({
@@ -2046,13 +2092,15 @@ export async function downloadToTemp(
       return Buffer.from(await resp.arrayBuffer());
     },
     {
-      attempts: 3,
+      // 5 tries over ~30 s (2, 4, 8, 16 s): on a flaky connection a lookup or connect failure
+      // lasts seconds — 0.5 s / 1 s lost 17 of Dale's 45 scenes in one assembly (job 389).
+      attempts: 5,
       label: `download ${name}`,
       tag: "[Assembly]",
-      // A 4xx is permanent (expired or deleted object); burning two more attempts and
-      // 1.5s of backoff on it only delays the failure. Network errors, timeouts and 5xx retry.
+      // A 4xx is permanent (expired or deleted object); burning more attempts on it only delays
+      // the failure. Network errors, timeouts and 5xx retry.
       isRetryable: (_msg, err) => !(err?.status >= 400 && err?.status < 500),
-      backoffMs: tryNo => 500 * (tryNo + 1),
+      backoffMs: tryNo => 2000 * 2 ** tryNo,
     }
   );
   const filePath = path.join(dir, name);
@@ -3226,9 +3274,10 @@ export async function assemblePerSceneFilm(opts: {
   musicBedUrls?: string[];
   /**
    * Optional host lower-third: a full-frame transparent PNG (`renderNameCardPng`) overlaid on a
-   * CONTIGUOUS run of scenes (`nameCardSceneIndices` — the locked cold open). The run fades in at
-   * its head and out at its tail and is static across every cut between, so it reads as one card
-   * that arrives once and leaves once. Each entry is a position in the `scenes` array above, not a
+   * CONTIGUOUS run of scenes (`nameCardSceneIndices` — the self-introduction take, else a host take
+   * just after it; with no introduction, the cold open or the first host take that can hold it).
+   * The run fades in at its head and out at its tail and is static across every cut
+   * between, so it reads as one card that arrives once and leaves once. Each entry is a position in the `scenes` array above, not a
    * `StoryboardScene.index`. Non-fatal: if the PNG can't be staged, the film renders without it.
    */
   nameCard?: { png: Buffer; sceneIndices: number[] };
@@ -3479,6 +3528,10 @@ export async function assemblePerSceneFilm(opts: {
               hash: nameCardHash,
               fadeIn: ncAt === 0,
               fadeOut: ncAt === ncRun.length - 1,
+              // A take under 3 s used to draw no card under this same key, and now draws one with
+              // shorter edges (`nameCardOnWindow`): naming the rule keeps such an entry from being
+              // reused. Only the card's own scenes (one or two a film) are encoded again.
+              edges: "fit",
             }
           : undefined;
 

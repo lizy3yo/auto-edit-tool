@@ -83,7 +83,9 @@ const publicBase = (): string | undefined => {
  */
 const R2_PUT_CONCURRENCY = Number(process.env.R2_PUT_CONCURRENCY ?? 16);
 /** Tries per upload when the failure is the network, not the request. */
-const R2_PUT_ATTEMPTS = 4;
+// 6 tries over ~31 s (1, 2, 4, 8, 16 s): a resolver hiccup on this network lasts seconds, not
+// milliseconds, and a missing upload is a missing QR or scene (2026-10-17, job 394's book QR).
+const R2_PUT_ATTEMPTS = 6;
 let uploadsInFlight = 0;
 const uploadQueue: (() => void)[] = [];
 async function withUploadSlot<T>(fn: () => Promise<T>): Promise<T> {
@@ -97,12 +99,14 @@ async function withUploadSlot<T>(fn: () => Promise<T>): Promise<T> {
     uploadQueue.shift()?.();
   }
 }
-/** A connect/socket timeout, reset or 5xx — worth another try; a 4xx is not. Pure. */
+/** A connect/socket timeout, reset, 5xx or a failed name lookup — worth another try; a 4xx is not.
+ * ENOTFOUND counts: every call here goes to OUR bucket's own host, which exists, so a lookup that
+ * fails is the resolver blinking (Windows reports it as ENOTFOUND, not EAI_AGAIN). Pure. */
 export function isTransientR2Error(err: any): boolean {
   const status = err?.$metadata?.httpStatusCode;
   if (typeof status === "number" && status >= 500) return true;
   const text = `${err?.name ?? ""} ${err?.code ?? ""} ${err?.message ?? ""}`;
-  return /TimeoutError|did not establish a connection|timed? ?out|ECONNRESET|ETIMEDOUT|ECONNREFUSED|EAI_AGAIN|EPIPE|socket hang up|NetworkingError/i.test(
+  return /TimeoutError|did not establish a connection|timed? ?out|ECONNRESET|ETIMEDOUT|ECONNREFUSED|EAI_AGAIN|ENOTFOUND|EPIPE|socket hang up|NetworkingError/i.test(
     text
   );
 }

@@ -160,11 +160,20 @@ export function towardWhite(hex: string, t: number): string {
 /**
  * The theme a cue renders with: the video's own (from its host photo) or the default, and — when
  * the composite measured its coloured words too dark to read on the picture — `lift` (0-1) moves
- * the accent and the warning red toward white, the same colour in a lighter shade. One function,
- * used by the renderer (Root) and by the readability check (which needs the exact text colours).
+ * the accent and the warning red toward white, the same colour in a lighter shade. `plain` is the
+ * last fix before a graphic is left out: the accent drawn in the theme's plain text colour (white
+ * on the dim ground), so the number or key word reads like the rest of the text, its colour given
+ * up. The warning red keeps its colour (it says "warning"). One function, used by the renderer
+ * (Root) and by the readability check (which needs the exact text colours).
  */
-export function themeFor(props: { theme?: unknown; lift?: unknown }): Theme {
+export function themeFor(props: { theme?: unknown; lift?: unknown; plain?: unknown }): Theme {
   const base = props.theme ? { ...THEME, ...(props.theme as Partial<Theme>) } : THEME;
   const lift = typeof props.lift === "number" ? Math.min(1, Math.max(0, props.lift)) : 0;
-  return lift ? { ...base, accent: towardWhite(base.accent, 0.4 * lift), danger: towardWhite(base.danger, 0.4 * lift) } : base;
+  const t = lift ? { ...base, accent: towardWhite(base.accent, 0.4 * lift), danger: towardWhite(base.danger, 0.4 * lift) } : base;
+  if (props.plain !== true) return t;
+  // The accent stays a #rrggbb (glows `withAlpha` and the readability check's inks parse it), and
+  // accent and text stay the SAME string: the check's inks and a step disc (NumberDot) both read
+  // "drawn plain" as accent === text, and a mismatch would draw a white digit on a white disc.
+  const ink = /^#[0-9a-f]{6}$/i.test(base.text) ? base.text : "#FFFFFF";
+  return { ...t, accent: ink, text: ink };
 }

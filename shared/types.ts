@@ -208,9 +208,20 @@ export interface SplitLayout {
 /**
  * Why a scene's clip was submitted to a paid provider. `first` is the render every scene
  * makes; everything else is a second payment for the same beat, and the ledger names which.
+ * `glitch` is a moving cutaway rendered again because its first clip moved wrong
+ * (`scanClipGlitch`) — it was written as `resume` before, so the Cost dialog could not tell it
+ * from a restart. Since 2026-10-18 only `CLIP_GLITCH_RERENDER=1` renders it: a clip that moves
+ * wrong is paid for once and the beat shows its start frame as a still (`movedWrong`).
  */
 export type SceneSubmitReason =
-  "first" | "resume" | "transient" | "infra" | "regenerate" | "retry" | "merge";
+  | "first"
+  | "resume"
+  | "transient"
+  | "infra"
+  | "regenerate"
+  | "retry"
+  | "merge"
+  | "glitch";
 
 /** The person whose click paid for a render — kept on the ledger so the Cost dialog can name them. */
 export interface SubmitActor {
@@ -237,6 +248,12 @@ export interface SceneSubmit {
    * video's host spend limit (`shared/hostRegenLimit.ts`, `shared/hostSpend.ts`).
    */
   pastLimit?: boolean;
+  /**
+   * The clip this submit returned MOVED WRONG (what the motion check named, `scanClipGlitch`) and
+   * was not shown: the beat shipped its checked start frame as a still instead of paying for a
+   * second render (`planGlitchRerender`). Paid for, so it stays on the ledger — once.
+   */
+  movedWrong?: string;
 }
 
 /**
@@ -273,6 +290,8 @@ export interface PictureTake {
   clipShortSec?: number;
   /** The description this picture was drawn from, so the card reads true after a switch. */
   visualPrompt?: string;
+  /** The faults this picture shipped with (`StoryboardScene.pictureFlaws`), so its badge follows a switch. */
+  pictureFlaws?: string[];
   at: string;
   source: "original" | "regenerate";
   by?: SubmitActor;
@@ -301,6 +320,53 @@ export interface KeyThing {
   main?: true;
 }
 
+/**
+ * Someone other than the host who comes back in a video's story — the same "she" a story follows
+ * over several shots, a customer seen again — and the one look every picture of them keeps
+ * (`parseRecurringPeople` in server/shotList.ts). `name` is how the script refers to them ("the
+ * woman passenger"); `look` is what a picture generator draws from behind or the side: age range,
+ * build, hair and clothes, never a face.
+ */
+export interface RecurringPerson {
+  name: string;
+  look: string;
+}
+
+/**
+ * How far along a thing the video MAKES is in one picture, earliest first: "material" (the raw
+ * stock or pieces before any work), "making" (being made, partly built), "done" (finished —
+ * finishing touches such as oil, wax or a felt pad count as done).
+ */
+export type BuildStage = "material" | "making" | "done";
+
+/**
+ * One reference picture a picture of a key thing is drawn from (`StoryboardScene.memoryRefScenes`):
+ * the scene it was drawn for, whether it is a picture of the drawn picture's OWN thing (else it lends
+ * only another key thing), and which of the drawn picture's other key things it shows.
+ */
+export interface MemoryRef {
+  index: number;
+  own?: true;
+  shows?: string[];
+}
+
+/** A key thing's written look, cut down for one picture (`StoryboardScene.otherThingLooks`). */
+export interface ThingLook {
+  name: string;
+  look: string;
+}
+
+/**
+ * The written look of a PLACE a picture is set in (`StoryboardScene.placeLooks`): a place key thing or
+ * the props list's home setting, cut to what the place is made of — or, with `in`, a key thing that
+ * stands in that place (the bed in the bedroom), which keeps one look in every picture set there.
+ */
+export interface PlaceLook {
+  name: string;
+  look: string;
+  in?: string;
+}
+
 export interface StoryboardScene {
   index: number;
   /** Short display label for this beat (derived = first words of `scriptText`) */
@@ -321,6 +387,14 @@ export interface StoryboardScene {
    * `visualPrompt` still holds the rewrite that actually renders.
    */
   visualPromptSeed?: string;
+  /**
+   * What `visualPrompt` was last WRITTEN for by `enhanceBrollPrompts` (`server/brollRewrite.ts`):
+   * a clip of something moving by itself, a photo catching it mid-motion, or an ordinary photo.
+   * A shot written for motion in which nothing turns out to move by itself (the plan gate makes it
+   * an ordinary photo) is written again (`leftMotionLane`). Unset when the prompt is the scene's own
+   * words (no rewrite landed).
+   */
+  promptLane?: "video" | "moving-thing" | "still";
   /**
    * Read-only preview, computed at poll time by `pollJob` and NEVER persisted: the exact
    * fully-assembled prompts this scene ships to the providers — `assembledClipPrompt` to
@@ -380,7 +454,7 @@ export interface StoryboardScene {
    * in `parseStoryboard` and honored by every later pass: opener scenes are never demoted
    * (`rebalanceHostScreenTime`, `enforceVisualAdjacency`), never forced into a split-frame
    * (`enforceHostSplitMix`), never split (`splitOverlongScenes`) or merged
-   * (`coalesceShortScenes`), and are the scenes the host name card rides on
+   * (`coalesceShortScenes`), and carry the host name card when the film has no self-introduction
    * (`nameCardSceneIndices`). Their chunks are packed to the host floor (`HOST_MIN_HOLD_SEC`)
    * at segmentation, ending on a sentence boundary.
    */
@@ -389,7 +463,8 @@ export interface StoryboardScene {
    * The line where the host introduces themself ("I'm Hank Hardwood", "my name is…") —
    * `markHostIntroductions`. Always the host, full frame, speaking the whole sentence: a
    * self-introduction over b-roll reads as a stranger's voice. Protected like the cold open —
-   * an anchor in the host budget, never demoted by a balancer, never split.
+   * an anchor in the host budget, never demoted by a balancer, never split. The host name card
+   * goes on it (`nameCardSceneIndices`).
    */
   hostIntro?: true;
   /**
@@ -402,20 +477,56 @@ export interface StoryboardScene {
   wordCut?: true;
   /** Renders of this beat that came back BLACK (or one solid colour) and were refused. */
   blankClips?: number;
-  /** Moving clips of this beat refused for impossible motion (`scanClipGlitch`); the second makes
-   *  the beat a still. */
+  /** Moving clips of this beat refused for impossible motion (`scanClipGlitch`); the first makes
+   *  the beat a still, made from the start frame already drawn and checked for that clip
+   *  (`checkedKeyframeOf`) — never a second paid render. `CLIP_GLITCH_RERENDER=1` renders once
+   *  more from that frame first, and the second glitch makes the still. */
   motionGlitches?: number;
   /** Every check of a picture drawn for this beat — its kind and what the check named
    *  (`server/pictureCheckLog.ts`), so a film shows which kinds come out right the first time. */
   pictureChecks?: { kind: string; panel?: boolean; flags: string[] }[];
+  /**
+   * The picture SHIPPED although its check still named these faults (`checkFlags` words, plus
+   * "different thing" / "near copy" from the later checks) — its redraws did not clear them, and
+   * the film never stops for a picture. Set or cleared every time the picture is drawn; the job
+   * warns and the card shows a badge (`shared/pictureFlaws.ts`).
+   */
+  pictureFlaws?: string[];
+  /** The same for the split-screen panel, which is drawn from a copy of the scene. */
+  panelFlaws?: string[];
   /** The clip URL last checked for a picture at assembly — so a Reassemble does not re-check it. */
   clipCheckedUrl?: string;
   /** One item of a spoken list ("a saw, a drill, …") — a quick cut, allowed down to `LIST_SHOT_MIN_SEC`. */
   listCut?: true;
   /**
+   * A list item's place in its list: its own item and the other items said with it, as spoken
+   * (`listItemsAround` in pictureMemory). The picture is drawn so it could not be taken for another
+   * item — Dale's job 397 drew "coasters" and "ornaments" as the same round discs.
+   */
+  listItems?: { own: string; others: string[] };
+  /**
+   * The items, as said, of the spoken list a picture GATHERS right after it ("the steel in those
+   * three", `listGroupFor` in pictureMemory) — the ones whose own pictures it is drawn from, so each is
+   * drawn as the very one shown a moment before (job 414 scene 8: the froe came back a flat bar).
+   */
+  groupItems?: string[];
+  /**
+   * The time and place a list item's sentence is set in when it is not the video's own here and now
+   * ("a medieval market town, about 1300") — the list finder's `setting`, put on every item of the
+   * list and on its bridge picture (`applySpokenLists`) and said in its prompt (`listItemClause`). An
+   * item drawn from its bare words has no time of its own: job 409's "The farmer complains, the
+   * senator complains, the old complain, and the young…", inside a passage about a writer of ancient
+   * times, came back as a farmer in overalls, an old man on a park bench and a young man in a hoodie.
+   * A list of steps carries it too: job 418's "They cut the log into short bolts," told of the oldest
+   * cabins, was drawn with a modern chainsaw.
+   */
+  listSetting?: string;
+  /**
    * The picture leading into a spoken list when the host could not say the bridge words: the place
    * the line names with ALL the list's items in it together. The items after it are drawn from it
-   * (`listSetFor` in pictureMemory), so each close-up is the same thing as in the group.
+   * (`listSetFor` in pictureMemory), so each close-up is the same thing as in the group. Only when
+   * one photograph can hold every item (`itemsInOnePhoto` in spokenLists): a list of ideas, people,
+   * times, places or steps keeps an ordinary bridge picture (job 400's paper cut-outs).
    */
   listSet?: true;
   /**
@@ -426,8 +537,9 @@ export interface StoryboardScene {
    */
   hostCandidate?: true;
   /**
-   * The thing this picture must show, in the shot list's words ("a stack of sandpaper"). The still
-   * checker re-rolls a picture that does not show it (`scanStillDefects`' `missing` verdict).
+   * The thing this picture must show, in the shot list's words ("a stack of sandpaper"), or the
+   * operator's own once they type the picture again (`ownTypedPicture`). The still checker re-rolls a
+   * picture that does not show it (`missing`), or shows it other than described (`detail`).
    */
   showSubject?: string;
   /** Scenes cut from one storyboard beat share its index here — the shot list's own bookkeeping. */
@@ -477,6 +589,28 @@ export interface StoryboardScene {
    */
   otherKeyThings?: string[];
   /**
+   * Key things this picture's own words name only as ANOTHER one of their kind (`othersOfKindIn`),
+   * with the words that say so — "a wild cat" for the video's own cat (job 412 scenes 23-26), "the
+   * neighbour's dog". Never `keyThing` or `otherKeyThings`, so never drawn from that thing's pictures
+   * or look; the prompt says it is not the one shown before (`anotherOfItsKindClause`). Set by
+   * `tagKeyThings` on every pass.
+   */
+  othersOfKind?: { name: string; said: string }[];
+  /**
+   * How far along the thing the video MAKES is in this picture, set only on a picture of that thing
+   * or what it is made from (the shot list, the line check, a step of a spoken list). The picture is
+   * drawn only from pictures of the same or an EARLIER stage (`memorySourcesFor`): a build video
+   * opens on the finished piece, and Hank's job 268 drew "hands drilling a hole into a charred cedar
+   * block" from the hook's finished, oiled holder. Unset: no stage, memory exactly as before.
+   */
+  buildStage?: BuildStage;
+  /**
+   * "steps": one step of a spoken list of steps (`applySpokenLists`) — the same piece, further along.
+   * Steps are done to one thing, never separate things: a step is about its key thing and is drawn
+   * from the steps before it in its list (`ownKeyThing`, `memorySourcesFor`).
+   */
+  listKind?: "steps";
+  /**
    * Whether something in this picture MOVES BY ITSELF, as judged on its own description
    * (`judgeSelfMoving`, 2026-10-01 — it replaced a fixed word list that let "a sliding door" and
    * "a smoke alarm" count as moving). Only `true` may be a video; unset means not judged yet.
@@ -501,8 +635,85 @@ export interface StoryboardScene {
   blurPrint?: true;
   /** The earlier pictures of the same key thing this one was drawn from (set at render). */
   memoryRefUrls?: string[];
+  /**
+   * What each picture in `memoryRefUrls` is, in the same order (set at render, `memoryFor`): its scene,
+   * whether it is a picture of this one's own thing, and which of its other key things it shows. A
+   * near-copy redraw of one of them drops just that reference (`withoutMemoryRef`, job 408 scene 19).
+   */
+  memoryRefScenes?: MemoryRef[];
   /** The camera position a memory picture is drawn from — never its memory's own (set at render). */
   memoryView?: string;
+  /**
+   * The memory pictures show only the OTHER key things in this picture, none of its own — the
+   * heater's first picture beside the first mattress (set at render). The picture is then not told
+   * its references are its own thing, and not compared with them (`memoryClause`, `scanSameThing`).
+   */
+  memoryOthersOnly?: true;
+  /**
+   * The OTHER key things in this picture that none of its memory pictures shows (set at render,
+   * `memoryFor`): drawn as this picture's own words describe them, never called "this exact" thing
+   * of the references (`memoryClause`). Job 404 scene 14 was told its two snowy-lawn robin pictures
+   * showed "this exact robin and gulf coast yard" — the lawn was the only yard there to copy.
+   */
+  memoryNotShown?: string[];
+  /**
+   * Its key thing's look, cut down for this picture (`keyThingLookFor`) — set at render ONLY when it
+   * has no picture of its own thing to follow, so the look is what its first picture is drawn by
+   * (Ruth's job 305: the first straight-stitch machine was drawn with no colour or material, and 5
+   * later pictures copied it).
+   */
+  keyThingLook?: string;
+  /**
+   * Where in `memoryRefUrls` the picture this one must not repeat is (set at render, `recomposeFrom`):
+   * the one shown RIGHT BEFORE it, about something else (job 399 scene 17 came back as scene 16 on a
+   * new background), or the one it CONTINUES as the same topic (`memoryContinues`). It lends only the
+   * thing's look, never its composition, and the same-thing check compares with it.
+   */
+  memoryRightBefore?: number;
+  /**
+   * The picture at `memoryRightBefore` is one this picture CONTINUES — a topic past its limit, a split
+   * picture's later part, the same words again (set at render, `continuedPicture`): job 405 scene 22
+   * came back as scene 21 a little tighter. It is drawn from a concrete new camera (`REDRAW_CAMERAS`).
+   */
+  memoryContinues?: true;
+  /**
+   * Its key thing's written look, set at render only on a picture drawn FROM a picture of its own
+   * thing (where `keyThingLook` stays unset): kept for the redraw from words a picture gets when it
+   * copies its memory twice (`memoryToWords`).
+   */
+  memoryWordsLook?: string;
+  /**
+   * The written looks of the OTHER key things this picture's own words name, cut down for it (set at
+   * render with its memory, `memoryFor`) — never a thing that only stood in a reference picture. Kept
+   * for the redraw from words (`memoryToWords`): job 409 scene 3,
+   * the aisle with the sympathy card in a man's hands, lost its reference and kept only the aisle's
+   * look, and came back holding a lily card in place of the cream card with a grey ribbon.
+   */
+  otherThingLooks?: ThingLook[];
+  /**
+   * The written looks of the PLACES this picture is set in, and of the key things its words name that
+   * stand in them with no reference picture showing them (set at render, `memoryFor`): a place never
+   * lends a reference picture — job 411's lawn handed scene 2's yard to four later pictures and its snow
+   * to the Gulf Coast panel — so a place is held to one look in words, and only where the picture's own
+   * words set it in that same place (`placeLookClause`). Job 412's "ankle" list item, drawn from
+   * nothing, came back in another bedroom with other bedding.
+   */
+  placeLooks?: PlaceLook[];
+  /**
+   * The picture's last check said what it must show is not in it (`missing`), so no later picture is
+   * drawn from it (`memorySourcesFor`): stored films had 22 first pictures copied after failing
+   * their last check. Never set for a staged look or readable writing alone — the thing is there.
+   * Set too when the frame that shipped was seen cut open (`cutOpenFault`, job 403).
+   */
+  memoryUnfit?: true;
+  /**
+   * Drawn from the OUTSIDE on purpose (`server/cutOpen.ts`): a key thing in it is a part hidden inside
+   * something — its props-list look describes an inside no camera sees (job 403: "the toilet's
+   * internal porcelain passage behind the bowl") — set by `attachMemory`; or the check saw this
+   * picture cut open (`cutOpenFault`). Its prompt then carries `SEEN_FROM_OUTSIDE_CLAUSE` and its
+   * check `INSIDE_PART_NOTE`. A picture whose own words ask for an inside view gets both without it.
+   */
+  seenFromOutside?: true;
   /**
    * The exact look of the specific named kind this picture shows ("churn dash block: a 3×3 block…"),
    * written by `describeNamedLooks` so the picture maker can draw what it cannot know by name.
@@ -529,11 +740,29 @@ export interface StoryboardScene {
   brollHostLook?: string;
   brollHostRef?: string;
   /**
-   * The host's picture is a step on their OWN FACE (make-up, skin care — `FACE_ROUTINE`), so the
-   * face is shown: drawn from the host photo (`hostFaceClause`) and checked to be the same person
-   * (`scanSameHost`). Unset on every other host picture, which keeps the face out of frame.
+   * The host's picture is a step on their OWN FACE (make-up, skin care — `FACE_ROUTINE`), or its line
+   * is about how something LOOKS on the face (a lipstick shade, a cut or colour round the face,
+   * glasses, earrings — `faceLookFramed`, 2026-10-18), so the face is shown: drawn from the host photo
+   * (`hostFaceClause` / `hostFaceLookClause`) and checked to be the same person (`scanSameHost`). Unset
+   * on every other host picture, which keeps the face out of frame, and on a split's panel.
    */
   hostFaceShown?: boolean;
+  /**
+   * A drawing of this host picture showed the face (`scanSameHost`'s `face`), so every later drawing
+   * of it — the redraw, and a Regenerate — is framed from behind or the side only
+   * (`HOST_TURNED_AWAY_CLAUSE`, `hostTurnedAway` in server/hostLook.ts), never the "either" framing
+   * the model ignored. Never set or acted on for a chin line's lips-cut picture, a step on the host's
+   * own face, or a picture of a piece worn at the neck (`mayTurnHostAway`).
+   */
+  hostTurnedAway?: true;
+  /**
+   * A drawing of this picture of SOMEONE ELSE (`otherPerson`) showed a face — the still check's
+   * `face` (job 410 scene 8: an older passenger in profile, eye, glasses and a smile) — so every later
+   * drawing of it, the redraw and a Regenerate, is framed from behind or the side and a little behind
+   * (`OTHERS_TURNED_AWAY_CLAUSE` in server/longformVideo.ts). Kept only while the picture is someone
+   * else's (`markHostBroll`).
+   */
+  othersTurnedAway?: true;
   /**
    * Where the device sits in a SCREEN picture (an app, a listing): each screen of a film gets the
    * next of several settings (`assignScreenSetups` in server/pictureVariety.ts), so no two look alike.
@@ -543,9 +772,39 @@ export interface StoryboardScene {
    * The person this picture shows when the line is about SOMEONE ELSE than the host — a customer,
    * a neighbour ("a woman customer"), in the line's own words. Drawn from behind or the side, face
    * never shown, WITHOUT the host's photo or look (`otherPersonClause`); the host is never put in
-   * their place. Set by the shot list (`other`).
+   * their place. Set by the shot list (`other`), the line check (`who`), or the picture's own words
+   * (`someoneElse` in server/hostLook.ts: a role, a sex the host does not have, two or more people).
    */
   otherPerson?: string;
+  /**
+   * How many people `otherPerson` is when more than one (2, or 3 for several): two people are never
+   * drawn from one photo, and the prompt asks for each of them (`otherPersonClause`).
+   */
+  otherPeople?: number;
+  /**
+   * The fixed look of the person (or people) `otherPerson` names when they come back in the story
+   * (`matchRecurringPeople` in server/hostLook.ts, stamped by `markHostBroll`): every picture of
+   * them is drawn with the same age, hair and clothes (`otherPersonClause`). Unset for someone the
+   * story shows only once, and for a name that fits no one or more than one recurring person.
+   */
+  otherPersonLooks?: RecurringPerson[];
+  /**
+   * The HOST when they are in a picture WITH someone else (`otherPerson`): the words naming them in
+   * the description (`who`: "a nurse" on a nurse's channel, "the host") and the host's look (`look`).
+   * Drawn from that look in words — never the host photo — seen from behind or the side, the face
+   * never shown, beside the other people (`hostWithOthersClause`). Set by `markHostBroll`
+   * (`castOfPicture` in server/hostLook.ts) on a channel with a host on camera; unset otherwise.
+   */
+  hostAmongOthers?: { who: string; look: string };
+  /**
+   * What this picture's SENTENCE rules out, so the picture must not show it — the act it says not
+   * to do, the thing it says is not meant or is used instead of, or the place it says to keep
+   * something away from ("the lumber stack near the furnace"), in the line check's words
+   * (`fitPicturesToLines`, `forbids`). The picture check asks whether the frame shows it
+   * (`scanStillDefects`' `forbids`) and draws once more when it does. It is about the LINE, so it
+   * stays through any later rewrite of the picture. Unset: the sentence rules nothing visible out.
+   */
+  forbids?: string;
   /**
    * This beat sits inside the FAST-OPEN window (`LongformPacing.fastOpen`): the first `zoneSec`
    * of narration, where cuts land faster to match the script's opening pace. Set once at
@@ -851,6 +1110,14 @@ export interface StoryboardScene {
    * field existed — a right-panel re-render backfills it.
    */
   splitRightUrl?: string;
+  /**
+   * The render gave up on this split's panel (`server/splitPanel.ts`): the draw failed twice, was
+   * still running when the host scene's time ran out, or the two halves could not be put
+   * together — so the scene shipped as its host take alone and the job carries a warning naming
+   * it. Why and when, for the card. Cleared by the next composite. Films rendered before the
+   * flag are found by `splitPanelMissing` (`shared/splitPanel.ts`), which reads the clips.
+   */
+  splitPanelMissing?: { reason: string; at: string };
   /**
    * Operator-chosen geometry of the split composite. Absent ⇒ the historical default layout
    * (host LEFT at the canvas remainder, b-roll in a full-height square panel, host crop panned
@@ -1187,6 +1454,39 @@ export interface JobGraphics {
   replan?: boolean;
   /** Why the last assembly shipped the film without graphics, when it did. */
   skipped?: string;
+  /**
+   * How the plan was written, round by round (server/graphics/apply.ts `plannerForJob`): what each
+   * round asked for, how many passed, and what the checks refused. Kept so a bare moment can be
+   * explained from the job and not only from a render log. Carried over by a Reassemble that reuses
+   * the saved plan (that one makes no model call). Capped: 60 problems a round, each cut short.
+   */
+  planner?: JobGraphicsPlanner;
+  /** The graphics whose words the readability check had to fix (or could not), with each step tried. */
+  readability?: { id: string; pass: boolean; summary: string; steps: string[] }[];
+}
+
+/** The graphics planner's rounds, as kept on the job (`JobGraphics.planner`). */
+export interface JobGraphicsPlanner {
+  model: string;
+  /** When this plan was written (a Reassemble that reuses it keeps this time). */
+  at?: string;
+  rounds: {
+    /** "first", "repair", "fill", "fill repair" or "lists". */
+    step: string;
+    asked: number;
+    kept: number;
+    problems: { cue: string; problem: string }[];
+    /** Problems past the cap, not kept. */
+    truncated?: number;
+    /** The fill round only: each sentence offered back (`at` = its first word, the text cut short),
+     * the cues whose start words are said in it, and whether a graphic is over it after the round (no
+     * cue and not placed = passed over). */
+    offered?: { at: number; text: string; asked: string[]; placed: boolean }[];
+    /** Offered sentences past the cap, not kept. */
+    offeredTruncated?: number;
+    /** The round's model call failed, or its answer could not be read. */
+    error?: string;
+  }[];
 }
 
 export interface LongformInputParams {
@@ -1243,8 +1543,8 @@ export interface LongformInputParams {
   droppedHostPhotos?: number;
   /**
    * The host's on-screen identity, resolved from the channel config. Rendered as a lower-third
-   * card over the SECOND host shot of the film (see `nameCardSceneIndex` / `renderNameCardPng`).
-   * All three unset → no card.
+   * card over the host's self-introduction take, else the first host take that can hold it (see
+   * `nameCardSceneIndices` / `renderNameCardPng`). All three unset → no card.
    */
   hostName?: string;
   hostTitle?: string;
@@ -1405,10 +1705,27 @@ export interface LongformInputParams {
    */
   keyThings?: KeyThing[];
   /**
-   * The spoken lists found in the whole script (`server/spokenLists.ts`), kept for the voicing
-   * stage's last pass, which applies them again on the final lengths.
+   * The people other than the host who come back in the story, each with one fixed look, written
+   * by the same call as the props list (its `PERSON name: look` lines, `parseRecurringPeople`) and
+   * kept apart from `continuitySheet`, which stays things only. Snapshotted with the props list.
    */
-  spokenLists?: { sentence: number; items: string[] }[];
+  recurringPeople?: RecurringPerson[];
+  /**
+   * WHO "YOU" IS when the script speaks to the viewer as someone the host's own job SERVES (a
+   * patient, a client, a guest) rather than someone doing the host's own kind of work: the role the
+   * script gives them and one fixed look, written by the props-list call (its `VIEWER name: look`
+   * line, `parseViewerPerson`). Every picture of "you" is then that ordinary person, drawn with that
+   * look, never the host. Unset — "you" stays the host, as before — when the viewer does the host's
+   * own work (a how-to), and on every job made before it. Snapshotted with the props list.
+   */
+  viewerPerson?: RecurringPerson;
+  /**
+   * The spoken lists found in the whole script (`server/spokenLists.ts`), kept for the voicing
+   * stage's last pass, which applies them again on the final lengths — with each list's kind and the
+   * time and place its sentence is set in (`setting`, job 409), so that pass and a resume set the
+   * items where the first pass did.
+   */
+  spokenLists?: { sentence: number; items: string[]; kind?: "things" | "steps"; setting?: string }[];
   /**
    * Which long-form tab (slot 0–4) launched this job. Selects BOTH per-tab provider keys: the
    * APIMART key for b-roll VIDEO generation (unset or a slot with no key ⇒ the 69Labs video path)

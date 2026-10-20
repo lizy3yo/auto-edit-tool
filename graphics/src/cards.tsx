@@ -76,6 +76,22 @@ export type MythTruthProps = BaseProps & {
   emphasis?: string[];
 };
 
+/** The widest a Myth/Truth line runs at full size, px. */
+const MYTH_TRUTH_MEASURE = 1240;
+/** How many px the myth's type shrinks by as it steps back for the truth. */
+const MYTH_SHRINK = 24;
+
+/**
+ * The myth's type `p` (0-1) of the way into its step back: smaller, and its measure narrower in
+ * the same proportion, so its lines break exactly where they broke at full size. With the measure
+ * held at full width the shrinking words re-flowed mid-turn — three lines became two, "know"
+ * jumped up a line while the strike was being drawn (job 399). Pure.
+ */
+export function mythType(p: number): { fontSize: number; maxWidth: number } {
+  const fontSize = TYPE.headline - MYTH_SHRINK * Math.min(1, Math.max(0, p));
+  return { fontSize, maxWidth: (MYTH_TRUTH_MEASURE * fontSize) / TYPE.headline };
+}
+
 export const MythTruthCard: React.FC<MythTruthProps> = ({ myth, truth, emphasis }) => {
   const t = useTheme();
   const frame = useCurrentFrame();
@@ -88,7 +104,7 @@ export const MythTruthCard: React.FC<MythTruthProps> = ({ myth, truth, emphasis 
     fontWeight: 800,
     lineHeight: 1.12,
     letterSpacing: "-0.015em",
-    maxWidth: 1240,
+    maxWidth: MYTH_TRUTH_MEASURE,
     textShadow: TEXT_SHADOW,
   };
   return (
@@ -99,23 +115,13 @@ export const MythTruthCard: React.FC<MythTruthProps> = ({ myth, truth, emphasis 
           <div style={{ marginBottom: 22 }}>
             <Kicker text="Myth" bracketed />
           </div>
-          <div style={{ position: "relative", display: "inline-block" }}>
-            <WordReveal
-              phrase={myth}
-              style={{ ...big, fontSize: TYPE.headline - 24 * p, color: t.text }}
-            />
-            <div
-              style={{
-                position: "absolute",
-                left: 0,
-                top: "52%",
-                height: 7,
-                width: `${strike * 100}%`,
-                background: t.danger,
-                borderRadius: 4,
-              }}
-            />
-          </div>
+          {/* Struck word by word, every line (job 399: one bar at half the block's height fell
+              between the two lines of a wrapped myth and ran past its words). */}
+          <WordReveal
+            phrase={myth}
+            strike={{ progress: strike, color: t.danger }}
+            style={{ ...big, ...mythType(p), color: t.text }}
+          />
         </div>
         <div style={{ opacity: p, transform: `translateY(${(1 - p) * 24}px)` }}>
           <div style={{ marginBottom: 22 }}>
@@ -134,7 +140,17 @@ export const MythTruthCard: React.FC<MythTruthProps> = ({ myth, truth, emphasis 
 
 /* ───────────────────────── This vs That ───────────────────────── */
 
-export type Side = { icon?: string; title: string; sub?: string; at: number };
+export type Side = {
+  icon?: string;
+  title: string;
+  sub?: string;
+  at: number;
+  /** When the sub's own words are said (set by the resolver from the side's "say", cueResolve
+   * `subHeard`); without it the sub enters with the title. */
+  subAt?: number;
+  /** When this side's spoken words finish (set by the resolver from its "say"). */
+  saidUntil?: number;
+};
 
 export type VersusProps = BaseProps & {
   kicker?: string;
@@ -148,6 +164,10 @@ export type VersusProps = BaseProps & {
  * One side of the comparison. Both sides read neutral (white) until the comparison is DECIDED
  * — the moment the second side is said — then the favoured side turns accent and the other
  * steps back. Greying a side before its rival is even on screen gives the verdict away early.
+ *
+ * The title enters at `at`, the sub at its own words (`subAt`): entering together, job 408's
+ * "German bathroom — A small bin, with a lid" gave the reveal away 2.3 s before "a small bin stands
+ * there, with a lid" was said. The sub's place is kept from the start, so the title never moves.
  */
 const SidePanel: React.FC<{ side: Side; tone: "win" | "lose" | "plain"; cx: number; decideFrame: number }> = ({
   side,
@@ -159,6 +179,7 @@ const SidePanel: React.FC<{ side: Side; tone: "win" | "lose" | "plain"; cx: numb
   const frame = useCurrentFrame();
   const at = useAt();
   const enter = useEnter(at(side.at), 26);
+  const subEnter = useEnter(at(side.subAt ?? side.at), 14);
   const d = tone === "plain" ? 0 : fadeIn(frame, decideFrame, 12);
   const titleColor = tone === "win" && d > 0.5 ? t.accent : t.text;
   const loseDim = tone === "lose" ? 1 - 0.55 * d : 1;
@@ -197,6 +218,7 @@ const SidePanel: React.FC<{ side: Side; tone: "win" | "lose" | "plain"; cx: numb
       {side.sub && (
         <div
           style={{
+            ...(side.subAt !== undefined ? subEnter : {}),
             marginTop: 14,
             fontFamily: t.font,
             fontWeight: 600,
@@ -218,7 +240,9 @@ export const VersusCard: React.FC<VersusProps> = ({ kicker, left, right, winner 
   const line = fadeIn(frame, 0, 14);
   const tone = (s: "left" | "right") =>
     winner === "none" ? "plain" : winner === s ? "win" : "lose";
-  const decide = Math.max(at(left.at), at(right.at)) + 6;
+  // The verdict waits until BOTH sides have been said: each side is at full strength while it is
+  // spoken (Scarlett's "Polished metal" greyed 0.2 s after it appeared, while she was saying it).
+  const decide = Math.max(at(left.saidUntil ?? left.at), at(right.saidUntil ?? right.at)) + 8;
   return (
     <AbsoluteFill>
       <CardBackground />
@@ -239,8 +263,10 @@ export const VersusCard: React.FC<VersusProps> = ({ kicker, left, right, winner 
       />
       <SidePanel side={left} tone={tone("left")} cx={480} decideFrame={decide} />
       <SidePanel side={right} tone={tone("right")} cx={1440} decideFrame={decide} />
+      {/* The badge enters WITH the second side, as NumberLabel's "vs" does: drawn with the first, it
+          pointed at an empty half for 2.8 s (job 408, "American bathroom" until "In a German bathroom"). */}
       <div style={{ position: "absolute", left: 960 - 75, top: 530 }}>
-        <VsBadge atFrame={Math.min(at(left.at), at(right.at)) + 4} />
+        <VsBadge atFrame={Math.max(at(left.at), at(right.at)) + 4} />
       </div>
     </AbsoluteFill>
   );
@@ -437,10 +463,12 @@ export const StepCardsCard: React.FC<StepCardsProps> = ({ kicker, steps }) => {
 
 /* ───────────────────────── Before → After ───────────────────────── */
 
+/** The icons are optional: an icon is the object a side names, or none (job 400's "The loudest
+ * thing" names no object, and was given a megaphone). The planner keeps them as a pair. */
 export type BeforeAfterProps = BaseProps & {
   kicker?: string;
-  before: { icon: string; label: string; at: number };
-  after: { icon: string; label: string; at: number };
+  before: { icon?: string; label: string; at: number };
+  after: { icon?: string; label: string; at: number };
 };
 
 export const BeforeAfterCard: React.FC<BeforeAfterProps> = ({ kicker, before, after }) => {
@@ -467,12 +495,12 @@ export const BeforeAfterCard: React.FC<BeforeAfterProps> = ({ kicker, before, af
       )}
       <AbsoluteFill style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 120, paddingTop: 80 }}>
         <div style={{ ...b, display: "flex", flexDirection: "column", alignItems: "center", width: 620 }}>
-          <Icon code={before.icon} size={240} />
+          {before.icon && <Icon code={before.icon} size={240} />}
           <div style={{ ...label, color: t.textSecondary }}>{before.label}</div>
         </div>
         <Arrow atFrame={at(after.at) - 6} width={180} thickness={8} />
         <div style={{ ...a, display: "flex", flexDirection: "column", alignItems: "center", width: 620 }}>
-          <Icon code={after.icon} size={240} />
+          {after.icon && <Icon code={after.icon} size={240} />}
           <div style={{ ...label, color: t.accent }}>{after.label}</div>
         </div>
       </AbsoluteFill>

@@ -153,5 +153,7 @@ describe("list items stay their own things; real names look real (Dale's job 290
     const { NAMED_LOOKS_SYSTEM } = await import("./namedLooks");
     expect(NAMED_LOOKS_SYSTEM).toMatch(/REAL, RECOGNISABLE thing the LINE names/);
     expect(NAMED_LOOKS_SYSTEM).toMatch(/physical PART of that one thing/);
-  });
+    // The first import of longformVideo in this file: ~4.5 s alone, past the 5 s default in a busy
+    // parallel run of the whole suite (5.3 s once continuationViews.test.ts joined it).
+  }, 30_000);
 });

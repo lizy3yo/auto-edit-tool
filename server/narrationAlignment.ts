@@ -20,6 +20,7 @@
  * scene's share of the total word count. Pure (no IO) — unit-tested.
  */
 import type { StoryboardScene } from "../shared/types";
+import { endsOnAbbreviation } from "../shared/sentenceEnds";
 import type { WhisperWord } from "./_core/voiceTranscription";
 import type { SilenceInterval } from "./videoAssembly";
 
@@ -38,6 +39,8 @@ type BoundaryPlan = {
   /** Where the transcript says the two words meet: `[prevWord.end, nextWord.start]`. Only a real
    * pause may use the wider `gaps` window — see `SHORT_GAP_SLACK_SEC`. */
   meets?: Gap[];
+  /** The transcript word each boundary's scene starts on (-1 when the walk could not say). */
+  next?: number[];
   /** Boundary indexes pinned by a CTA anchor — found verbatim, so never moved by a repair. */
   pinned: number[];
 };
@@ -76,6 +79,132 @@ const SNAP_CUT_MARGIN_SEC = 0.04;
  * "th" of Hannah's "with" take a cut (the words met at 25.13-25.19, the gap sat at 25.04-25.09).
  */
 const SHORT_GAP_SLACK_SEC = 0.03;
+/**
+ * The most speech a number's sound may run before its transcribed start. The aligner times a word
+ * by its letters, and a number written in digits ("370", "$500") has none it can use, so its start
+ * is a guess — usually late: job 406's "Three hundred seventy pages" began at 180.16 s, right after
+ * a 0.74 s pause, and was heard as one token "370" at 180.53. Past this much speech between the
+ * pause and the guess, something else was said there (a word the transcript lost), and the number
+ * keeps the time it was heard at.
+ */
+const NUMBER_LATE_MAX_SEC = 1;
+/** The word before a number must have begun at least this long before the pause the number follows. */
+const PREV_SOUND_SEC = 0.03;
+/** A pause ending this close to the number's transcribed start already IS its start. */
+const NUMBER_ONSET_SLACK_SEC = 0.02;
+/** A word written with a digit — a time the transcriber guessed rather than aligned. */
+const SPOKEN_NUMBER = /\d/;
+/**
+ * A scene's text that ends a sentence — the same test `endsSentence` makes on a whole scene: never
+ * on an initial or a short form ("…On a lot of U.", job 417), whose full stop belongs to the word.
+ */
+const endsSentenceText = (t: string, next?: string) =>
+  /[.!?…]["'”’)\]]*$/.test(t) && !endsOnAbbreviation(t, next);
+/**
+ * The furthest a cut at a sentence break beside a number may move from where the words put it.
+ * The window it is chosen in is two words wide, so this only guards a transcript whose words there
+ * are seconds long (a hole the plausibility gate has not caught).
+ */
+const NUMBER_BREAK_MAX_MOVE_SEC = 1.5;
+/**
+ * The most sound between two pauses that is still one gap between sentences — a breath the
+ * sentence-pause step lowered but did not silence, never a word. Job 409 (1:39): "…all seven of the
+ * thieves." — 1.0 s of silence, 0.17 s of breath, 0.55 s of silence — "Two thousand years ago".
+ */
+const BREATH_MAX_SEC = 0.3;
+
+/**
+ * The real pause at a sentence break beside a spoken number — the one the next sentence starts
+ * after — or null when neither word at the break is a number or no pause reaches in. `next` is the
+ * index of the first word after the break.
+ *
+ * The transcriber cannot time a number written in digits ("370", "$10,000."), and it drags the
+ * words on either side of it too: job 413 (2:59) heard "…actually run. 370 pages" with "run." at
+ * 180.09-180.61 and "370" at 180.71, where the voice says "…actually run." before a 0.81 s pause
+ * (179.15-179.96) and "Three hundred seventy" after it. "run." was timed over "Three hundred", so the
+ * transcript's own meeting point held no pause at all and the cover-to-host cut came out at 180.54,
+ * on "seventy". The opening's "costs $10,000. | A loan," the other way: "A" heard at 5.47, inside the
+ * 0.75 s pause it really ends (5.37-6.12). So neither word's time is trusted here: the longest real
+ * pause (`silences`, ≥120 ms — never a closure inside a word) reaching into the words around the
+ * break, up to the end of the first one after, is the break. It reaches back to the end of the word
+ * before the last one only when the number comes AFTER the break — the word dragged is then the
+ * sentence's last, as "run." was; a number that ENDS the sentence is reached from its own start, so
+ * a pause the voice leaves before a price ("it costs… ten thousand dollars.") is never taken for the
+ * gap after it. Only ever at a sentence break (the caller's test, from the script): a sentence end
+ * is where the voice pauses longest, and every voiced master gets ≥0.25 s of silence there
+ * (`sentencePauses.ts`), while a comma's pause, or a silence inside a heard word, may be anything.
+ * A gap a breath split in two is one gap: a pause starting within `BREATH_MAX_SEC` of the chosen
+ * one's end, and before the first word after the break is heard, takes over, so the cut still comes
+ * where the next sentence begins. Returns the pause itself (an element of `silences`). Pure —
+ * unit-tested.
+ */
+export function numberBreakPause<W extends { start: number; end: number; word?: string }>(
+  words: readonly W[],
+  next: number,
+  silences: readonly SilenceInterval[] | null | undefined
+): SilenceInterval | null {
+  const before = words[next - 1];
+  const after = words[next];
+  if (!before || !after || !silences?.length) return null;
+  const numberAfter = SPOKEN_NUMBER.test(after.word ?? "");
+  if (!numberAfter && !SPOKEN_NUMBER.test(before.word ?? "")) return null;
+  const from = numberAfter ? (words[next - 2]?.end ?? before.start) : before.start;
+  const to = after.end;
+  let best: SilenceInterval | null = null;
+  let bestIn = 0;
+  for (const p of silences) {
+    const inside = Math.min(p.end, to) - Math.max(p.start, from);
+    if (inside > bestIn) {
+      best = p;
+      bestIn = inside;
+    }
+  }
+  if (!best) return null;
+  const later = silences.filter(p => p.start > best!.start).sort((a, b) => a.start - b.start);
+  for (const p of later) {
+    if (p.start - best.end > BREATH_MAX_SEC || p.start >= after.start) break;
+    best = p;
+  }
+  return best;
+}
+
+/**
+ * The words with each NUMBER moved back to where its sound begins: the end of the last real pause
+ * (`silences`, ≥120 ms — never a closure inside a word) after the word before it began, when there
+ * is speech between that pause and the number's transcribed start. Job 406: the cut from the book
+ * cover to the host was placed by text, the host's line opened on "Three hundred seventy pages",
+ * and a cut made from the transcript's late "370" could land inside the number — "Three hundred |
+ * seventy" — where the real break was the pause before it. Only ever earlier, never past
+ * `NUMBER_LATE_MAX_SEC`, and never when the word before is heard running ON past that pause: such a
+ * word may be one the transcriber started early (Whisper puts onsets inside words), and the speech
+ * after the pause its own. Nor when the word before is itself heard AFTER the pause: job 413's
+ * "run." was timed over "Three hundred", so the pause sat before the word before and nothing here
+ * could move "370" back past it. A cut at a sentence break deals with both by the pause itself
+ * (`numberBreakPause`, used by the aligner's snap and by `gapBeforeWord` in planGate.ts). A number
+ * with no pause before it is left as heard — a voice running straight on gives no edge to trust.
+ * Returns new objects; pure — unit-tested.
+ */
+export function retimeSpokenNumbers<
+  W extends { start: number; end: number; word?: string },
+>(words: readonly W[], silences: readonly SilenceInterval[] | null | undefined): W[] {
+  const out = words.map(w => ({ ...w }));
+  if (!silences?.length) return out;
+  for (let i = 1; i < out.length; i++) {
+    const w = out[i];
+    const prev = out[i - 1];
+    if (!SPOKEN_NUMBER.test(w.word ?? "")) continue;
+    let pause: SilenceInterval | undefined;
+    for (const p of silences) {
+      if (p.start < prev.start + PREV_SOUND_SEC) continue; // before the word before was said
+      if (p.end >= w.start - NUMBER_ONSET_SLACK_SEC) continue; // no speech between it and the number
+      if (w.start - p.end > NUMBER_LATE_MAX_SEC) continue;
+      if (!pause || p.end > pause.end) pause = p;
+    }
+    if (!pause || prev.end > pause.end + NUMBER_ONSET_SLACK_SEC) continue;
+    w.start = pause.end;
+  }
+  return out;
+}
 
 /** Lowercased alphanumeric word tokens (digits kept so "2024" is one token; edge apostrophes dropped). */
 export function tokenizeNarration(text: string): string[] {
@@ -114,6 +243,35 @@ export function numberWords(n: number): string[] {
   return String(n)
     .split("")
     .map(d => ONES[+d]);
+}
+
+/** The words a number spelled out in the script can END on: the number itself, or what it counts. */
+const SPELLED_NUMBER_END = new Set([
+  ...ONES,
+  ...TENS,
+  "hundred",
+  "thousand",
+  "million",
+  "billion",
+  "dollar",
+  "dollars",
+  "cent",
+  "cents",
+  "percent",
+]);
+
+/**
+ * Whether a SCRIPT word can be the last word of a number spelled out ("seventy-five", "dollars.",
+ * "hundred,"). The transcriber writes the whole amount as ONE numeral ("$75.", "300,"), so such a
+ * word is never heard as itself, and a cut looked up by it finds nothing. Pure — unit-tested.
+ */
+export function endsSpelledNumber(word: string | undefined): boolean {
+  const parts = (word ?? "")
+    .toLowerCase()
+    .replace(/[^a-z-]+/g, "")
+    .split("-")
+    .filter(Boolean);
+  return parts.length > 0 && parts.every(p => SPELLED_NUMBER_END.has(p));
 }
 
 /**
@@ -211,10 +369,17 @@ export function assignSceneRanges(
   const sceneTokens = scenes.map(s =>
     tokenizeNarration(s.scriptText ?? s.narration ?? "")
   );
+  // A number's transcribed start is a guess, usually late; with the real pauses known it goes back
+  // to where its sound begins, so a cut before it lands in the pause and never inside the number
+  // (job 406: "Three hundred | seventy pages").
+  const timed =
+    words && words.length > 0 && silences?.length
+      ? retimeSpokenNumbers(words, silences)
+      : words;
 
   const plan: BoundaryPlan =
-    words && words.length > 0
-      ? alignBoundaries(sceneTokens, words, dur, ctaAnchors(scenes))
+    timed && timed.length > 0
+      ? alignBoundaries(sceneTokens, timed, dur, ctaAnchors(scenes))
       : {
           boundaries: proportionalByTokens(sceneTokens, dur),
           gaps: [],
@@ -255,16 +420,32 @@ export function assignSceneRanges(
   const tokenCounts = sceneTokens.map(t => t.length);
   if (silences && silences.length > 0) {
     const aligned = boundaries;
+    // A sentence break beside a spoken number is cut in the real pause between the two sentences,
+    // never where the words around the number put it (`numberBreakPause` — job 413's book cover held
+    // through the pause and the host came back on "seventy").
+    const atNumbers = timed?.length
+      ? numberBreakCuts(scenes, timed, plan, boundaries, silences)
+      : [];
     boundaries = snapBoundariesToSilence(
       boundaries,
       silences,
       plan.gaps,
       shortSilences ?? [],
-      plan.meets ?? []
+      plan.meets ?? [],
+      atNumbers
     );
     // A snap never takes a piece's own words away — judged on the snap alone, before the QR
-    // rescue below moves a cut on purpose.
-    boundaries = keepOwnWords(aligned, boundaries, plan.meets ?? []);
+    // rescue below moves a cut on purpose. A cut made at a number's sentence break is the piece's
+    // edge itself: the heard words there are the guesses it was made to get past.
+    const snapped = boundaries;
+    boundaries = keepOwnWords(
+      aligned,
+      snapped,
+      plan.meets ?? [],
+      atNumbers.map(
+        (c, s) => c != null && snapped[s] === cutPointInSilence(silences[c].end, silences[c])
+      )
+    );
     rescueSilentQrTails(scenes, boundaries, silences);
     boundaries = unsnapImplausible(aligned, boundaries, tokenCounts);
   }
@@ -294,6 +475,35 @@ export function assignSceneRanges(
     scenes[i].audioDuration = endSec - startSec;
   }
   return ranges;
+}
+
+/**
+ * For each boundary that starts a sentence with a spoken number beside it, the index (in
+ * `silences`) of the real pause the cut goes in — `numberBreakPause` — else null. The sentence
+ * break is read from the SCRIPT (the scene before ends one), never the transcript's punctuation;
+ * only boundaries whose words the walk placed (`plan.meets`), never a stretch re-split by word
+ * count. Parallel to `boundaries`.
+ */
+function numberBreakCuts(
+  scenes: StoryboardScene[],
+  words: readonly WhisperWord[],
+  plan: BoundaryPlan,
+  boundaries: number[],
+  silences: SilenceInterval[]
+): (number | null)[] {
+  const out: (number | null)[] = new Array(boundaries.length).fill(null);
+  for (let s = 1; s < scenes.length; s++) {
+    if (!plan.meets?.[s]) continue;
+    const said = (scenes[s - 1].scriptText ?? scenes[s - 1].narration ?? "").trim();
+    if (!endsSentenceText(said, scenes[s].scriptText ?? scenes[s].narration)) continue;
+    const next = plan.next?.[s] ?? -1;
+    if (next < 1) continue;
+    const pause = numberBreakPause(words, next, silences);
+    if (!pause) continue;
+    if (Math.abs(cutPointInSilence(pause.end, pause) - boundaries[s]) > NUMBER_BREAK_MAX_MOVE_SEC) continue;
+    out[s] = silences.indexOf(pause);
+  }
+  return out;
 }
 
 /**
@@ -487,6 +697,7 @@ function alignBoundaries(
   const boundaries: number[] = new Array(n + 1);
   const gaps: Gap[] = new Array(n + 1).fill(null);
   const meets: Gap[] = new Array(n + 1).fill(null);
+  const next: number[] = new Array(n + 1).fill(-1);
   boundaries[0] = 0;
   boundaries[n] = masterDurationSec;
   for (let s = 1; s < n; s++) {
@@ -513,7 +724,9 @@ function alignBoundaries(
     // (production job 75: 14/169 cuts stranded mid-word by the old [prevEnd, nextStart] clamp),
     // but a cut past these spans would move a whole word into the wrong scene. ANCHORED
     // boundaries keep the narrow inter-word gap: the QR trigger/release was found verbatim, so
-    // its onset is trustworthy, and a nearby pause must not pull the pinned QR cut off it.
+    // its onset is trustworthy, and a nearby pause must not pull the pinned QR cut off it — unless
+    // a spoken number sits at that sentence break, whose words' times are guesses whatever the text
+    // matched (`numberBreakCuts`).
     const prevStart =
       prevEndIdx >= 0 && prevEndIdx < words.length
         ? words[prevEndIdx].start
@@ -522,6 +735,7 @@ function alignBoundaries(
       nextStartIdx < words.length ? words[nextStartIdx].end : nextStart;
     gaps[s] = aw !== undefined ? [prevEnd, nextStart] : [prevStart, nextEnd];
     meets[s] = [prevEnd, nextStart];
+    next[s] = nextStartIdx < words.length ? nextStartIdx : -1;
   }
   // Anchor authority: predecessors that overshot a pinned boundary are pulled back and spread
   // evenly over the stretch before it — residual drift can neither squeeze the CTA block nor
@@ -537,13 +751,14 @@ function alignBoundaries(
         boundaries[j] + ((boundaries[b] - boundaries[j]) * (k - j)) / (b - j);
       gaps[k] = null; // walk indexes here are drift garbage — snap tolerance-only
       meets[k] = null;
+      next[k] = -1;
     }
   }
   // Guarantee non-decreasing even if a degenerate scene produced an inverted midpoint.
   for (let s = 1; s <= n; s++) {
     if (boundaries[s] < boundaries[s - 1]) boundaries[s] = boundaries[s - 1];
   }
-  return { boundaries, gaps, meets, pinned: anchorIdxs };
+  return { boundaries, gaps, meets, next, pinned: anchorIdxs };
 }
 
 /** A contiguous stretch of scenes (positions in the scene array, inclusive) and its audio span. */
@@ -798,28 +1013,38 @@ export const OWN_WORDS_MIN_SHARE = 0.6;
  * edge and wrong for a piece that IS one short word. Any piece whose snapped slice holds less than
  * `OWN_WORDS_MIN_SHARE` of its own words' time (`meets`: where its first word starts and its last
  * word ends) gets both cuts back where the alignment put them. Stays monotonic. Pure — unit-tested.
+ *
+ * `kept[s]`: boundary `s` was cut in the real pause at a sentence break beside a spoken number
+ * (`numberBreakCuts`). There the heard words are the guesses the cut was made to get past, so the
+ * cut itself is the piece's edge and it is never put back: job 413's list item "A loan," was heard
+ * starting 0.65 s early, inside the pause before it, and judged by that word it lost "its own"
+ * words to the very cut that gave the picture its word.
  */
 export function keepOwnWords(
   aligned: number[],
   snapped: number[],
-  meets: readonly (readonly [number, number] | null)[]
+  meets: readonly (readonly [number, number] | null)[],
+  kept: readonly boolean[] = []
 ): number[] {
   const n = aligned.length - 1;
   const out = snapped.slice();
   for (let i = 0; i < n; i++) {
-    const first = i > 0 ? meets[i]?.[1] : undefined;
-    const last = i + 1 < n ? meets[i + 1]?.[0] : undefined;
+    const first = i > 0 ? (kept[i] ? out[i] : meets[i]?.[1]) : undefined;
+    const last = i + 1 < n ? (kept[i + 1] ? out[i + 1] : meets[i + 1]?.[0]) : undefined;
     if (first == null || last == null || last <= first) continue;
     const held = Math.min(out[i + 1], last) - Math.max(out[i], first);
     if (held >= (last - first) * OWN_WORDS_MIN_SHARE) continue;
-    out[i] = aligned[i];
-    out[i + 1] = aligned[i + 1];
+    if (!kept[i]) out[i] = aligned[i];
+    if (!kept[i + 1]) out[i + 1] = aligned[i + 1];
   }
   for (let dirty = true; dirty; ) {
     dirty = false;
     for (let s = 1; s <= n; s++) {
       if (out[s] >= out[s - 1]) continue;
-      if (out[s] !== aligned[s]) out[s] = aligned[s];
+      // Put back a cut the snap moved on its own first; a kept cut only when nothing else can.
+      if (out[s] !== aligned[s] && !kept[s]) out[s] = aligned[s];
+      else if (out[s - 1] !== aligned[s - 1] && !kept[s - 1]) out[s - 1] = aligned[s - 1];
+      else if (out[s] !== aligned[s]) out[s] = aligned[s];
       else out[s - 1] = aligned[s - 1];
       dirty = true;
     }
@@ -971,7 +1196,10 @@ function cutPointInSilence(boundary: number, sil: SilenceInterval): number {
  * tolerance-only snapping. Boundaries with no qualifying silence in `silences` get a second
  * chance against `shortSilences` (a finer scan that sees sub-120ms inter-word gaps) — only within
  * `SHORT_GAP_SLACK_SEC` of where the words meet (`meets[s]`), since a gap that short may be a
- * consonant's closure inside a word. Keeps
+ * consonant's closure inside a word. A boundary with an `atNumbers` pause (an index into
+ * `silences`, from `numberBreakCuts`) is cut at that pause's end — where the next sentence begins —
+ * ahead of every other boundary and past both windows: the words those windows come from are the
+ * guesses beside a spoken number. Keeps
  * `boundaries` monotonic and tiling `[0, dur]`. Pure — unit-tested.
  */
 function snapBoundariesToSilence(
@@ -979,14 +1207,20 @@ function snapBoundariesToSilence(
   silences: SilenceInterval[],
   gaps: Gap[] = [],
   shortSilences: SilenceInterval[] = [],
-  meets: Gap[] = []
+  meets: Gap[] = [],
+  atNumbers: readonly (number | null)[] = []
 ): number[] {
   const n = boundaries.length - 1; // scene count
   const pick: { cut: number; interval: number; dist: number }[] = new Array(
     n + 1
   );
-  for (let s = 1; s < n; s++)
-    pick[s] = { cut: boundaries[s], interval: -1, dist: Infinity };
+  for (let s = 1; s < n; s++) {
+    const c = atNumbers[s];
+    const p = c != null ? silences[c] : undefined;
+    pick[s] = p
+      ? { cut: cutPointInSilence(p.end, p), interval: c!, dist: -1 }
+      : { cut: boundaries[s], interval: -1, dist: Infinity };
+  }
 
   // Tier 1: real pauses; tier 2 (only for boundaries tier 1 left unsnapped): short-gap scan.
   for (const tier of [silences, shortSilences]) {

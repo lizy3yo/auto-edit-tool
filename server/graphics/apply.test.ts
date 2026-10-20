@@ -1,0 +1,242 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { writeFileSync } from "node:fs";
+import type { JobGraphics, LongformInputParams, StoryboardScene } from "@shared/types";
+import type { AddGraphicsInput, GraphicsRecord } from "./finish";
+
+/**
+ * What the graphics step keeps on the job (G1). The planner's refusals and the readability fixes
+ * used to reach only the render log: across the 12 films made with graphics (jobs 385-398) the rows
+ * held one left-out graphic and no refusal, so a bare moment of Dale's job 397 ("Smalls, about $10
+ * to $40.") could not be explained from the job.
+ */
+
+let record: Partial<GraphicsRecord> | Error = {};
+vi.mock("../db", () => ({ getChannelConfig: vi.fn(async () => undefined) }));
+vi.mock("./finish", () => ({
+  addGraphics: vi.fn(async (input: AddGraphicsInput) => {
+    if (record instanceof Error) throw record;
+    writeFileSync(input.outPath, "film with graphics");
+    return record;
+  }),
+  themeOf: vi.fn(async () => ({ accent: "#3FA36B", bg: "#0B1A12" })),
+}));
+
+const { withGraphics, plannerForJob, readabilityForJob, MAX_KEPT_PER_ROUND, filmLayoutOf, splitHostPanel } = await import("./apply");
+const finish = await import("./finish");
+
+const hooks = { phase: () => {}, warn: vi.fn(), log: () => {} };
+const qa = { pass: true, lines: ["all good"], failures: [] } as unknown as GraphicsRecord["qa"];
+const base = (over: Partial<GraphicsRecord> = {}): Partial<GraphicsRecord> => ({ at: "2026-10-18T10:00:00.000Z", plan: [], placed: [], dropped: [], qa, readability: [], ...over });
+const params = (graphics?: JobGraphics) => ({ script: "", graphics }) as unknown as LongformInputParams;
+const run = async (p: LongformInputParams) => {
+  await withGraphics(397, Buffer.from("film"), [], p, hooks);
+  return p.graphics!;
+};
+
+const refusal = { cue: "probe-smalls-price", problem: "starts 0.4 s after three-piles ends (needs 1 s)" };
+const rounds = [{ step: "first" as const, asked: 21, kept: 20, problems: [refusal] }];
+const lattice = { id: "lattice-six-hours", pass: false, summary: "colour 4.0:1", steps: ["as designed: colour 3.1:1", "darker behind the words (0.5): colour 3.6:1", "darker behind the words (1): colour 4.0:1"] };
+
+beforeEach(() => {
+  delete process.env.GRAPHICS;
+  record = {};
+  vi.mocked(finish.addGraphics).mockClear();
+});
+afterEach(() => {
+  delete process.env.GRAPHICS;
+});
+
+describe("the planner's rounds are kept on the job", () => {
+  it("a fresh plan keeps each round's asked, kept and refusals, with the model and when it was written", async () => {
+    record = base({ planner: { model: "claude-opus-5-5", rounds } });
+    const g = await run(params());
+    expect(g.planner?.rounds[0].problems[0].cue).toBe("probe-smalls-price");
+    expect(g.planner).toEqual({ model: "claude-opus-5-5", at: "2026-10-18T10:00:00.000Z", rounds: [{ step: "first", asked: 21, kept: 20, problems: [refusal] }] });
+  });
+
+  it("a Reassemble that reuses the saved plan (no model call, no rounds) carries the rounds that wrote it", async () => {
+    const prior = plannerForJob({ model: "claude-opus-5-5", rounds }, "2026-10-17T09:00:00.000Z");
+    record = base({ planner: undefined, plan: [{ id: "probe-smalls-price" }] as GraphicsRecord["plan"] });
+    const g = await run(params({ plan: [{ id: "probe-smalls-price" }], planner: prior }));
+    expect(g.planner).toEqual(prior);
+    expect(vi.mocked(finish.addGraphics).mock.calls[0][0].savedPlan).toEqual([{ id: "probe-smalls-price" }]);
+  });
+
+  it("a re-plan replaces the old rounds with its own", async () => {
+    const prior = plannerForJob({ model: "claude-opus-5-5", rounds }, "2026-10-17T09:00:00.000Z");
+    record = base({ planner: { model: "claude-opus-5-5", rounds: [{ step: "first", asked: 5, kept: 5, problems: [] }] } });
+    const g = await run(params({ plan: [], planner: prior, replan: true }));
+    expect(g.planner?.at).toBe("2026-10-18T10:00:00.000Z");
+    expect(g.planner?.rounds).toEqual([{ step: "first", asked: 5, kept: 5, problems: [] }]);
+  });
+
+  it("graphics off, or a step that failed, leaves the kept rounds and readability as they were", async () => {
+    const prior: JobGraphics = { plan: [], planner: plannerForJob({ model: "m", rounds }, "t"), readability: readabilityForJob([lattice]) };
+    process.env.GRAPHICS = "0";
+    const off = await run(params(structuredClone(prior)));
+    expect(off).toMatchObject({ planner: prior.planner, readability: prior.readability, skipped: "motion graphics are off (GRAPHICS=0)" });
+    delete process.env.GRAPHICS;
+    record = new Error("ffmpeg died");
+    const failed = await run(params(structuredClone(prior)));
+    expect(failed).toMatchObject({ planner: prior.planner, readability: prior.readability, skipped: "ffmpeg died" });
+  });
+});
+
+describe("the readability fixes are kept beside what was left out", () => {
+  it("a graphic left out as unreadable keeps the steps tried; one that read as designed is not kept", async () => {
+    const asDesigned = { id: "three-piles", pass: true, summary: "contrast 9.2:1", steps: ["as designed: contrast 9.2:1"] };
+    const shaded = { id: "smalls-label", pass: true, summary: "contrast 6.1:1", steps: ["as designed: contrast 3.9:1", "darker behind the words (0.5): contrast 6.1:1"] };
+    record = base({ readability: [asDesigned, lattice, shaded], dropped: [{ id: "lattice-six-hours", why: "text not readable on the picture (colour 4.0:1)" }] });
+    const g = await run(params());
+    expect(g.dropped).toEqual([{ id: "lattice-six-hours", why: "text not readable on the picture (colour 4.0:1)" }]);
+    expect(g.readability).toEqual([lattice, shaded]);
+  });
+
+  it("nothing kept when every graphic read as designed — and the last film's fixes do not linger", async () => {
+    record = base({ readability: [{ id: "three-piles", pass: true, summary: "contrast 9.2:1", steps: ["as designed: contrast 9.2:1"] }] });
+    const g = await run(params({ plan: [], readability: readabilityForJob([lattice]) }));
+    expect(g.readability).toBeUndefined();
+  });
+});
+
+describe("what is kept is capped (it rides every save of the job)", () => {
+  it("200 refusals keep 60, each at most 200 characters, and say how many were left out", () => {
+    const many = Array.from({ length: 200 }, (_, i) => ({ cue: `cue-${i}-${"x".repeat(100)}`, problem: `refused ${"because ".repeat(60)}` }));
+    const kept = plannerForJob({ model: "m", rounds: [{ step: "first", asked: 200, kept: 0, problems: many }] }, "t")!;
+    const r = kept.rounds[0];
+    expect(r.problems).toHaveLength(MAX_KEPT_PER_ROUND);
+    expect(r.truncated).toBe(140);
+    expect(r.problems.every(p => p.problem.length <= 200 && p.cue.length <= 80)).toBe(true);
+    expect(r.problems[0].problem.endsWith("…")).toBe(true);
+  });
+
+  it("the fill round's offered sentences are kept short, their start rounded, the passed-over ones visible", () => {
+    const offered = Array.from({ length: 70 }, (_, i) => ({ from: 49.6812 + i, to: 52.48 + i, text: i ? `Sentence ${i} ${"word ".repeat(30)}` : "Smalls, about $10 to $40.", asked: [], placed: false }));
+    const kept = plannerForJob({ model: "m", rounds: [{ step: "fill", asked: 0, kept: 0, problems: [], offered }] }, "t")!;
+    const r = kept.rounds[0];
+    expect(r.offered?.[0]).toEqual({ at: 49.68, text: "Smalls, about $10 to $40.", asked: [], placed: false });
+    expect(r.offered).toHaveLength(MAX_KEPT_PER_ROUND);
+    expect(r.offeredTruncated).toBe(10);
+    expect(r.offered!.every(o => o.text.length <= 80)).toBe(true);
+    expect(r.truncated).toBeUndefined();
+  });
+
+  it("a round with nothing to cut carries no truncation counts and no error", () => {
+    const kept = plannerForJob({ model: "m", rounds }, "t")!;
+    expect(Object.keys(kept.rounds[0]).sort()).toEqual(["asked", "kept", "problems", "step"]);
+    const failed = plannerForJob({ model: "m", rounds: [{ step: "fill", asked: 0, kept: 0, problems: [], offered: [], error: "overloaded" }] }, "t")!;
+    expect(failed.rounds[0]).toEqual({ step: "fill", asked: 0, kept: 0, problems: [], offered: [], error: "overloaded" });
+  });
+});
+
+describe("the film's layout carries each split's host panel (job 400's caption ran across the seam)", () => {
+  const R2 = "https://pub-x.r2.dev/longform/400";
+  // Job 400's scene 27 as stored: a split, its finished clip the composite, the host take beside it.
+  const split27 = {
+    index: 27,
+    narrationStartSec: 138.19,
+    narrationEndSec: 144.12,
+    scriptText: "When a man like that sits down to write about time, I pull my chair in closer.",
+    hostPresent: true,
+    sceneStatus: "completed",
+    splitVisual: "An aged papyrus scroll laid flat on a wooden desk",
+    splitRightUrl: `${R2}/still-27-a.mp4`,
+    clipUrls: [`${R2}/split-27-0-weCNwc.mp4`],
+    hostClipUrls: [`${R2}/clip-27-0-k0tiiz.mp4`],
+  } as unknown as StoryboardScene;
+  // Its scene 3: a split whose picture never came, so the film plays the host take full frame.
+  const missing3 = {
+    index: 3,
+    narrationStartSec: 12.88,
+    narrationEndSec: 17.32,
+    scriptText: "He is counting backward. He is sixty-four.",
+    hostPresent: true,
+    sceneStatus: "completed",
+    splitVisual: "A sympathy card in a plain cream envelope",
+    clipUrls: [`${R2}/clip-3-0-tcI0x8.mp4`],
+    hostClipUrls: [`${R2}/clip-3-0-tcI0x8.mp4`],
+  } as unknown as StoryboardScene;
+
+  it("400 scene 27: a split, with the host's panel where the compositor drew it (840 px on the left)", () => {
+    const [s] = filmLayoutOf([split27]).scenes;
+    expect(s).toMatchObject({ index: 27, split: true, hostPanel: { x: 0, w: 840 } });
+  });
+
+  it("400 scene 3: no panel came, so it is not a split and carries no panel", () => {
+    const [s] = filmLayoutOf([missing3]).scenes;
+    expect(s.split).toBe(false);
+    expect(s.hostPanel).toBeUndefined();
+    // nor one whose panel was drawn but never put beside the host (its clip IS the host take)
+    const notJoined = { ...missing3, splitRightUrl: `${R2}/still-3-a.mp4` } as StoryboardScene;
+    expect(filmLayoutOf([notJoined]).scenes[0]).toMatchObject({ split: false });
+    expect(filmLayoutOf([notJoined]).scenes[0].hostPanel).toBeUndefined();
+  });
+
+  it("the operator's layout is passed through: a dragged seam, the host turned to the right", () => {
+    expect(splitHostPanel({ ...split27, splitLayout: { seamX: 0.5 } } as StoryboardScene)).toEqual({ x: 0, w: 960 });
+    expect(splitHostPanel({ ...split27, splitLayout: { hostSide: "right" } } as StoryboardScene)).toEqual({ x: 1080, w: 840 });
+    expect(filmLayoutOf([{ ...split27, splitLayout: { hostSide: "right", seamX: 0.6 } } as StoryboardScene]).scenes[0].hostPanel).toEqual({ x: 1152, w: 768 });
+  });
+
+  it("a host take or a picture carries no panel", () => {
+    const host = { index: 1, narrationStartSec: 0, narrationEndSec: 2.5, hostPresent: true, clipUrls: [`${R2}/clip-1-0.mp4`] } as unknown as StoryboardScene;
+    const still = { index: 2, narrationStartSec: 2.5, narrationEndSec: 12.88, clipUrls: [`${R2}/still-2-0.mp4`] } as unknown as StoryboardScene;
+    for (const s of filmLayoutOf([host, still]).scenes) {
+      expect(s.split).toBe(false);
+      expect(s.hostPanel).toBeUndefined();
+    }
+  });
+});
+
+describe("the film's layout says what each b-roll picture is and shows (round 13: the planner saw only 'B-ROLL')", () => {
+  // Job 409's scenes 22 and 24 and job 408's scene 3, as stored (the fields the planner reads).
+  const seneca = {
+    index: 22,
+    narrationStartSec: 100.675,
+    narrationEndSec: 109.896,
+    stillImage: true,
+    humanPresent: true,
+    showSubject: "a man in an off-white wool toga draped over his left shoulder in deep folds, writing on a scroll with a reed pen by lamplight, seen from the side",
+    otherPerson: "Seneca, a Roman writer",
+  } as unknown as StoryboardScene;
+  const bin = { index: 3, narrationStartSec: 7.28991, narrationEndSec: 13.7519, objectMotion: true, showSubject: "a small white plastic bin with a closed hinged lid", keyThing: "bin", otherKeyThings: ["toilet"] } as unknown as StoryboardScene;
+  const host = { index: 24, narrationStartSec: 117.23, narrationEndSec: 119.963, hostPresent: true, showSubject: "a wealthy man in a fine off-white toga" } as unknown as StoryboardScene;
+
+  it("a still with who is in it, a video with its key things; a host take carries nothing about a picture", () => {
+    const [s22, s3, s24] = filmLayoutOf([seneca, bin, host]).scenes;
+    expect(s22).toMatchObject({ video: false, person: "Seneca, a Roman writer", shows: expect.stringMatching(/^a man in an off-white wool toga/) });
+    expect(s3).toMatchObject({ video: true, things: ["bin", "toilet"] });
+    for (const k of ["shows", "person", "things", "video", "listItem"]) expect(s24).not.toHaveProperty(k);
+  });
+});
+
+/**
+ * The host name card moved to the self-introduction take (job 406: "…I'm Gary," closes scene 8,
+ * 18.8-29.2 s, after a 2.56 s cold open that could not hold it). The graphics' rules are told where
+ * it was drawn, and the card is drawn in the graphics' own accent.
+ */
+describe("the name card, as the graphics see it", () => {
+  const R2 = "https://pub-x.r2.dev/longform/406";
+  const host = (index: number, a: number, b: number, over: Partial<StoryboardScene> = {}) =>
+    ({ index, narrationStartSec: a, narrationEndSec: b, hostPresent: true, clipUrls: [`${R2}/clip-${index}-0.mp4`], ...over }) as unknown as StoryboardScene;
+  const still = (index: number, a: number, b: number) =>
+    ({ index, narrationStartSec: a, narrationEndSec: b, clipUrls: [`${R2}/still-${index}-0.mp4`] }) as unknown as StoryboardScene;
+  const gary = [host(1, 0, 2.56, { hostOpener: true }), still(2, 2.56, 5.21), host(8, 18.8, 29.24, { hostIntro: true })];
+
+  it("406: the layout names the scenes the card was drawn on", () => {
+    expect(filmLayoutOf(gary, [8]).nameCardScenes).toEqual([8]);
+    // A film with no card says so; a caller that does not know leaves it unset.
+    expect(filmLayoutOf(gary, []).nameCardScenes).toEqual([]);
+    expect("nameCardScenes" in filmLayoutOf(gary)).toBe(false);
+  });
+
+  it("the card takes the accent the last graphics run saved, else the host photo's", async () => {
+    const { graphicsAccent } = await import("./apply");
+    const saved = { graphics: { theme: { accent: "#E8A13A", bg: "#14100B" } }, faceImageUrl: `${R2}/host.jpg` } as unknown as LongformInputParams;
+    expect(await graphicsAccent(saved)).toBe("#E8A13A");
+    expect(vi.mocked(finish.themeOf)).not.toHaveBeenCalled();
+    const fresh = { faceImageUrl: `${R2}/host.jpg` } as unknown as LongformInputParams;
+    expect(await graphicsAccent(fresh)).toBe("#3FA36B");
+    expect(vi.mocked(finish.themeOf)).toHaveBeenCalledWith(`${R2}/host.jpg`);
+  });
+});

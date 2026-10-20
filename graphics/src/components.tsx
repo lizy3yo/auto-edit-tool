@@ -10,8 +10,9 @@ import {
   useVideoConfig,
 } from "remotion";
 import { withAlpha } from "./palette";
+import { PLACE_INSET } from "./spots";
 import { THEME, TYPE, type Theme } from "./theme";
-import { fadeIn, splitWords, wordFrames, type Phrase } from "./timing";
+import { drawnTo, fadeIn, pageStarts, splitWords, strikeSweep, wordFrames, type Phrase } from "./timing";
 
 export const ThemeContext = React.createContext<Theme>(THEME);
 export const useTheme = () => React.useContext(ThemeContext);
@@ -25,7 +26,8 @@ export const useTheme = () => React.useContext(ThemeContext);
 export const shaded = (base: number, shade = 0, max = 0.92): number => base + (max - base) * Math.min(1, Math.max(0, shade));
 
 /** Where a movable text graphic sits: side and band of the frame (title-safe). The composite
- * moves one to the calmest part of the picture when its first place is too bright to read. */
+ * moves one to the calmest part of the picture when its first place is too bright to read, and a
+ * template with places of its own (registry `spots`) to the one clear of the picture's subject. */
 export type Place = { h: "left" | "right"; v: "top" | "middle" | "bottom" };
 export const PLACES: Place[] = [
   { h: "left", v: "middle" },
@@ -39,11 +41,11 @@ export const PLACES: Place[] = [
 /** Absolute position for a block of text at `place`; `align` follows the side. */
 export function placeStyle(place: Place | undefined, height: number): React.CSSProperties {
   const p = place ?? PLACES[0];
-  const top = p.v === "top" ? 150 : p.v === "bottom" ? 1080 - 170 - height : (1080 - height) / 2;
+  const top = p.v === "top" ? PLACE_INSET.top : p.v === "bottom" ? 1080 - PLACE_INSET.bottom - height : (1080 - height) / 2;
   return {
     position: "absolute",
     top,
-    ...(p.h === "left" ? { left: 160 } : { right: 160 }),
+    ...(p.h === "left" ? { left: PLACE_INSET.x } : { right: PLACE_INSET.x }),
     textAlign: p.h === "left" ? "left" : "right",
     display: "flex",
     flexDirection: "column",
@@ -149,6 +151,9 @@ export const Kicker: React.FC<{
   );
 };
 
+/** A strike's stroke, in the words' own size: 7 px on the 88 px myth, as the old bar was. */
+export const STRIKE_THICKNESS = "0.08em";
+
 /**
  * Text that appears word by word exactly as it is spoken. `emphasis` lists the words (matched
  * without punctuation, case-insensitive) drawn in the accent colour — Steve never colours more
@@ -162,35 +167,85 @@ export const WordReveal: React.FC<{
   uppercase?: boolean;
   /** Words not yet spoken: hidden (default) or shown dim, as a "ghost" line. */
   ghost?: boolean;
-}> = ({ phrase, style, emphasis = [], emphasisColor, uppercase, ghost }) => {
+  /** Page a long line like subtitles: at most this many words on screen, the next page replacing
+   * it the moment its first word is said — so a whole sentence is shown, never half of it. */
+  pageWords?: number;
+  /** Strike the words through, the stroke `progress` (0-1) of the way along (`strikeSweep`). */
+  strike?: { progress: number; color: string };
+}> = ({ phrase, style, emphasis = [], emphasisColor, uppercase, ghost, pageWords, strike }) => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
   const t = useTheme();
-  const words = splitWords(phrase.text);
-  const frames = wordFrames(phrase, fps);
+  const measuring = React.useContext(MeasuringContext);
+  const all = splitWords(phrase.text);
+  const allFrames = wordFrames(phrase, fps);
+  const starts = pageStarts(all, pageWords ?? 0);
+  let page = 0;
+  for (let p = 1; p < starts.length; p++) if (frame >= allFrames[starts[p]]) page = p;
+  const from = starts[page];
+  const to = starts[page + 1] ?? all.length;
+  const words = all.slice(from, to);
+  const frames = allFrames.slice(from, to);
   const em = new Set(emphasis.map(norm));
+  const reveal = frames.map(f => fadeIn(frame, f));
+  const opacity = (i: number) => (ghost ? 0.18 + 0.82 * reveal[i] : reveal[i]);
+  // THE STRIKE is a line-through on each word and on each space between two, so it crosses every
+  // line exactly where that line's words are, however they wrap and at whatever size (a space the
+  // wrap moves to a line's end is not drawn, so neither is its stroke) — one bar across the whole
+  // block fell between the two lines of a wrapped myth (job 399). It is drawn on a see-through copy
+  // laid exactly over the words, not on the words: there each word's soft shadow fell across the
+  // stroke of the space before it, a dark notch between every two words. The copy is built from
+  // the SAME elements as the words under it — a struck phrase keeps each space in its own span from
+  // its first frame, in both — because line balancing reads the elements, not only the letters:
+  // with bare spaces below and spans above, a 14-word myth broke after "attendants" below and after
+  // "only" above (test render, 2026-10-18), the stroke across the wrong words. A measuring render
+  // leaves it out, as it leaves out every mark that is not a word.
+  const sweep = strike && strike.progress > 0 && !measuring ? strikeSweep(words, strike.progress) : undefined;
+  const struck = (a: number): React.CSSProperties => ({
+    textDecorationLine: "line-through",
+    textDecorationColor: withAlpha(strike?.color ?? t.danger, Math.round(a * 1000) / 1000),
+    textDecorationThickness: STRIKE_THICKNESS,
+  });
+  const layer = (stroke?: { words: number[]; gaps: number[] }) =>
+    words.map((w, i) => (
+      <React.Fragment key={i}>
+        <span
+          style={{
+            display: "inline-block",
+            opacity: opacity(i),
+            transform: `translateY(${(1 - reveal[i]) * 10}px)`,
+            color: stroke ? "transparent" : em.has(norm(w)) ? (emphasisColor ?? t.accent) : undefined,
+            textTransform: uppercase ? "uppercase" : undefined,
+            ...(stroke ? struck(stroke.words[i]) : null),
+          }}
+        >
+          {w}
+        </span>
+        {i === words.length - 1 ? null : !strike ? (
+          " "
+        ) : (
+          // a space is struck only once both its words are on screen
+          <span style={stroke ? struck(stroke.gaps[i] * Math.min(opacity(i), opacity(i + 1))) : undefined}> </span>
+        )}
+      </React.Fragment>
+    ));
+  const own = style?.position;
   return (
-    <div style={{ textWrap: "balance", ...style } as React.CSSProperties}>
-      {words.map((w, i) => {
-        const p = fadeIn(frame, frames[i]);
-        const isEm = em.has(norm(w));
-        return (
-          <React.Fragment key={i}>
-            <span
-              style={{
-                display: "inline-block",
-                opacity: ghost ? 0.18 + 0.82 * p : p,
-                transform: `translateY(${(1 - p) * 10}px)`,
-                color: isEm ? (emphasisColor ?? t.accent) : undefined,
-                textTransform: uppercase ? "uppercase" : undefined,
-              }}
-            >
-              {w}
-            </span>
-            {i < words.length - 1 ? " " : null}
-          </React.Fragment>
-        );
-      })}
+    <div
+      style={
+        {
+          textWrap: "balance",
+          ...style,
+          ...(sweep ? { position: own && own !== "static" ? own : "relative" } : null),
+        } as React.CSSProperties
+      }
+    >
+      {layer()}
+      {sweep && (
+        <div style={{ position: "absolute", inset: 0, padding: "inherit", color: "transparent", textShadow: "none" }}>
+          {layer(sweep)}
+        </div>
+      )}
     </div>
   );
 };
@@ -265,7 +320,9 @@ export const NumberDot: React.FC<{ n: number; size: number }> = ({ n, size }) =>
         height: size,
         borderRadius: "50%",
         background: t.accent,
-        color: "#fff",
+        // A disc drawn in the plain text colour (the last readability fix, `plain`) carries its
+        // digit in the ground colour: a white digit on a white disc is no digit.
+        color: t.accent === t.text ? t.bg : "#fff",
         fontFamily: t.font,
         fontWeight: 800,
         fontSize: size * 0.56,
@@ -280,7 +337,12 @@ export const NumberDot: React.FC<{ n: number; size: number }> = ({ n, size }) =>
   );
 };
 
-/** A right-pointing accent arrow that draws itself in from `atFrame`. */
+/**
+ * A right-pointing accent arrow that draws itself in from `atFrame`. Nothing of it shows before
+ * then: the shaft is left out until it has length (`drawnTo`) — drawn at length 0 its round cap was
+ * a stray dot at the middle of job 400's Before → After card for two seconds — while the empty box
+ * keeps its place in the row, so nothing beside it moves when it draws.
+ */
 export const Arrow: React.FC<{ atFrame: number; width: number; thickness?: number }> = ({
   atFrame,
   width,
@@ -290,17 +352,12 @@ export const Arrow: React.FC<{ atFrame: number; width: number; thickness?: numbe
   const frame = useCurrentFrame();
   const p = fadeIn(frame, atFrame, 10);
   const head = thickness * 3.2;
+  const shaftEnd = drawnTo(p, width - head);
   return (
     <svg width={width} height={head * 2} style={{ overflow: "visible", flex: "none" }}>
-      <line
-        x1={0}
-        y1={head}
-        x2={(width - head) * p}
-        y2={head}
-        stroke={t.accent}
-        strokeWidth={thickness}
-        strokeLinecap="round"
-      />
+      {shaftEnd !== null && (
+        <line x1={0} y1={head} x2={shaftEnd} y2={head} stroke={t.accent} strokeWidth={thickness} strokeLinecap="round" />
+      )}
       <polygon
         points={`${width - head * 1.4},${head - head * 0.75} ${width},${head} ${width - head * 1.4},${head + head * 0.75}`}
         fill={t.accent}

@@ -38,6 +38,7 @@
  */
 import sharp from "sharp";
 import { invokeClaude, type ClaudeImage } from "./claude";
+import { CUT_OPEN_BROKEN, INSIDE_PART_NOTE } from "./cutOpen";
 import { safeParseJSON } from "./jsonRepair";
 
 /**
@@ -102,10 +103,60 @@ export const STILL_DEFECT_SYSTEM =
   "work — with no hand holding it; " +
   "a needle through a finger; scissors cutting where the blades do not " +
   "meet; a tool held in a way no hand could hold it; a hand with too many or too few fingers\n" +
+  "- a person whose body faces the camera while the head is turned away over a shoulder (a pose a " +
+  "real body does not hold), or a head turned round further than a real neck turns\n" +
   "- a hand, finger or arm inside, through, behind or merged into a vise, clamp, machine or tool " +
   "body (a hand in a vise's jaws)\n" +
   "- a tool held or angled in a way no real user holds it, or whose path runs into the table, the " +
   "bench or a hand; fingers in front of or right beside a blade, saw, bit or cutting edge\n" +
+  // 2026-10-20, job 418 scene 25: a person-free panel's froe with a bare wire hook on its handle end,
+  // balanced across the bolt's top with the handle out over nothing — the panel had asked for it "set
+  // into its top end with the handle angled, resting unattended". Named in words the redraw can read
+  // (`namedFaultClause`, `UNHELD_POSE`), so it is told how a tool nobody holds is put down. A tool on a
+  // wall's peg or rack, in its holder, or left in the work where it really stays is right — job 418's
+  // own back wall "hung an axe, a froe, and a drawknife" — and so is one leaning against a wall the way
+  // a person stands it there (job 162 scene 145's push saw "leans upright against the bare concrete
+  // wall"): it keeps that by itself, so "leans" alone is never the fault.
+  "- a tool with NO hand on it that hangs in mid-air or from a hook, wire or string fixed to " +
+  "nothing, or stands, balances or leans in its working pose at an angle it could not keep by " +
+  "itself (a handle sticking up or out over nothing from a blade that is not deep in the work); a " +
+  "tool lying on a surface or across the rim of its pot, sitting in its holder, hanging on a wall, " +
+  "peg or rack, leaning against a wall that holds it up, or left standing in the work where a real " +
+  "one stays by itself (an axe or a wedge driven into wood, a saw in its own cut, a spade in the " +
+  "soil) is right\n" +
+  // Job 406 scene 9 passed with a chisel pushed straight at the other hand flat on the board. A
+  // kitchen knife is not named: it cuts down beside the guide hand, and one being sharpened has
+  // fingers on its flat — the line above already covers fingers right beside an edge.
+  "- a hand or fingers AHEAD of a chisel, gouge, plane or a knife carving wood — on the work where " +
+  "its edge points or is being pushed (a chisel driven toward the other hand lying flat on the " +
+  "wood)\n" +
+  // Job 407 scenes 10, 14 and 17: a froe in the side of a piece, on top of it, out in the air. Only
+  // while SPLITTING: the same film's broadaxe hewing the side of a log (scene 25) is right.
+  "- a tool SPLITTING wood (a froe, wedge, maul or axe splitting a piece) whose edge is not in the " +
+  "wood's end grain: pushed into the SIDE of an upright piece, its edge resting on the wood but not " +
+  "in it, its blade sticking out into the air with no wood under its edge, or lying ACROSS a split " +
+  "already open (a split runs along the blade); a piece splitting apart with no blade in its " +
+  "split; a hand gripping a piece where it is splitting open. " +
+  // Round 14, job 414 scene 17: the froe flat on top of the bolt, both hands pressing down, no club —
+  // named so the check's words carry it to the redraw (`namedFaultClause`). A froe already in the wood
+  // and levered by its handle is right with no club in sight.
+  "A froe or wedge pressed down on top of the wood by the hands alone, its edge not in it and no " +
+  "club, mallet or sledge to strike it in, is this fault; a froe already sunk in the wood and levered " +
+  "by its handle needs no club in the frame. An axe chopping, felling or hewing " +
+  "into the side of a log or trunk is right, and a tool hanging, lying or resting unused is " +
+  "splitting nothing\n" +
+  // Round 14, job 414 scene 13: a drawknife laid along the board, its stroke across the narrow width.
+  "- a drawknife or spokeshave whose blade lies ALONG the length of the piece it is shaving, so its " +
+  "stroke would run sideways across the piece's narrow width instead of along its length\n" +
+  // Round 14, job 413 scene 29: the plug lead looping into the carburetor's fuel inlet. A loose cord
+  // or a stripped wire end is real, so only a line ending in the wrong part or merged is named — and
+  // lines meeting at a real fitting are right: a drain's branch joins its run at a tee (job 403's
+  // "PVC pipework with visible joints and bends").
+  "- a cable, wire, cord, hose or pipe that runs into a part it does not serve or into another " +
+  "part's fitting (an electrical lead plugged into a fuel or water fitting, a hose ending in a power " +
+  "socket), one line turning into a different one with no fitting between them (an electrical lead " +
+  "that becomes a fuel hose), or a line that fades into a surface or into another object; lines " +
+  "meeting at a real fitting (a pipe tee, a coupler, a plug in its socket) are right\n" +
   "- a phone, tablet or laptop built into, framed by or made of another object (a tablet whose " +
   "frame is a cutting board, a screen set inside a quilt or a shelf)\n" +
   "- a body part that looks CUT OFF: hair still shaped like a head or hairstyle with no head " +
@@ -116,7 +167,56 @@ export const STILL_DEFECT_SYSTEM =
   "head, an apron tied on the back)\n" +
   "- a head turned further round than a neck can turn, or facing a different way from the " +
   "shoulders; more than two arms or hands on one person\n" +
+  // 2026-10-20, the operator on job 417 ("they aren't even seated properly"): scene 2's two passengers
+  // sat backwards, facing their own seat backs, and passed with no flag; scene 8's row ahead was turned
+  // round to face the man behind it; job 402 scene 23 sat a woman sideways across her seat; job 417
+  // scenes 9 and 31 had two people talking side by side to a wall. Each is a pose no one takes for what
+  // they are doing, and the check now names it — in words the redraw can read (`namedFaultClause`).
+  // Seat-mates are the exception named: two passengers in one row (job 417 scene 2 drawn right, job 399
+  // scene 2's man) face forward while they talk, and a broken verdict there would redraw a right
+  // picture and, on a second one, ship it with nobody in it (`faultRedrawFor`'s "at rest").
+  "- a person in a pose nobody takes for what they are doing: sitting backwards or sideways in a " +
+  "seat that faces one way (facing their own seat back, or their legs across the seat); in rows of " +
+  "fixed seats that all face one way, one row turned round to face the others; a body passing " +
+  "through its seat, or sitting or leaning on nothing; a body twisted away from the work its own " +
+  "hands are doing; two people talking or handing something over who stand or sit side by side " +
+  "facing the same way instead of toward each other; a heavy thing held out at arm's length in one " +
+  "hand. A person seen from behind or beside who sits the way their seat faces, its back hiding " +
+  "them, is right, and so is someone asleep on their front or side; so are people side by side in " +
+  "one row of seats (a car, a bench, a pew, a row of fixed seats) who face the way the row faces " +
+  "while they talk, and seats built to face each other (a booth, a bay of four)\n" +
+  // Round 16 (2026-10-20, job 421, the round-15 film's targeted check): the line above asks about the
+  // BODY, and faults about the FURNITURE passed it with no "broken" — scene 2's row ahead drawn front-on
+  // beside a woman whose own seat faced away (two rows knee to knee, job 417 scene 8's fault again), and
+  // job 399 scene 2's torso drawn through its seat back. Which way a seat faces shows in which side of it
+  // the camera sees, and a turned one is told from seats BUILT to face each other by the seats around
+  // it: in rows that all face one way the odd one out is wrong, while a booth, a table's chairs, a
+  // train's facing pairs or a room's walls of chairs agree with what is around them. Each seat looks
+  // right on its own, which is how they passed as "mild strangeness". WHAT HIDES WHAT settles it: scene
+  // 29 was first read as a seat turned 90° to the gap between the rows, her thighs at the camera, and a
+  // second look found its seat facing forward — the camera behind and beside it saw the padded SIDE of
+  // its seat back, taken for a cushion, and her turned at the waist toward the gap, the very framing and
+  // pose the redraws ask for (`NATURAL_POSE_FIX`, `SEATED_PERSON_FIX`); her seat back's headrest
+  // crossed her hair, so it stood between her and the camera. A broken verdict there would redraw a
+  // right picture and, on a second one, ship it with nobody in it (`faultRedrawFor`'s "at rest").
+  // Named in words the redraw reads (`SEAT_TURNED`, `SEATED_WRONG`, `SEAT_FACING_FIX`).
+  "- fixed seats facing a way such seats never face. In rows of fixed seats that all face one way, " +
+  "see which side of each seat the camera sees — its back, or its cushion and the front of its seat " +
+  "back — and compare it with the seats around it: one seat or one row facing another way from the " +
+  "rows beside, ahead of and behind it is turned. That is a seat turned sideways or round while its " +
+  "row faces forward; a row showing its cushions beside or ahead of seats that show their backs, so " +
+  "two rows face each other knee to knee; a person facing their own seat back; a body, arm or leg " +
+  "passing through its seat, seat back or armrest. Tell which way a seat faces by what hides what: a " +
+  "seat back that hides part of the person in it (its headrest across their hair, its side in front of " +
+  "their shoulder) is behind them, so that seat faces away from the camera — the padded side of a seat " +
+  "back seen at an angle is no cushion — and someone in it who turns their head and shoulders or leans " +
+  "toward the gap beside their seat is right. Seats BUILT to face each other agree with what is " +
+  "around them and are right: a booth, chairs round a table, a train's pairs of facing seats, a bay of " +
+  "four, chairs along the walls of a room facing its middle; so are rows that all face the camera, and " +
+  "a loose chair or sofa turned any way the room puts it. A seat turned against its rows is no mild " +
+  "strangeness: each seat looks right on its own, so judge them together\n" +
   "- a mirror that does not reflect what is in front of it\n" +
+  CUT_OPEN_BROKEN +
   "Answer false for everything else: unusual but possible products or craftsmanship, odd " +
   "compositions, shallow depth of field, soft focus, plain or boring frames, imperfect " +
   "staging, and any small detail you cannot clearly resolve at this size. This is AI-generated " +
@@ -134,7 +234,13 @@ export const STILL_DEFECT_SYSTEM =
   "When unsure, answer false.\n\n" +
   'Return ONLY this JSON, no prose: {"overlay":true|false,"broken":true|false,"writing":true|false,"what":"..."}\n' +
   'what: 3-8 words naming the worst defect and where it sits (e.g. "white caption bar across ' +
-  'the bottom", "cutting board floating above the table"); "" when both are false.';
+  'the bottom", "cutting board floating above the table"); a fault in a tool, cable, wire or hose ' +
+  'names it (e.g. "saw blade resting on top of the plank", "chisel hanging from a hook fixed to ' +
+  'nothing", "power cord running into the tap"); a ' +
+  'person in a pose nobody takes starts "unnatural pose:" and says who and how (e.g. "unnatural ' +
+  'pose: two people sitting backwards in their seats"); a seat or a row facing another way from the ' +
+  'rows around it starts "seat turned:" and says which one and which way (e.g. "seat turned: one seat ' +
+  'sideways, its row forward", "seat turned: row ahead faces the row behind"); "" when both are false.';
 
 export interface StillDefectVerdict {
   overlay: boolean;
@@ -143,11 +249,44 @@ export interface StillDefectVerdict {
    *  prompt bans it (`NO_READABLE_TEXT`); a true verdict re-rolls the still like `overlay`. */
   writing: boolean;
   /**
+   * The words the check read in the frame, as printed (`READ_WORDS_QUESTION`) — set only beside a
+   * `writing` verdict, and asked only of a picture with a line and no allowed words, so the caller
+   * can tell words its own line says from made-up writing (`writingTheLineSays`, job 413 scene 2).
+   */
+  read?: string;
+  /**
    * The frame does not show the thing its line names (`scene.showSubject`) — "a stack of
    * sandpaper" drawn as a sanding block, or not there at all. Only asked when the caller passes
    * what the frame must show; re-rolls the still like `writing`.
    */
   missing: boolean;
+  /**
+   * The thing is there, but not in the STATE, action, number or position its description says
+   * (`detailQuestion`) — a padlock described hanging open drawn shut. Kept apart from `missing` so
+   * it can be counted on its own and `missing` keeps its meaning (the thing itself is absent or
+   * swapped). Set only when true, and only asked alongside `missing`.
+   */
+  detail?: boolean;
+  /** What the description asks for that the frame shows otherwise, in the check's words (`detail`). */
+  detailWhat?: string;
+  /**
+   * A person or any part of one — a hand at an edge included — in a picture that must show nobody:
+   * the backdrop behind the big QR card (`QR_BACKDROP_PERSON_QUESTION`). Set only when true, and
+   * only asked when the caller says the picture is one.
+   */
+  person?: boolean;
+  /**
+   * A FACE on a picture of someone else, whose face is never shown (`OTHER_FACE_QUESTION`, job 410
+   * scene 8: an older passenger in profile with her eye, glasses and a smile). Set only when true,
+   * and only asked when the caller says the picture is one.
+   */
+  face?: boolean;
+  /**
+   * The frame shows what its line RULES OUT (`scene.forbids`, from the line check) — the act the
+   * line says not to do, the thing it says is not meant, the place it says to keep something away
+   * from (`forbiddenQuestion`). Set only when true, and only asked when the caller passes it.
+   */
+  forbidden?: boolean;
   /** A legible brand name or logo, or a subject lost in busy unrelated clutter (rule 4). */
   messy: boolean;
   /** The line names a place (a market, a fair, a church hall) and the frame is clearly somewhere
@@ -197,17 +336,31 @@ export function parseStillDefectVerdict(
   const messy = parsed.data?.messy === true;
   const wrongPlace = parsed.data?.wrong_place === true;
   const staged = parsed.data?.staged === true;
+  const detail = parsed.data?.detail === true;
+  const detailWhat = parsed.data?.detail_what;
+  const forbidden = parsed.data?.forbidden === true;
+  const person = parsed.data?.person === true;
+  const face = parsed.data?.face === true;
   const what = parsed.data?.what;
+  const read = parsed.data?.read;
   return {
     overlay,
     broken,
     writing,
+    ...(writing && typeof read === "string" && read.trim() ? { read: read.trim().slice(0, 160) } : {}),
     missing,
+    ...(detail ? { detail } : {}),
+    ...(detail && typeof detailWhat === "string" && detailWhat.trim()
+      ? { detailWhat: detailWhat.trim().slice(0, 80) }
+      : {}),
+    ...(forbidden ? { forbidden } : {}),
+    ...(person ? { person } : {}),
+    ...(face ? { face } : {}),
     messy,
     wrongPlace,
     staged,
     what:
-      (overlay || broken || writing || missing || messy || wrongPlace || staged) &&
+      (overlay || broken || writing || missing || detail || forbidden || person || face || messy || wrongPlace || staged) &&
       typeof what === "string"
         ? what.slice(0, 80)
         : "",
@@ -248,20 +401,66 @@ export function missingQuestion(expect: string): string {
   );
 }
 
+/**
+ * Whether the `detail` question is asked. ON since 2026-10-18 — the operator approved it on condition
+ * that it does not raise what a video costs. It was off until measured: it is asked of two thirds of
+ * all pictures (66% of descriptions name a state, an action, a count or a position), and each "not as
+ * described" was another picture and another check. Measured on the 148 described pictures of jobs
+ * 401-407 it flagged 5, never more than 2 in one video (job 402 scene 26's "nearly empty snack basket"
+ * drawn well stocked). The condition is kept twice: the question rides this same call (no new one),
+ * and the redraws it may cause are capped per video (`server/detailRedraws.ts`, 3 by default) — past
+ * the cap a flagged picture ships and says so. `PICTURE_DETAIL_CHECK=0` turns it off: the check is
+ * then exactly what it was before it.
+ */
+export const detailCheckOn = () => process.env.PICTURE_DETAIL_CHECK !== "0";
+
+/**
+ * QUESTION 4b, asked with QUESTION 4: the thing is there, but is it the WAY its description says?
+ * (2026-10-18, the audit's picture-vs-line rows.) Question 4 asks only whether the named thing is
+ * the centre of attention, so a picture of the right thing in the wrong state passed it: in a hand
+ * sample of 60 pictures the audit judged wrong for their line, 25 had a description that already
+ * named the state, action or position the picture then missed — job 305 scene 118 "padlock hanging
+ * open on a mesh gate latch" drawn shut, 285-125 a bobbin "wound lumpy" drawn neat, 233-134 "both
+ * arms raised over her head" drawn with the arms down. A separate verdict, so `missing` keeps its
+ * meaning and its fallback order, and so it can be counted on its own. A FACE'S EXPRESSION is never
+ * asked: the one wrong flag of the 148 measured (job 401 scene 29, "a farmer standing in a field
+ * looking weary" — "expression not weary, appears neutral") judged a face the film hides by design.
+ */
+export function detailQuestion(expect: string): string {
+  return (
+    `\n\nQUESTION 4b — detail: does the description "${expect.replace(/"/g, "'")}" give the thing ` +
+    "a STATE (open or shut, folded, lit, wet, half done), something being done with it or by " +
+    "someone, a NUMBER, or a POSITION against something else (hanging from, inside, on top of)? If " +
+    "so, is the thing there but clearly NOT that way — shut where it says open, one where it says " +
+    "three, lying flat where it says hanging, nobody where it says someone is doing something? " +
+    "Answer false when it names no such detail, when the detail is shown, when it is too small to " +
+    "judge, when the thing itself is not there (that is question 4), and when unsure. Never answer " +
+    "about the camera (how close, from which side, how it is framed), the setting, the light, " +
+    "words and printing, or a person's FACE — an expression or a feeling (weary, proud, worried) is " +
+    "not a detail here, since a face is often turned away or left out on purpose. When true, also " +
+    'give detail_what: 3-8 words on what differs (e.g. "gate shut, should hang open").'
+  );
+}
+
 /** The stronger checker a picture with an exact look is judged by (`scanStillDefects`' `exactLook`). */
 const EXACT_LOOK_MODEL = () => process.env.EXACT_LOOK_MODEL || "claude-sonnet-5-5";
 
 /**
  * QUESTION 4 sharpened for a picture of a NAMED KIND (`scene.namedLook`): the thing must be drawn
  * the way its exact look describes — shapes, counts, arrangement — not a generic or different one.
+ * A specialised tool is a named kind too (job 408 scene 23: a toilet auger drawn as a bent rod on a
+ * screwdriver handle), judged by its build — one in use may hide the part that is inside its work.
+ * "Build", never "parts": the same question goes on to say a picture of ONE particular part is right,
+ * and "other parts" beside that reads as failing a close-up for not showing the rest.
  */
 export function exactLookQuestion(look: string): string {
   return (
     "\n\nQUESTION 4, SHARPER FOR THIS PICTURE — missing: the frame must show this named kind exactly: " +
     `"${look.replace(/"/g, "'").slice(0, 600)}". Answer true if it is not clearly there as the main ` +
-    "thing, OR if what is drawn does not match that look (other shapes, another arrangement, a " +
-    "generic or different pattern), OR if the frame mostly shows something bigger it belongs to " +
-    "instead of the thing itself up close. Answer false only when it clearly matches. That look " +
+    "thing, OR if what is drawn does not match that look (other shapes or a different build, another " +
+    "arrangement, a generic or different pattern or tool), OR if the frame mostly shows something " +
+    "bigger it belongs to instead of the thing itself up close. A tool in use may hide the part of " +
+    "it that is inside what it works on. Answer false only when it clearly matches. That look " +
     "is how the kind looks IN GENERAL: when the narrator's words above name a particular part, " +
     "page or screen of it, a stage of the work, or something done or added to it, the frame must " +
     "show THAT, in this look's colours and style — never answer true only because the frame is " +
@@ -282,16 +481,55 @@ export const SOFT_PRINT_QUESTION =
   "words cannot be read. Answer missing only when there is no sign of it at all.";
 
 /**
+ * QUESTION 4 for a picture ALLOWED some words (`scene.pictureText`), whose other print is now asked
+ * soft around them (`ALLOWED_TEXT_REST_CLAUSE`, job 411 scene 17: "a field guide page … with its
+ * entry text" beside the one word the line says). That soft entry is the entry shown, as for a
+ * blurred-print picture (`SOFT_PRINT_QUESTION`); the allowed words themselves are judged by QUESTION
+ * 3, which still fails them missing or misspelt.
+ */
+export const SOFT_REST_QUESTION =
+  "\n\nQUESTION 4 NOTE — apart from the words this picture is allowed to show, any printing on the " +
+  "named thing (the rest of a page, a label, a box) is drawn SOFT on purpose: a blurred patch of " +
+  "print counts as that printing being shown. Never answer missing because the rest of its words " +
+  "cannot be read.";
+
+/**
+ * Asked beside QUESTION 3 of a picture with a line and no allowed words (2026-10-19, job 413 scene 2:
+ * the heading "LOAN" on loan papers under the line "A loan," was refused for writing three times).
+ * The check only REPORTS what it can read — every word, so a heading named alone cannot hide the
+ * paragraphs under it; whether those are words the picture's own line says is decided in code
+ * (`writingTheLineSays`), never by the model.
+ */
+export const READ_WORDS_QUESTION =
+  '\n\nREAD — when writing is true, also give "read": EVERY word, number or letter a viewer can ' +
+  "read in the frame, exactly as printed and in reading order — all of it, not only the largest " +
+  '(at most 12 words; end with "…" when there are more). "" when writing is false.';
+
+/**
  * QUESTION 4 widened for a picture about KEY THINGS: every one of them must really be there, and a
  * different object drawn in one's place counts as missing.
  */
-export function requiredThingsQuestion(things: string[]): string {
+export function requiredThingsQuestion(
+  things: string[],
+  /**
+   * The look its own key thing must have (`lookToHold`): a picture every later picture of the thing
+   * is drawn from, with nothing earlier to follow — a miss here is a different object in every copy.
+   */
+  look?: { thing: string; look: string }
+): string {
   const list = things.map(t => `"${t.replace(/"/g, "'")}"`).join(", ");
   return (
     "\n\nQUESTION 4, ALSO FOR THIS PICTURE — missing: each of these must be clearly in the frame: " +
     `${list}. Answer true if any of them is absent, or if a different object stands where it should ` +
     "be (a small box where a bookcase was asked for, a bowl where a quilt was), or if it is so small " +
-    "or hidden that a viewer would not notice it."
+    "or hidden that a viewer would not notice it." +
+    (look
+      ? ` Every later picture of the "${look.thing.replace(/"/g, "'")}" in this video is drawn from ` +
+        `this one, so it must also look like this: "${look.look.replace(/"/g, "'").slice(0, 400)}". ` +
+        "Answer true as well if it clearly does not — another colour, material, size or shape than " +
+        "that says. Where it is, which part of it shows and how far along it is are as the " +
+        "narrator's words say: never answer true for those."
+      : "")
   );
 }
 
@@ -328,8 +566,128 @@ export const STAGED_RULE =
 /** QUESTION 7, always asked: an ordinary phone photo, not a styled or AI-looking render. */
 export const STAGED_QUESTION = `\n\nQUESTION 7 — staged: ${STAGED_RULE}`;
 
-/** QUESTION 6, asked only with the narration line: the frame is set where the line says. */
-export function placeQuestion(line: string): string {
+/**
+ * Words that NAME a picture's light: a dark hour, the low light of dusk or dawn, or a light source.
+ * Each is narrow on purpose, since a word used as a name lights nothing: a fire extinguisher or a
+ * fire alarm, a nightstand, glue left overnight, "evening out" a finish, dark walnut, dim sum, a
+ * stack of firewood. "tonight" is left out too — "so tonight we're treating that scene like
+ * footage" (job 405 scene 13) is a host talking, not a time of day.
+ */
+const NOT_A_COLOUR =
+  "(?![-\\s]+(?:green|blue|red|brown|gr[ae]y|black|wood|walnut|oak|cherry|mahogany|stain|finish|roast|colou?r)\\b)";
+/**
+ * "In the dark" names the light only where the phrase ENDS: punctuation, the end, a small word, a
+ * new subject or what someone is doing ("glow in the dark, if…", "in the dark of your closet", "you
+ * need in the dark should…", "in the dark scrolling"). Followed by a noun, "dark" describes that
+ * thing instead — a style line's "yourself in the dark necklace", "in dark colors", "in dark mode" —
+ * and a list of colours could never name every thing a word can describe.
+ */
+const DARK_PHRASE_ENDS =
+  "(?=\\s*(?:[^\\w\\s]|$)|\\s+(?:of|with|and|or|but|so|as|at|on|for|to|by|from|under|near|beside|" +
+  "until|till|when|while|before|after|because|like|again|alone|all|now|then|too|where|without|is|" +
+  "was|are|were|will|would|should|can|could|may|might|must|does|did|has|had|i|you|he|she|we|they|" +
+  "this|that|there|here)\\b|\\s+(?!clothing\\b)\\w+ing\\b)";
+const NAMED_LIGHT: RegExp[] = [
+  // A dark hour: night, midnight, the small hours, one to five in the morning, a late evening hour.
+  // Never a colour ("midnight blue").
+  /\b(?:mid)?nights?(?:[- ]?time)?\b(?![-\s]+(?:stand|table|cream|gown|shirt|owl|guard|mode|serum|mask|blue|black)s?\b)/gi,
+  /\b(?:small|wee) hours\b/gi,
+  /\b(?:[1-5]|12|one|two|three|four|five|twelve)(?:[:.]\d\d|[- ](?:thirty|fifteen|forty(?:[- ]five)?))?(?: o'clock)? in the morning\b/gi,
+  /\b(?:[1-5]|12|one|two|three|four|five|twelve)(?::\d\d)?\s?a\.?\s?m\.?(?!\w)/gi,
+  /\b(?:[7-9]|1[01]|seven|eight|nine|ten|eleven)(?::\d\d)?\s?p\.?\s?m\.?(?!\w)/gi,
+  // The low light at either end of the day.
+  /\bevenings?\b(?![-\s]+(?:out|up)\b)/gi,
+  // Never a paint colour or a contract's end ("sunset orange", "a sunset clause").
+  /\b(?:dusk|dawn|pre-?dawn|daybreak|nightfall|twilight|sunset|sundown|sunrise|first light|last light)\b(?![-\s]+(?:orange|yellow|red|pink|gold|clauses?|provisions?)\b)/gi,
+  // The dark itself, said of a place or a time — never of a colour or a wood ("in dark walnut"), nor
+  // of a thing ("in the dark necklace", `DARK_PHRASE_ENDS`).
+  /\b(?:in|into) (?:the )?darkness\b/gi,
+  new RegExp(`\\bafter dark\\b${NOT_A_COLOUR}`, "gi"),
+  new RegExp(`\\b(?:in|into) (?:the )?dark\\b${DARK_PHRASE_ENDS}`, "gi"),
+  new RegExp(
+    "\\b(?:house|home|room|bedroom|kitchen|street|sky|outside|world|everything|it)(?:'s|\\s+(?:is|was|" +
+      "has gone|had gone|goes|went|gets|got|grows|grew|turns|turned|is getting|was getting))\\s+" +
+      `(?:pitch\\s+)?dark\\b${NOT_A_COLOUR}`,
+    "gi"
+  ),
+  /\bdark (?:room|house|home|bedroom|kitchen|hall|hallway|study|garage|shed|barn|street|road|yard|sky|window|windows|cabin|tent)s?\b/gi,
+  /\bpitch[- ](?:dark|black)\b/gi,
+  /\bdim(?:ly)?(?:[- ]lit)?\b(?![-\s]+(?:sum|view|wit(?:ted)?)\b)/gi,
+  /\blow light\b/gi,
+  /\b(?:power (?:outage|cut|failure)|blackout)s?\b/gi,
+  // A light source: a lamp, a candle, a fire, the moon, a screen in the dark.
+  /\b(?:head|street)?lamp(?:s|light|lit|-lit)?\b/gi,
+  /\bcandle(?:s|light|lit|-lit)?\b/gi,
+  /\blanterns?\b/gi,
+  /\b(?:flash|torch|moon|star|street|night)[- ]?lights?\b/gi,
+  /\bmoonlit\b/gi,
+  // Not the trade or the gear around a fire ("the fire service", "fire protection", a fire hose), nor
+  // the verb ("fire up", "fire off an email").
+  /(?<![\w-])(?:camp|bon|wild)?fires?(?:light|lit|place|places|side|pits?)?\b(?![-\s]+(?:extinguishers?|alarms?|trucks?|engines?|stations?|departments?|services?|protection|prevention|fighters?|safety|doors?|codes?|hazards?|escapes?|exits?|drills?|insurance|marshals?|chiefs?|hydrants?|hoses?|blankets?|risks?|starters?|sales?|ants?|resistant|rated|proof|up|away|off)\b)/gi,
+  /\b(?:hearth|embers)\b/gi,
+  /\bflames?\b(?![-\s]+(?:retardant|resistant|proof)\b)/gi,
+  /\bglow of (?:a|an|the|her|his|their|your|my) (?:phone|screen|laptop|tablet|tv|television|monitor)\b/gi,
+  /\b(?:phone|screen|laptop|tablet|tv|television|monitor) glow\b/gi,
+];
+
+/**
+ * The words in a picture's narration line and its own description that name its light, in the
+ * order they appear, each once (a word inside a longer match — "night" in "night light" — is
+ * dropped). Empty when neither names any. Pure — unit-tested.
+ */
+export function namedLight(...texts: (string | undefined)[]): string[] {
+  const found: string[] = [];
+  for (const text of texts) {
+    if (!text) continue;
+    const spans: { at: number; end: number; words: string }[] = [];
+    for (const re of NAMED_LIGHT)
+      for (const m of Array.from(text.matchAll(re))) spans.push({ at: m.index!, end: m.index! + m[0].length, words: m[0].trim() });
+    spans.sort((a, b) => a.at - b.at || b.end - a.end);
+    for (const s of spans) {
+      if (spans.some(o => o !== s && o.at <= s.at && o.end >= s.end && o.end - o.at > s.end - s.at)) continue;
+      if (!found.some(f => f.toLowerCase() === s.words.toLowerCase())) found.push(s.words);
+    }
+  }
+  return found.slice(0, 6);
+}
+
+/**
+ * LIGHT THE WORDS NAME IS NOT STAGED (2026-10-18, the review of jobs 401-407). `STAGED_RULE` counts
+ * a glowing lamp, a candle or moody light with dark corners as staged, and the picture prompt
+ * already lets that light in when the shot names it (`amateurSettingClause`: "no glowing lamps,
+ * candles or fire unless the shot names them") — but the check was never told what the shot named,
+ * so it refused the very light the line asked for. Job 405's night bedroom ("a quiet bedroom at
+ * night", "the lamp glowing softly on the nightstand", scenes 13, 16, 18, 20), job 401 scene 11
+ * ("the kitchen table at two in the morning", "a dim lamp at night") and scene 22 ("writing on a
+ * scroll … by lamplight") were each called staged on both draws and shipped with the warning: a
+ * redraw from the same words draws the same night again, so the flag only cost a picture. The check
+ * is now told which words name the light, and judges only what does not come from them — the
+ * golden glow nobody asked for, the glossy advert finish — as the rule always has. Asked after the
+ * cached rulebook, like `SOFT_PRINT_QUESTION`; `STAGED_RULE` itself is unchanged.
+ */
+export function namedLightQuestion(named: string[], heading = "QUESTION 7 NOTE — staged"): string {
+  if (!named.length) return "";
+  const words = named.map(w => `"${w.replace(/"/g, "'")}"`).join(", ");
+  return (
+    `\n\n${heading}: the narrator's line or this picture's own description names its light ` +
+    `(${words}). Light that comes from that is what was asked for — a lamp, candle, fire or screen ` +
+    "glowing in a dark room, dim or low light with dark corners, dark windows, the low warm light of " +
+    "dusk or dawn — and is NEVER staged on its own. Judge everything else as before: answer true " +
+    "for a glossy, polished advertising finish, or for a golden glow or dramatic light that does not " +
+    "come from what those words name."
+  );
+}
+
+/**
+ * QUESTION 6, asked only with the narration line: the frame is set where the line says.
+ *
+ * `rulesOut`: the picture's sentence rules something out (`scene.forbids`, QUESTION 8). A place such
+ * a line names is where the thing must NOT be — "Never in | the garage, | … | or on the porch"
+ * (production 225-79..83) — and asked plainly, this question would call a picture drawn the right
+ * way (out in the open) the wrong place for "or on the porch,", spending a redraw on pulling it
+ * toward the very place the line rules out. Said only on the pictures the line check marked.
+ */
+export function placeQuestion(line: string, rulesOut = false): string {
   return (
     "\n\nQUESTION 6 — wrong_place: this frame plays under the narration line: " +
     `"${line.replace(/"/g, "'").slice(0, 400)}". ONLY about the SETTING, never which object is ` +
@@ -338,16 +696,97 @@ export function placeQuestion(line: string): string {
     "or patio, a garden or field, a hospital, a particular country's buildings — is the frame " +
     "clearly somewhere else, or showing that place only as a picture or poster on a wall? A " +
     "workshop, garage, shed, sewing room, kitchen table or work bench all count as the same home " +
-    "base and never make it wrong. If the line names no such place, or you are unsure, answer false."
+    "base and never make it wrong. " +
+    (rulesOut
+      ? "The narrator's sentence rules something out here: a place it says to keep something " +
+        "away from, out of, or never to use is NOT where the frame must be — a frame anywhere else " +
+        "is false for it. "
+      : "") +
+    "If the line names no such place, or you are unsure, answer false."
   );
 }
 
-/** The JSON shape, listing every question asked. */
-export function verdictShape(expect?: string, line?: string): string {
+/**
+ * QUESTION 8, asked only on a picture whose sentence the line check found rules something out
+ * (`scene.forbids`, 2026-10-18, the audit): does the frame show THAT? Nothing asked it, so a picture
+ * drawn right for "keep the lumber away from the furnace" could still come back with the furnace
+ * beside the stack (production 203-143), and nothing looked. The phrase is the check's own, written
+ * for this picture — a word list as the gate fired on 39% of the sentences it caught ("just don't
+ * count on it"), so this is asked on the few pictures per film the line check marks.
+ */
+export function forbiddenQuestion(forbids: string): string {
+  // One picture for a joined sentence carries both parts' marks, "a; b" (`applyPictureJoins`).
+  const several = forbids.includes(";");
+  return (
+    "\n\nQUESTION 8 — forbidden: the narrator's line rules this out, so the frame must NOT show it: " +
+    `"${forbids.replace(/"/g, "'").slice(0, 240)}". Does the frame clearly show exactly that` +
+    (several ? " — any one of the things listed" : "") +
+    "? When " +
+    "it names an act, answer true only if the act is being done; when it names a thing in a place or " +
+    "beside something, only if the thing is there, in that place or beside it; when it names a thing " +
+    "alone, if that thing is in the frame. The same task done the right way, a different thing in " +
+    "its place, or the thing on its own away from that place is false. When unsure, answer false."
+  );
+}
+
+/**
+ * QUESTION 9, asked only of the picture behind the big QR card (2026-10-18, the review of jobs
+ * 401-407): job 402 scene 33's backdrop had a passenger's hand holding a packet where the card sits,
+ * the fingers round the card's edge, so for 19.6 s a hand held the QR code — and the check, asked
+ * only about the packet's exact look, passed it. Nothing else asks whether a picture is person-free:
+ * the cutaway rule lets bare hands in, so this question is for this picture alone. A dress form is no
+ * person: the prompt sends worn things to one (`QR_BACKDROP_CLAUSE`), and a necklace on a stand must
+ * not be redrawn for it.
+ */
+export const QR_BACKDROP_PERSON_QUESTION =
+  "\n\nQUESTION 9 — person: this picture is the backdrop behind a large card laid over its middle, " +
+  "and it must show NOBODY. Is a person or any part of one — a face, head, body, arm, hand, finger " +
+  "or thumb, a leg or a foot — visible anywhere in the frame, even small, partly, or at an edge? A " +
+  "glove, sleeve, coat or shoe with nobody in it is not a person, and neither is a dress form or " +
+  "display stand holding something worn, or a picture or statue of one. Answer false when no part " +
+  "of a person is there.";
+
+/**
+ * QUESTION 10, asked only of a picture of SOMEONE ELSE (`scene.otherPerson`, 2026-10-18, job 410
+ * scene 8): an older passenger was drawn in profile with her eye, glasses, nose and a smiling mouth,
+ * under a prompt saying no face is ever shown — and nothing looked. The host's face is checked
+ * beside the host photo (`scanSameHost`); someone else has no photo to compare with, so the question
+ * rides the one check every picture already gets, at no extra call. Stricter than the host's
+ * (`SAME_HOST_SYSTEM` lets a profile pass, since "from the side" is a framing the host prompt asks
+ * for): someone else's prompt asks for the face turned away, and a profile that shows the eye, the
+ * nose and the mouth — a smile on it — is the face. A head turned away with only a cheek showing
+ * (job 405 scene 10, the sleeper turned to the cat) is not.
+ */
+export const OTHER_FACE_QUESTION =
+  "\n\nQUESTION 10 — face: the people in this picture are drawn seen from behind or from the side, " +
+  "their faces turned away or out of frame, so NO face is shown. Is any person's face shown — the " +
+  "eyes, nose and mouth of a face turned toward the camera, from the front or in three-quarter " +
+  "view, or a profile clear enough to make out an eye, the nose and the mouth or what the face is " +
+  "doing (a smile, a frown)? Answer false for the back of a head; a head turned away so only the " +
+  "hair, an ear, the cheek or the edge of the jaw shows; a face cut off by the frame above the mouth " +
+  "or hidden behind something; and a person too small or soft for any feature to be made out. When " +
+  "unsure, answer false.";
+
+/** The JSON shape, listing every question asked (`detail` only beside `missing`). */
+export function verdictShape(
+  expect?: string,
+  line?: string,
+  detail?: boolean,
+  forbids?: boolean,
+  noPerson?: boolean,
+  noFace?: boolean,
+  /** The words the check reads, beside `writing` (`READ_WORDS_QUESTION`). */
+  read?: boolean
+): string {
   return (
     '\n\nReturn ONLY this JSON, no prose: {"overlay":true|false,"broken":true|false,' +
     '"writing":true|false' +
+    (read ? ',"read":"..."' : "") +
     (expect ? ',"missing":true|false' : "") +
+    (expect && detail ? ',"detail":true|false,"detail_what":"..."' : "") +
+    (forbids ? ',"forbidden":true|false' : "") +
+    (noPerson ? ',"person":true|false' : "") +
+    (noFace ? ',"face":true|false' : "") +
     ',"messy":true|false' +
     (line ? ',"wrong_place":true|false' : "") +
     ',"staged":true|false' +
@@ -390,10 +829,41 @@ export async function scanStillDefects(
    */
   required?: string[],
   /** The picture's printing is shown soft on purpose (`scene.blurPrint`) — `SOFT_PRINT_QUESTION`. */
-  softPrint?: boolean
+  softPrint?: boolean,
+  /** The look its own key thing must have, on a picture later ones copy (`lookToHold`). */
+  requiredLook?: { thing: string; look: string },
+  /**
+   * What the picture's sentence rules out (`scene.forbids`) — adds the `forbidden` question. Its own
+   * parameter, never `line`: the line feeds the place question, and a neighbour's words there would
+   * hold this picture to a place another picture names.
+   */
+  forbids?: string,
+  /**
+   * The picture is drawn from the OUTSIDE on purpose (`drawnFromOutside`, job 403) — adds
+   * `INSIDE_PART_NOTE`, so a whole fixture is not called missing for not showing the channel in it.
+   */
+  fromOutside?: boolean,
+  /**
+   * The picture must show nobody — the backdrop behind the big QR card (`qrBackdrop`) — adds the
+   * `person` question (`QR_BACKDROP_PERSON_QUESTION`).
+   */
+  noPerson?: boolean,
+  /**
+   * The picture is of someone else, whose face is never shown (`scene.otherPerson`) — adds the
+   * `face` question (`OTHER_FACE_QUESTION`, job 410 scene 8).
+   */
+  noFace?: boolean
 ): Promise<StillDefectVerdict> {
   try {
     const mustShow = expect && required?.length ? required : undefined;
+    const ruledOut = forbids?.trim() || undefined;
+    // The state, action, number and position the description says — asked with `missing`, unless it
+    // is turned off (`detailCheckOn`).
+    const askDetail = !!expect && detailCheckOn();
+    // What it reads, so the caller can pass words the picture's own line says (job 413 scene 2). A
+    // picture allowed words is held to exactly those (`allowedTextQuestion`), and one with no line
+    // (the CTA) has no words of its own to pass.
+    const askRead = !!line?.trim() && !allowedText;
     // Spelling and a named pattern need the larger frame.
     const [w, h] = allowedText || exactLook ? [1280, 720] : [DEFECT_SCAN_WIDTH, DEFECT_SCAN_HEIGHT];
     const small = await sharp(buffer)
@@ -416,16 +886,28 @@ export async function scanStillDefects(
       systemSuffix:
         (expect ? missingQuestion(expect) : "") +
         (expect && exactLook ? exactLookQuestion(exactLook) : "") +
-        (mustShow ? requiredThingsQuestion(mustShow) : "") +
-        (expect && softPrint ? SOFT_PRINT_QUESTION : "") +
-        (line ? placeQuestion(line) : "") +
+        (mustShow ? requiredThingsQuestion(mustShow, requiredLook) : "") +
+        (expect && fromOutside ? INSIDE_PART_NOTE : "") +
+        (expect && softPrint ? SOFT_PRINT_QUESTION : expect && allowedText ? SOFT_REST_QUESTION : "") +
+        (askDetail ? detailQuestion(expect!) : "") +
+        (line ? placeQuestion(line, !!ruledOut) : "") +
         (allowedText ? allowedTextQuestion(allowedText) : "") +
-        verdictShape(expect, line),
+        (askRead ? READ_WORDS_QUESTION : "") +
+        (ruledOut ? forbiddenQuestion(ruledOut) : "") +
+        // Light the line or the picture's own description names is what was asked for, not staged.
+        namedLightQuestion(namedLight(line, expect)) +
+        (noPerson ? QR_BACKDROP_PERSON_QUESTION : "") +
+        (noFace ? OTHER_FACE_QUESTION : "") +
+        verdictShape(expect, line, askDetail, !!ruledOut, noPerson, noFace, askRead),
       userMessage:
         "Is any text stamped over this frame, does it contain obviously impossible structure, " +
         "is there readable writing in the scene, and is it messy or branded?" +
         (expect ? ` Does it show "${expect.replace(/"/g, "'")}"?` : "") +
+        (askDetail ? " Is it the way it is described?" : "") +
         (line ? " Is it set where the line says?" : "") +
+        (ruledOut ? " Does it show what the line rules out?" : "") +
+        (noPerson ? " Is any person, or any part of one, in it?" : "") +
+        (noFace ? " Is anyone's face shown?" : "") +
         " Does it look like an ordinary phone photo?",
       imageInput: image,
       // The verdict is ~40 tokens. The careful model THINKS unless told not to, and thinking
@@ -450,18 +932,34 @@ export async function scanStillDefects(
     }
     const verdict = parseStillDefectVerdict(result.text, result.stopReason);
     if (!expect) verdict.missing = false;
+    if (!askDetail) {
+      delete verdict.detail;
+      delete verdict.detailWhat;
+    }
     if (!line) verdict.wrongPlace = false;
+    // …nor a "read" nobody asked for: on a picture allowed words, it must never excuse other writing.
+    if (!askRead) delete verdict.read;
+    // A stray "forbidden" on a picture nothing was ruled out for is not an answer to anything.
+    if (!ruledOut) delete verdict.forbidden;
+    // …nor a "person" on a picture allowed one (a cutaway may show hands at work).
+    if (!noPerson) delete verdict.person;
+    // …nor a "face" on a picture nobody asked about (the host's own face is asked beside its photo).
+    if (!noFace) delete verdict.face;
     if (
       verdict.overlay ||
       verdict.broken ||
       verdict.writing ||
       verdict.missing ||
+      verdict.detail ||
+      verdict.forbidden ||
+      verdict.person ||
+      verdict.face ||
       verdict.messy ||
       verdict.wrongPlace ||
       verdict.staged
     )
       console.log(
-        `[StillDefects] ${verdict.overlay ? "stamped text" : verdict.broken ? "broken geometry" : verdict.writing ? "readable writing" : verdict.missing ? "named thing missing" : verdict.messy ? "brand or clutter" : verdict.wrongPlace ? "wrong place" : "staged look"} detected: ${verdict.what}`
+        `[StillDefects] ${verdict.overlay ? "stamped text" : verdict.broken ? "broken geometry" : verdict.writing ? "readable writing" : verdict.missing ? "named thing missing" : verdict.detail ? `detail not as described (${verdict.detailWhat ?? ""})` : verdict.forbidden ? `shows what the line rules out (${ruledOut})` : verdict.person ? "a person behind the QR card" : verdict.face ? "a face on someone else" : verdict.messy ? "brand or clutter" : verdict.wrongPlace ? "wrong place" : "staged look"} detected: ${verdict.what}`
       );
     return verdict;
   } catch (err: any) {
@@ -488,17 +986,40 @@ export async function hasOverlayText(buffer: Buffer): Promise<boolean> {
 const SAME_THING_MODEL = () => process.env.SAME_THING_MODEL || "claude-sonnet-5";
 
 /**
+ * THE SAME LAYOUT IS THE SAME PICTURE (round 13, the review of jobs 408-410). Both side-by-side checks
+ * let two kinds of copy through, as "a different distance" or as "another subject". A punch-in or a
+ * pull-back on one layout: job 410 scene 23 was scene 22's carry-on bag under the same seat, the
+ * bottle in the same mesh pocket, only closer — 18.5 s of one picture, both checks clean — and job 408
+ * scene 5 was scene 4's panel, the same bin beside the same toilet, a little further back. The same
+ * place with a person taken out: job 410 scene 20 was scene 3's seat row, window, curtain and cart in
+ * the same spots with the woman gone. A real new view stays one — one small part filling the frame,
+ * another side or height, or a view so wide the place is most of the picture. Said the same way to
+ * both checks (`NEAR_COPY_SYSTEM`, `JUST_SHOWN_COPY_NOTE`), so the two cannot drift. Pure data.
+ */
+export const SAME_LAYOUT_RULE =
+  "The same layout is the same picture whatever the crop: the same things in the same arrangement, " +
+  "seen from the same side and height, only closer or further back (a punch-in or a pull-back on the " +
+  "same shelf), is a copy — and so is the same place and arrangement with a person or a hand taken out " +
+  "or put in (the same table and chairs with the person who sat there gone). It is a new view only " +
+  "when it shows one small part filling the frame with the rest out of it, the subject from another " +
+  "side or height, or so much more of the place around it that the place is most of the picture.";
+
+/**
  * Would a viewer think the same picture was shown twice? (2026-10-15, the review: "Dale repeats
  * phone-screen pictures that look almost the same".) Asked only of pairs a picture fingerprint
  * flagged (`server/pictureVariety.ts`), since the fingerprint alone cannot tell a near-copy from
- * another picture of the same workshop.
+ * another picture of the same workshop. A tighter or looser crop of one layout, and one layout with a
+ * person taken out, are copies too (`SAME_LAYOUT_RULE`).
  */
 export const NEAR_COPY_SYSTEM =
   "You compare two pictures from the same video. copy: true when a viewer would think the same " +
   "picture was shown twice — the same kind of subject in the same setting, from nearly the same " +
   "spot, distance and framing (two near-identical phone screens on the same bench, the same pile " +
-  "of pieces from the same angle). copy: false when they are clearly different pictures — " +
-  "another subject, another place, or the same subject from a clearly different distance or side.\n" +
+  `of pieces from the same angle). ${SAME_LAYOUT_RULE} copy: false when they are clearly different ` +
+  "pictures — another subject, another place, or such a new view of the same subject; a person added " +
+  "or taken away does not make another subject. " +
+  "One of them may be square, with black bars at its sides (a picture shown beside the host): " +
+  "compare what the two pictures show, never the shape of their frames.\n" +
   'Return ONLY JSON: {"copy":true|false,"what":"<what makes them look alike, a few words, or empty>"}';
 
 /** Decide from the model's answer; anything unreadable is "not a copy". Pure. */
@@ -513,18 +1034,29 @@ export function parseNearCopyVerdict(raw: string, stopReason?: string): { copy: 
   }
 }
 
+/**
+ * The pair the near-copy look is shown: `earlier` LEFT, `buffer` RIGHT, each WHOLE in its 640×360
+ * half. A split panel's square thumbnail sits between black bars — cut to fill the half, the look saw
+ * only the panel's middle band (2026-10-18, panels joined the check: job 405 scene 9). A full-frame
+ * thumbnail fills its half exactly, as before.
+ */
+export async function nearCopyPair(earlier: Buffer, buffer: Buffer): Promise<Buffer> {
+  const side = (b: Buffer) =>
+    sharp(b).resize(640, 360, { fit: "contain", background: { r: 0, g: 0, b: 0 } }).png().toBuffer();
+  const [left, right] = await Promise.all([side(earlier), side(buffer)]);
+  return sharp({ create: { width: 1280, height: 360, channels: 3, background: "#000" } })
+    .composite([
+      { input: left, left: 0, top: 0 },
+      { input: right, left: 640, top: 0 },
+    ])
+    .png()
+    .toBuffer();
+}
+
 /** Are `earlier` and `buffer` near-copies? Side by side. Never throws: a dead check says no. */
 export async function scanNearCopy(earlier: Buffer, buffer: Buffer): Promise<{ copy: boolean; what: string }> {
   try {
-    const side = (b: Buffer) => sharp(b).resize(640, 360, { fit: "cover" }).png().toBuffer();
-    const [left, right] = await Promise.all([side(earlier), side(buffer)]);
-    const pair = await sharp({ create: { width: 1280, height: 360, channels: 3, background: "#000" } })
-      .composite([
-        { input: left, left: 0, top: 0 },
-        { input: right, left: 640, top: 0 },
-      ])
-      .png()
-      .toBuffer();
+    const pair = await nearCopyPair(earlier, buffer);
     const result = await invokeClaude({
       systemPrompt: NEAR_COPY_SYSTEM,
       userMessage: "Are these two pictures near-copies of each other?",
@@ -545,6 +1077,13 @@ export async function scanNearCopy(earlier: Buffer, buffer: Buffer): Promise<{ c
  * Is the person in a picture the HOST? (2026-10-15, the review: Scarlett's routine pictures showed
  * "a different woman".) The host photo LEFT, the picture RIGHT. Only what the picture shows is
  * judged — a picture from behind is judged on hair, build and clothes, one of the face on the face.
+ * IS THE FACE SHOWN? (`face`, 2026-10-18, the review of jobs 401-407): the same call also says
+ * whether the face is in the picture. The rule that a host picture never draws the face lived only
+ * in the prompt, and a well-matched drawn face was the easiest kind to pass this check — job 401
+ * scene 20 (the host reading at a desk, face on, 10 s), job 406 scene 14 (smiling into the lens with
+ * a phone at the ear) and job 407 scene 27 (a full-body axe swing, the face in three-quarter view)
+ * all passed as "the same person". Both eyes are the line: a three-quarter view shows both, a profile
+ * turned from the camera one — and "from the side" is a framing the host prompt asks for.
  */
 export const SAME_HOST_SYSTEM =
   "You compare two photos. LEFT: the host of a video. RIGHT: a new picture that must show THAT " +
@@ -553,33 +1092,73 @@ export const SAME_HOST_SYSTEM =
   "skin tone; age (an older person must not become a young one, nor a woman a man); build; and, " +
   "when the face is shown, the face itself — its shape and features. Clothes may differ. " +
   "same: false when the RIGHT clearly shows a DIFFERENT person — different hair colour or style, " +
-  "clearly younger or older, different skin tone, a different face, or more than one person. " +
+  "clearly younger or older, different skin tone, a different face, or more than one person — " +
+  "except the hair when the question says it is styled or coloured on purpose: then the face, age " +
+  "and skin decide. " +
   "When too little of the person shows to tell (hands only), judge what shows (age and skin " +
   "tone of the hands) and give the benefit of the doubt.\n" +
-  'Return ONLY JSON: {"same":true|false,"what":"<what differs, a few words, or empty>"}';
+  "face: true when the RIGHT picture shows a person's FACE — the nose and both eyes (open, closed " +
+  "or looking down), from the front or in three-quarter view — however small the person is in the " +
+  "frame. false when the face is out of frame (the frame cut at the lips or the chin), turned away " +
+  "(seen from behind), seen edge-on in profile with only one eye showing, or when no head is in " +
+  "the picture. Answer face whatever you answer for same.\n" +
+  'Return ONLY JSON: {"same":true|false,"face":true|false,"what":"<what differs or shows, a few words, or empty>"}';
 
-/** Decide from the model's answer; anything unreadable passes (a check never costs a render). Pure. */
-export function parseSameHostVerdict(raw: string, stopReason?: string): { same: boolean; what: string } {
+/**
+ * Decide from the model's answer; anything unreadable passes (a check never costs a render) — so a
+ * face counts only when the answer says `face: true`. Pure.
+ */
+export function parseSameHostVerdict(
+  raw: string,
+  stopReason?: string
+): { same: boolean; face: boolean; what: string } {
   const m = /\{[\s\S]*\}/.exec(raw ?? "");
-  if (!m || stopReason === "max_tokens") return { same: true, what: "" };
+  if (!m || stopReason === "max_tokens") return { same: true, face: false, what: "" };
   try {
     const d = JSON.parse(m[0]);
     const same = d?.same !== false;
-    return { same, what: same ? "" : String(d?.what ?? "a different person").slice(0, 80) };
+    const face = d?.face === true;
+    const what = String(d?.what ?? "").trim().slice(0, 80);
+    return {
+      same,
+      face,
+      what: !same ? what || "a different person" : face ? what || "the face is shown" : "",
+    };
   } catch {
-    return { same: true, what: "" };
+    return { same: true, face: false, what: "" };
   }
 }
 
 /**
- * Is the person in `buffer` the host in `hostPhotoUrl`? Side by side, the photo on the left.
- * Never throws: a dead check passes the picture.
+ * The question asked beside the two photos. A picture whose face is shown by design is asked about
+ * the face; one whose HAIR is the look it shows (`hairMayDiffer`, a look on the host's face such as
+ * "gray hair that catches the light will read younger" — `hairLookOnFace`) is judged on the face,
+ * age and skin, since its hair is drawn as its description gives it and would otherwise read as
+ * "a different person" every time, ending in a picture with nobody in it. Pure.
+ */
+export function sameHostQuestion(faceShown: boolean, hairMayDiffer = false): string {
+  if (!faceShown)
+    return (
+      "Is the person in the right picture the same person as on the left, as far as it shows? " +
+      "And is their face shown?"
+    );
+  return hairMayDiffer
+    ? "The right picture shows the person's face, with their hair styled or coloured on purpose as " +
+        "the picture asks. Is it the same person as on the left? Judge the face itself — its shape and " +
+        "features — the age and the skin tone, not the hair."
+    : "The right picture shows the person's face. Is it the same person as on the left?";
+}
+
+/**
+ * Is the person in `buffer` the host in `hostPhotoUrl`, and is their face shown? Side by side, the
+ * photo on the left. Never throws: a dead check passes the picture.
  */
 export async function scanSameHost(
   hostPhotoUrl: string,
   buffer: Buffer,
-  faceShown: boolean
-): Promise<{ same: boolean; what: string }> {
+  faceShown: boolean,
+  hairMayDiffer = false
+): Promise<{ same: boolean; face: boolean; what: string }> {
   try {
     const { presignOwnBucketUrl } = await import("./storage");
     const res = await fetch(await presignOwnBucketUrl(hostPhotoUrl), {
@@ -597,9 +1176,7 @@ export async function scanSameHost(
       .toBuffer();
     const result = await invokeClaude({
       systemPrompt: SAME_HOST_SYSTEM,
-      userMessage: faceShown
-        ? "The right picture shows the person's face. Is it the same person as on the left?"
-        : "Is the person in the right picture the same person as on the left, as far as it shows?",
+      userMessage: sameHostQuestion(faceShown, hairMayDiffer),
       imageInput: { base64: pair.toString("base64"), mediaType: "image/png" },
       maxTokens: 200,
       model: SAME_THING_MODEL(),
@@ -608,13 +1185,22 @@ export async function scanSameHost(
     });
     const v = parseSameHostVerdict(result.text, result.stopReason);
     if (!v.same) console.log(`[SameHost] not the host: ${v.what}`);
+    else if (v.face && !faceShown) console.log(`[SameHost] the face is shown: ${v.what}`);
     return v;
   } catch (err: any) {
     console.warn(`[SameHost] check failed: ${err?.message ?? err} — passing the picture`);
-    return { same: true, what: "" };
+    return { same: true, face: false, what: "" };
   }
 }
 
+/**
+ * A new background is not a new view (2026-10-18, job 399 scenes 16-17): the cup on a tray table came
+ * back as the cup at the cart — the same hands tipping the same can into it at the same angle, the
+ * name bar and pin in the same places — and passed as "not a copy" because the room behind it was
+ * another one. `copy` now names that case. It says the hands in the same POSITIONS, not "the same
+ * hands": two pictures of the host at work always show the same person's hands, and that alone is
+ * never a copy.
+ */
 export const SAME_THING_SYSTEM =
   "You compare two photos. LEFT: an earlier photo of a thing. RIGHT: a new photo that must show " +
   "the SAME thing — the very same object, not just the same kind — usually from another spot, " +
@@ -622,7 +1208,9 @@ export const SAME_THING_SYSTEM =
   "crop or light is fine, and so is the piece being further along. What is NOT fine: a different " +
   "shape, colour, material, size or design, or a different object of the same kind.\n" +
   "copy: true when the RIGHT photo is taken from nearly the same spot, distance and framing as the " +
-  "LEFT — a near-copy of it rather than a new view.\n" +
+  "LEFT — a near-copy of it rather than a new view. A new background or setting alone does NOT make " +
+  "a new view: the same pose, the hands in the same positions and the same things at the same angles " +
+  "and in the same places in the frame, with only what is behind them changed, is a copy.\n" +
   'Return ONLY JSON: {"same":true|false,"copy":true|false,"what":"<what differs, a few words, or empty>"}';
 
 /** Decide from the model's answer; anything unreadable passes (a check never costs a render). Pure. */
@@ -647,13 +1235,40 @@ export function parseSameThingVerdict(
 }
 
 /**
+ * Said with the pair when the LEFT picture is the one the new picture must not repeat — shown right
+ * before it, or the one it continues (`memoryRightBefore`). "A different distance or crop is fine"
+ * let a slightly tighter frame of the same composition through as a new view: job 405 scene 24 was
+ * scene 22 "only slightly tighter", job 403 scene 14 scene 10's pipe run a little closer, job 402
+ * scene 12 scene 9's stocked galley with "only the camera closer". A real close-up of one part, a
+ * wide view, another side or height is still a new view.
+ * NOT ONLY "A LITTLE" (round 13): job 410 scene 23, told "a close-up of one small detail … filling the
+ * frame", came back as scene 22's whole carry-on bag a good deal closer, and job 410 scene 28 as the
+ * basket handout of scene 27 with one more passenger in it — both passed this check, which counted only
+ * "a little closer or further back" as a copy. It now says the near-copy check's own rule
+ * (`SAME_LAYOUT_RULE`). Pure data.
+ */
+export const JUST_SHOWN_COPY_NOTE =
+  "The LEFT photo is shown in the video just before the RIGHT one, so the RIGHT must be a clearly " +
+  `new photo. ${SAME_LAYOUT_RULE}`;
+
+/** The question asked with the pair (`scanSameThing`); `justShown` adds `JUST_SHOWN_COPY_NOTE`. Pure. */
+export function sameThingQuestion(thing: string, justShown = false): string {
+  return (
+    `The thing: ${thing.replace(/"/g, "'").slice(0, 120)}. Is it the same one on the right, and is ` +
+    `the right a new view of it or a near-copy?${justShown ? ` ${JUST_SHOWN_COPY_NOTE}` : ""}`
+  );
+}
+
+/**
  * Is the `thing` in the new picture the same one as in its memory picture (`memoryUrl`)? The two are
- * laid SIDE BY SIDE, memory on the left. Never throws: a dead check passes the picture.
+ * laid SIDE BY SIDE, memory on the left. `justShown`: the memory picture is the one the new picture
+ * must not repeat (`JUST_SHOWN_COPY_NOTE`). Never throws: a dead check passes the picture.
  */
 export async function scanSameThing(
   memoryUrl: string,
   buffer: Buffer,
-  thing: string
+  thing: string,
+  justShown = false
 ): Promise<{ same: boolean; copy: boolean; what: string }> {
   try {
     const { presignOwnBucketUrl } = await import("./storage");
@@ -678,7 +1293,7 @@ export async function scanSameThing(
       .toBuffer();
     const result = await invokeClaude({
       systemPrompt: SAME_THING_SYSTEM,
-      userMessage: `The thing: ${thing.replace(/"/g, "'").slice(0, 120)}. Is it the same one on the right, and is the right a new view of it or a near-copy?`,
+      userMessage: sameThingQuestion(thing, justShown),
       imageInput: { base64: pair.toString("base64"), mediaType: "image/png" },
       maxTokens: 200,
       model: SAME_THING_MODEL(),

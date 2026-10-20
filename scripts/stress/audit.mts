@@ -45,7 +45,7 @@ import ffmpegPath from "ffmpeg-static";
 import { getLongformVideoJobById } from "../../server/db";
 import { invokeClaude } from "../../server/claude";
 import { safeParseJSON } from "../../server/jsonRepair";
-import { STAGED_RULE } from "../../server/overlayTextScan";
+import { namedLight, namedLightQuestion, STAGED_RULE } from "../../server/overlayTextScan";
 import type { StoryboardScene, LongformInputParams } from "../../shared/types";
 import { checkPlan, fmt, textOf, type PlanFinding } from "../../server/planGate";
 import { parseCtaMarkers } from "../../server/longformVideo";
@@ -162,9 +162,16 @@ type Judged = { scene: number; kind: string; text: boolean; brands: boolean; clu
 
 async function judge(buf: Buffer, narration: string, mustShow?: string): Promise<Omit<Judged, "scene" | "kind"> | null> {
   try {
+    // The light the line or the MUST SHOW names is not staged here either, so the audit's rule 13
+    // and the picture check judge it the same way (`namedLightQuestion`, jobs 401 and 405).
+    const light = namedLightQuestion(namedLight(narration, mustShow), "staged, for this frame").trim();
     const r = await invokeClaude({
       systemPrompt: JUDGE_SYSTEM,
-      userMessage: `Narration line: "${narration}"\n` + (mustShow ? `MUST SHOW: "${mustShow}"\n` : "") + "JSON:",
+      userMessage:
+        `Narration line: "${narration}"\n` +
+        (mustShow ? `MUST SHOW: "${mustShow}"\n` : "") +
+        (light ? `${light}\n` : "") +
+        "JSON:",
       imageInput: { base64: buf.toString("base64"), mediaType: "image/png" },
       // Room for Sonnet's own reasoning ahead of the JSON — at 160 the answer was cut off, and a
       // truncated reply parsed as "text: true" with no reason (8 of 9 text flags in round 3).

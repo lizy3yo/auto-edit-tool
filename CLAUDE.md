@@ -659,7 +659,18 @@ Express · tRPC · Drizzle · MySQL.
   (`holdsSpeech`, 2026-10-17): the transcriber drops prices and mishears full stops, so the step
   erased "$150 to $600", "to $1,500" (Dale, job 386) and "to $130", "of them" (Hank, job 388) — 2.5-3.3 s
   of digital silence where words were. Any 80 ms in a gap within 15 dB of the narration's speech level
-  leaves that gap exactly as voiced (the log says how many). `SENTENCE_PAUSES=0` turns it off; `voice-bench.mts`
+  leaves that gap exactly as voiced (the log says how many). A PAUSE IS MADE, NEVER CUT (2026-10-17,
+  Frederick's "The type." at 1:10 of job 393 sounded chopped): every edge comes from the SOUND — a gap
+  starts where the word has died away (`soundEnd`, 35 dB under the speech level) and ends where the
+  next word begins (`soundStart`), the fades are 80 ms (`FADE_SEC`, was 20), a breath is lowered 30 dB
+  (`QUIET_GAIN`), never to dead digital silence, and an inserted pause goes in at the quietest moment
+  between the words with the word before eased out over 60 ms. Sentence ends come from the SCRIPT as well
+  as the transcript (`scriptSentenceEnds`; "label. The type." was heard "label, the type").
+  The pause is 0.5 s (`PAUSE_SEC`, was 0.3): with the mark gone, 0.3 s left Scarlett's mouth moving in
+  pauses (three HeyGen rounds each, `bench/lipsync-pause`: mark 0.44 / sync 0.46, natural 0.3 s 0.62 / 0.31,
+  natural 0.5 s 0.59 / 0.35; Frederick 0.66/0.35 → 0.62/0.36). The operator chose the natural pause for
+  every channel over the mark: no word is cut, at the cost of Scarlett's calmer mouth (still above Bertha's 0.30).
+  `SENTENCE_PAUSES=0` turns it off; `voice-bench.mts`
   applies it by default (`sentencePauses: false` to compare). (c) A MOUTH AT REST (PHONE LOOK v4):
   HeyGen returns to the photo's mouth whenever the voice stops, so a photo taken MID-WORD gives a
   mouth that never closes between sentences (Dale's pauses showed teeth; HeyGen's own advice is a
@@ -709,6 +720,286 @@ Express · tRPC · Drizzle · MySQL.
   persona, through the voice session's own `scripts/voice-bench.mts --heygen` (words, loudness, noise
   in pauses, lip-sync against the voice) plus the lower mouth vs Bertha and the clip's skin, one pass
   line per check, each failure named as the VOICE half or the PHOTO half.
+- **The audit's rules, built and tested on new channels** (round 9, 2026-10-18). The audit of 139
+  production films (`analysis/generation-audit-2026-10.md`, 17% of clips with a visible error)
+  proposed R1-R15. Each was replayed over the 336 local storyboards (read only, free), challenged by
+  a second reviewer, built as a general rule with tests from the real rows, and reviewed again. Seven
+  channels were copied from the hosted app for this (`scripts/channels/import-hosted-channels.mts`,
+  skips any that exist; 3-minute excerpts of their real scripts in `scripts/stress/scripts/`).
+  (a) WHO IS IN THE PICTURE (`namedPeople`/`showsPerson`/`someoneElse`, hostLook.ts): people are read
+  off the picture's own words ("an older man", "a crowd", "a shopper's hand"); a role, a sex the host
+  does not have, or two or more people make `otherPerson` (+ `otherPeople`), never the host photo;
+  the line check answers `who` per person picture (`applyWho`). (b) BUILD STAGE (`scene.buildStage`
+  material/making/done from the shot list and line check): memory never draws a step from a later
+  stage (`laterStage` in `memorySourcesFor`). (c) ONE LOOK PER KEY THING: memory is the earliest
+  picture that is ABOUT the thing (`memoryOf`/`isSubject`); a picture with no own memory gets the
+  props list's look (`keyThingLookClause`, no place/light/writing); a first picture whose check said
+  missing is never memory (`memoryUnfit`). (d) THE LINE CHECK holds who does what, the state and the
+  count the line makes its point with, and writes `forbids` for a sentence that rules something out
+  (shot-list rule 6b "what not to do"; the still check's QUESTION 8 only on those pictures). A separate
+  `detail` question (right thing, wrong state/count/position) — ON since round 12, capped at 3
+  redraws a video, `PICTURE_DETAIL_CHECK=0` off. A typed redo owns its picture (`ownTypedPicture`). (e) NO
+  SILENT FAULTS (`shared/pictureFlaws.ts`): a picture that ships flagged says so (`pictureFlaws`/
+  `panelFlaws`, one job warning, a card badge); later refusals are recorded on `pictureChecks`; broken
+  geometry and plain-picture writing get one changed-prompt redraw (`faultRedrawFor`,
+  `FAULT_REDRAWS=0` off). (f) PRINT the line never says is drawn soft (`blurUnsaidPrint`); the book
+  guard reads the scrubbed words, so "Facebook" is not a book. (g) SCREENS show what their own
+  description says (`namesDevice`, `sellingScreen`, `DESCRIBED_SCREEN_CLAUSE`); the shopping grid is
+  for selling screens only. (h) SPLITS ship with both halves or say so (`server/splitPanel.ts`: the
+  panel starts when HeyGen accepts the render, waits on the host scene's own clock, one retry,
+  `splitPanelMissing` + a "Draw the picture(s)" banner for films already rendered). (i) CLIP CHECK is
+  told what is meant to move (`{what, meant}`); a glitch ends as the still from its checked keyframe
+  (round 12; with `CLIP_GLITCH_RERENDER=1` it is rendered once more from it, ledgered `glitch`). (j) CHIN/NECK LINES frame the host at the lips (`looksAtChinLine`,
+  `HOST_LIPS_CUT_CLAUSE`). (k) LIST ITEMS ARE THINGS (`notAThing`): numbers, durations, rates, set
+  phrases, clauses and describing words never make a list, and a list with one refused item is
+  dropped whole. (l) NO UNSEEN BEATS (`foldUnseenBeats`): a measured zero-length beat joins a
+  neighbour; a lead-in between two list items goes to the next item. (m) ONLY NARRATION IS VOICED
+  (`shared/scriptCheck.ts`): notes, headings and a 60+ word repeat are refused at Generate by line.
+  Left for the operator then, decided in round 12: the face on beauty/fashion "looks" lines (audit
+  cause 9) and the pay-once video rule.
+- **What the practice films of the new channels found** (round 10, 2026-10-18). Helena Hart (job
+  399) and Gideon Grant (job 400) were reviewed picture by picture with a second reviewer re-checking
+  each finding against the frames (73 confirmed; `graphics-lab/out/review-pack.mts` builds a review
+  pack: a frame per scene beside its line, frames of every graphic, the words heard). General rules
+  that came out of it: (a) A RECURRING PERSON KEEPS ONE LOOK: the props call also writes `PERSON name:
+  look` for someone other than the host shown in two or more sentences (`inputParams.recurringPeople`),
+  matched by name or role (`scene.otherPersonLooks`) — Helena's passenger was three women in 13 s. (b)
+  TWO PEOPLE, A CLAUSE EACH: a description naming two people asks for each, no face for anyone; the
+  host's own job on a host-led channel is the host drawn in words, never the photo. (c) A CONTINUATION
+  past the limit gets its own view even when the planner repeated the words without `sameShot`
+  (`joinSameContext`). (d) A PICTURE DRAWN FROM THE ONE RIGHT BEFORE IT, about something else, takes
+  only the thing's look (`rightBeforeClause`); a second copy is drawn from words + the written look.
+  (e) LISTS: a general head before its examples is no item (`generalHead`, "some ordinary place, a
+  waiting room…"); commas between describing words of ONE thing never split items (`seriesCommas`,
+  "a short, furious, loving essay"); a time a sentence opens on is no item; a parallel series keeps
+  its last member (`withLastSeriesMember`); a step offered as a choice ("…, or step back to the
+  galley") is part of the step before it (`joinChoiceSteps`). (f) THE BRIDGE into a list is one group
+  picture only when one photograph can hold every item (`notInOnePhoto`; no "money, grief, people"
+  cut-outs). (g) THE STYLE BIBLE loses only its sentences about printed matter, never the whole
+  (`bibleWithoutPrintedMatter`). (h) SPLIT PANELS borrow their key thing's named look
+  (`panelNamedLook`). (i) "strand" is a person only when it is hair. (j) CTA: the big QR starts on
+  any common scan wording (holding/lifting/aiming a phone at the screen or code, `SCAN_INTENT`); a
+  two-word title needs both words before the cover shows (`titleMatcher`); after the cover the host
+  comes back on a sentence start, the cover finishing its sentence up to 15 s
+  (`COVER_SENTENCE_MAX_SEC`). (k) A HOST TAKE stops mid-sentence only at a natural break
+  (`naturalBreak` in planGate.ts: a comma, before a joining word, an article, a count or a name),
+  never between subject and verb. A short practice film's 47 s without the host was NOT a bug: on a
+  3:52 film the 3 host minutes are capped at the 35% guide (1:21), two check-ins.
+- **What the seven new channels' practice films found** (round 11, 2026-10-18). Jobs 401-407 (Gary,
+  Gideon, Helena, Luca, Sam, Walter, Werner), reviewed picture by picture and graphic by graphic, each
+  finding re-checked against the frames; 21 general rules, each replayed over the local storyboards.
+  PEOPLE: (a) THE HOST'S FACE IS CHECKED, not only asked for: `scanSameHost` also answers whether the
+  face shows (nose and both eyes; a profile passes, "from the side" is a framing we ask for); outside
+  a step on the host's own face a shown face is a miss counted with the identity redraws, the redraw
+  is turned away (`HOST_TURNED_AWAY_CLAUSE`/`turnHostAway`, `scene.hostTurnedAway`), and after the
+  last miss the picture is drawn with nobody in it — that draw always gets its turn. A whole-body
+  action or a phone call is framed from behind or the side from the first draw (`turnAwayPose`).
+  (b) "YOU" IS THE HOST only when the viewer does the host's own work; when the host's job serves the
+  viewer (passenger, patient, guest) the props call writes `VIEWER name: look`
+  (`inputParams.viewerPerson`) and every picture of the viewer keeps that look. (c) "Hand" is a person
+  only as part of a body (`BODY_HAND`: not a hand saw, hand-stitched, by hand, a clock's hands).
+  (d) Splitting and edge tools in their real working position (end grain, edge-down; the other hand
+  behind the edge; `TOOL_CONTACT_CLAUSE`, the still check's `broken`). (e) Light the words name
+  (night, lamplight, screen glow) is never "staged" on its own (`namedLight`/`namedLightQuestion`,
+  audit rule 13 agrees). (f) The QR card's picture is person-free in its words too (`namesSomeone`,
+  `QR_BACKDROP_CLAUSE`, a "person" flag on that check). PICTURES: (g) a split panel gets its own line
+  check after the panel rewrite (`fitSplitPanelsToLines`, same rulebook and model) and a free cut of
+  "X or Y" to one thing; (h) split panels are in the near-copy check (`server/pictureVariety.ts`, a
+  panel looks at its three closest pictures up to 24 bits); (i) a continuation view is a NEW photo of
+  the thing from a camera in `REDRAW_CAMERAS`, checked against the picture it continues
+  (`JUST_SHOWN_COPY_NOTE`), and a picture after a host take no longer continues the one before it
+  (`breakTopicsAtHostTakes`); (j) memory lends only the THING, never its season, weather, light or
+  place (`MEMORY_SETTING_CLAUSE`); (k) a living thing's look names its exact regional kind with 2-3
+  features that tell it apart; (l) nothing solid is cut open (`server/cutOpen.ts`, `withoutCutaway`,
+  `SEEN_FROM_OUTSIDE_CLAUSE`); (m) a line with nothing to see gets an everyday moment that carries it,
+  never the main thing by default (shot-list rules 1f/1g); a sound shows what makes it; (n) the line
+  check may split a picture where a new sentence about another visible thing starts, even a joined
+  one. TIMING AND LISTS: (o) the intro is found by a short name too ("I am Sam", `server/hostIntro.ts`);
+  (p) a cut never lands inside a spoken number (`retimeSpokenNumbers`); (q) a list keeps its last item
+  when it runs into a closing clause ("…the kitchen table at two in the morning when…"). GRAPHICS:
+  (r) the planner refuses a card, window or Quote that would leave under 1.5 s of a shot (QA's own
+  blink check), a Quote counts as hiding the picture, and graphics leave ON the cut (one measuring
+  point for resolver and QA); (s) the name card is drawn in Inter everywhere (`interFontReady`,
+  `server/fontConfig.ts` — FONTCONFIG_FILE never reached librsvg on Windows) in the graphics' label
+  style, on the intro take else the first host take that can show it (`nameCardOnWindow`); (t) the
+  chapter label sits below the chin over a host (`LAYOUT.belowChinY`, `placementFor`); (u) NumberLabel
+  draws "vs" only when the two values are compared (a range or two prices never). Details and the
+  replay counts: `graphics-lab/out/round11-docs.json`.
+- **The operator's four decisions** (round 12, 2026-10-18). (a) THE DETAIL CHECK IS ON
+  (`detailCheckOn`, `PICTURE_DETAIL_CHECK=0` off) on the condition that it costs nothing more: it
+  rides the one check call, and its redraws are capped per video (`server/detailRedraws.ts`,
+  `DETAIL_REDRAWS_PER_VIDEO` 3, in memory per job; a detail on a draw redrawn anyway shares that
+  redraw). Past the cap the picture ships flagged "detail". It never judges a face's expression —
+  the one wrong flag of 148 measured (job 401 #29 "looking weary") was a face hidden by design.
+  Measured 5 flags in 148 pictures, never more than 2 a video. (b) EACH VIDEO CLIP IS PAID FOR ONCE:
+  a clip the motion check fails becomes the still it was rendered from (`checkedKeyframeOf`), the
+  submit marked `SceneSubmit.movedWrong`; locally 35 clips in 20 jobs had been rendered twice and 11
+  second renders failed too. `CLIP_GLITCH_RERENDER=1` restores the second render. (c) LOOKS ON THE
+  FACE SHOW THE HOST'S FACE, accurately: a line about what a shade, hair colour or cut, glasses,
+  earrings or a neckline does to the face (`looksOnTheFace`, "will read younger", "washes you out")
+  is drawn from the host photo (`faceLookFramed` → `hostFaceShown`, `hostFaceLookClause`) and checked
+  to be the host (`scanSameHost`; on a hair line it judges face, age and skin, not the hair,
+  `hairLookOnFace`). Replayed over 345 storyboards: 12 pictures, all Diane's hair lines. (d) THE FILM
+  NEVER ENDS ON A HOST SHOT UNDER A SECOND (plan-gate rule 7, `closingFoldTarget`,
+  `CLOSING_HOST_MIN_SEC` 1): the goodbye's words go to the beat before it — a host take joins into
+  one take (within `HOST_JOIN_MAX_SEC`), a picture or split runs to the end, and the END QR CARD's
+  release beat (`qrTail` + `qrHero`, the film's last words only) keeps its card and picture to the
+  end under the goodbye (25 of 141 production films ended card → a 0.8 s face; job 179). Never
+  across a CTA edge otherwise, into a cover or asset, or over a paid render.
+- **What the verification films on the round-12 code found** (round 13, 2026-10-19). The seven
+  channels' scripts were rendered again (jobs 408-414) and reviewed against their own earlier films
+  (401-407): severe faults 3 → 1, noticeable roughly halved (Luca 14 → 2). 19 general fixes, each
+  replayed over the ~350 local storyboards. REDRAWS: (a) a HOST PICTURE NEVER SHIPS UNCHECKED — the
+  "same faults twice → keep" step and the out-of-draws fallback used to ship before `scanSameHost`
+  ran (job 409 scene 28: the host reading face-on again, the severe one); now a kept or fallback host
+  picture passes the check or is turned away / drawn with nobody, at most one extra draw. (b) A REDRAW
+  DROPS WHAT CAUSED ITS FAULT: a missing/detail redraw goes without its memory pictures and memory
+  camera, drawn from the written look (a remembered cola cup had beaten "ginger ale", 410 scene 18);
+  a small subject never gets the far near-copy camera (408's swab as a speck); a copy of its own
+  memory drops only that reference (`memoryRefScenes`; 408's tunnel bowl). (c) A STAGED REDRAW IS
+  PLAINER (`server/plainLook.ts`, `plainLookRedraw`): light, grandeur and finish words the line never
+  said come out (marble throne, golden glow), and a view no phone could take is brought to one a person
+  could (an airliner above the clouds → a wing through a cabin window). (d) NEAR-COPY GAPS
+  (`server/pictureVariety.ts`): a picture is compared with the pictures it was drawn from and their
+  other children up to 24 bits; every shipped frame, fallbacks too, is remembered; a tighter or looser
+  crop of one layout, or a person taken out, is a copy (`SAME_LAYOUT_RULE`); pictures sharing a memory
+  draw in one lane as well as their thing's lane (`varietyLanes`, a panel waits ≤ 3 min). About three
+  more Sonnet looks per 3-minute film. (e) Drawn from words, a picture keeps every key thing's written
+  look (`otherThingLooks`), so 409's sympathy card stopped changing design. PEOPLE AND THINGS: (f) THE
+  BOOK GUARD keeps out only the video's own book (its title, "my book") — never a book or page the line
+  is about, never "checkbook"/"notebook" — and strips it from the scene's OWN words, never borrowing
+  a neighbour's prompt (`genericCtaBrollFor` had drawn 409's farmer through the study window). (g) A
+  THING ONLY THE CTA NAMES IS NO PROP: the style bible and props list read the script without its
+  marked CTA blocks (`splitCtaFromContent`, backstop `withoutCtaOnlyProps`; 409's CTA phone had filled
+  three pictures). (h) The props call gets the host's title and own words about themself, and one
+  small extra call ("Props list (people)", ~8 of 37 scripts) fills a PERSON line for someone the
+  script follows, or a PERSON/VIEWER look missing man/woman, age or hair (`followedPeople`,
+  `lookGaps`). (i) SOMEONE ELSE NEVER SHOWS A FACE: their expressions are said with the body
+  (`expressionAsBody`), and the still check asks those pictures whether a face shows (QUESTION 10,
+  same call; a clear profile counts), one redraw from behind (`OTHERS_TURNED_AWAY_CLAUSE`). (j) A
+  list said inside a passage of another time or place carries it (`listSetting`, from the list
+  finder's call); a story's "he/she" is never the host and a figure of speech is drawn by its meaning
+  (`fitPictureNotes`). PLANNING: (k) lines that COMPARE are never one same-topic picture
+  (`contrastAcross` in `parseContextGroups`; 408's bin under "it is empty"). (l) A picture is about the
+  ITEM, never the surface it sits on (`onlyItsSurface`), a held-things list keeps its holder
+  (`keepListHolders`), and the line check is told a closing "There is a …" thing the picture leaves
+  out (`closingThing`). (m) A TOOL MADE FOR ONE JOB is written by its parts, one kind
+  (`SPECIALISED_TOOL_RULE`, `TOOL_SHAPE_NOT_VERB`; 408's auger as a bent rod). (n) STEPS need three,
+  or two instructions on named things ("Flush, and follow." is none); a host take never stops right
+  after a preposition before a bare word — the gate hands over before the preposition. (o) The
+  Generate script check WARNS when a scan-window line puts the code in a corner/side
+  (`shared/scanIntent.ts`, `ctaPlacementJobWarnings`). GRAPHICS: (p) the planner SEES THE PICTURE
+  (`pictureOf`, graphics/src/plan/pictures.ts: still or video, list item, subject, person): a
+  SmallLabel names what its picture shows, one name a picture, no full-screen card leaves a video under
+  1.5 s or hides two list pictures. (q) Rows never stop before what their last word needs; steps get
+  their articles back and use only words said. (r) A Versus sub enters with its own words, the VS badge
+  with the second side; a graphic's own words end where a new clause begins (`subAt`, `drawnSec`).
+  (s) The name card sits on the self-introduction even when short (edges shrink to 0.2 s, the 1.5 s
+  hold kept), never on a take before it; a DimCaption is ≤ 10 words and darkening graphics are ≥ 3 s
+  apart. Details and replay counts: `graphics-lab/out/round13-docs.json`; the reviews: `graphics-lab/out/review3/`.
+- **What the other four verification films found** (round 14, 2026-10-20). Walter, Luca, Gary and
+  Sam (jobs 411-414) against 404-407: 0 severe, noticeable down (Luca 14 → 2, Sam 8 → 4). 19 general
+  fixes, each replayed over the ~350 local storyboards. MEMORY: (a) A PLACE LENDS NO PICTURE (a lawn,
+  yard, room, aisle, landscape or the weather — `lendsNoPicture`): job 411's first yard was copied into
+  five pictures and its snow under Gulf Coast palms; a place keeps one written look, without season,
+  light or hour (`placeLook`), used only in pictures set in that same place (`placesSetIn`, the home
+  line too). (b) ANOTHER OF ITS KIND IS NOT THE KEPT ANIMAL: wild/stray/feral/every… before a pet's or
+  the host's stock's name, or someone else's ownership of any key thing, files the picture under
+  nothing and says it is not the one shown before (job 412's wild cats drawn as the house cat).
+  (c) A CONTINUATION KNOWS WHAT IT CONTINUES: followed back past list items and inserts; a keyless
+  continuation is drawn from it (the people's and things' look only, a `REDRAW_CAMERAS` camera) and
+  after it — every picture waits for its near-copy partner (job 413's phone call, landline then
+  smartphone). (d) EVERY THING A PICTURE SHOWS KEEPS ITS MEMORY: a list's steps are done to one thing
+  and drawn from the steps before; "those three" is drawn from each item's own picture; a group key
+  thing whose look names a list's items makes each a member (job 414's froe). (e) A SEASON OR HOUR THE
+  LINE NAMES STAYS (`holdLineSeasons`, `SEASON_HOUR_RULE`; job 411's spring song drawn in snow), and
+  written looks and the props list carry no light, weather or hour (`sheetWithoutLight`).
+  PICTURES: (f) ALLOWED WORDS SHARP, OTHER PRINT SOFT on the same page; words the picture's own line
+  says (≤ 6, never a mid-sentence capitalised name) are not refused as writing (job 413's "LOAN").
+  (g) A PROMPT IS WRITTEN FOR THE SHOT IT WILL BE (`cutawayPromptLane`, `server/brollRewrite.ts`): the
+  hands-video directive is gone, a rewrite that copies a directive or drops its line's subject is
+  refused (`rewriteFault`), and a shot that turned out not to move is written again as a photo.
+  (h) TOOLS AND LINES AS THEY REALLY WORK: a froe or wedge struck with a club (`SPLIT_STRIKE_CLAUSE`),
+  a shaving tool across the piece along it (`SHAVING_STROKE_CLAUSE`), a cable or hose ends at the part
+  it serves (`connectingLinesClause`); a "broken" redraw for a tool names the fault. (i) NOTHING THE
+  LINE DOES NOT NAME (`NOTHING_UNNAMED_RULE`, `withoutAddedKeyThings`): the props list and stretch line
+  say how things look, never what to add; a later line's reveal is removed from earlier pictures, and
+  an empty place or a search that finds nothing is drawn bare (`NOTHING_THERE_RULE`). (j) A SPLIT
+  PANEL IS WRITTEN FROM ITS LINE (`showSubject` as MUST SHOW, judged by what most of its line is about
+  by speaking time) and keeps the tool its line names, resting on the work (`withLineTool`).
+  PLANNING: (k) THE COVER COMES UP WHEN THE BOOK IS NAMED: the cover beat is split at the clause that
+  first names it ("my book", the title), the words before stay on the host. (l) NUMBERS ARE NOT TIMING
+  ANCHORS: a sentence break beside a number cuts in the longest real pause (`numberBreakPause`, job
+  413's "Three hundred | seventy"). (m) A short lead that only finishes the sentence before goes back to
+  that picture; a beat ending on a sentence's first ≤ 4 words hands them on. (n) A SETTING TURN ENDS A
+  TOPIC (`SETTING_TURN_RULE`, `settingMove` in `server/lineSetting.ts`: wild → indoors, long ago →
+  today). (o) No host take stops between "anything", "the one", "the kind"… and the clause that says
+  what it is (`breakBetween`). GRAPHICS: (p) the script's spelling on screen, never the transcript's
+  (`closeSpelling`; "migratorious"); (q) cards say what the voice says — a BeforeAfter needs a change,
+  a MythStamp the belief the voice calls false, no number card for a figurative number, a unit said
+  right after the number; (r) a Checklist is held to the said-list rule at the script's punctuation; a
+  chapter series promising more than the film counts keeps its labels and drops only "of N"; (s) reading
+  time counts from when a graphic's words appear (`shownAt`), and the number pair, MYTH stamp and
+  chapter label move to the allowed corner covering least of the picture's subject. Details:
+  `graphics-lab/out/round14-docs.json`.
+- **A person is in a natural pose; what the targeted checks found** (round 15, 2026-10-20). The
+  operator on Helena's job 417: "they aren't even seated properly … an unnatural type of event the
+  person is doing, in every action" — two passengers sat BACKWARDS in forward-facing airline seats.
+  Cause: the no-face rules placed the camera relative to the PERSON ("from behind or the side") while
+  descriptions placed it relative to the ROOM ("aisle visible behind them"); in a row of fixed seats
+  the model turned the people round. A survey of 203 person pictures (jobs 399-417) found 4 such cabin
+  faults, conversations drawn as two backs, a sleeper flipped face-down and a toilet held one-handed.
+  (a) NATURAL POSE: every person picture carries `NATURAL_POSE_BODY_CLAUSE` (the body sits, stands,
+  lies and works as a real person does, facing the way its seat or work faces) and, where its framing
+  allows, `NATURAL_POSE_CAMERA_CLAUSE` (the CAMERA moves to keep the face out — beside, behind over a
+  seat back, below the chin — never the body); a chin-line host takes the body half only, anonymous
+  hands take `NATURAL_HANDS_POSE_CLAUSE`; two people talking face each other
+  (`FACING_EACH_OTHER_CLAUSE`); the turned-away redraw clauses move the camera. The still check's
+  broken question names an unnatural pose, and that fault's redraw is told `NATURAL_POSE_FIX` inside
+  the existing budget (`POSE_FAULT`). Person prompts grow ~12%; no new call. The targeted checks of the
+  verification films (jobs 415-419, `graphics-lab/out/review4/`) then gave: (b) THE HOST'S OWN "I" IS
+  THE HOST (`narratorOwnLine`, `narratorPictured`) — "I spent flights nursing a ginger ale" was drawn
+  as a story's passenger. (c) THE PERSON THE LINES FOLLOW, AND "YOU", KEEP ONE LOOK
+  (`linkFollowedPeople`: same sex, an age that fits, the person's place words or the he/she the lines
+  follow, exactly one fit; `viewerAsk` asks the one look for "you" on the named-things call already
+  made, never a role the lines name as someone else). (d) A PUSHED THING NEVER MOVES BY ITSELF (a cart,
+  stroller, luggage, a door — `SELF_MOVING_SYSTEM`, backup `pushedThingMoves`). (e) A FULL STOP THAT
+  ENDS NO SENTENCE (`shared/sentenceEnds.ts`: "U. S.", "Dr.", "a.m.", web addresses — one test for
+  every splitter; job 417's cut inside "U.S."). (f) THE SPLIT PANEL'S BOOK GUARD follows round 13's
+  cutaway guard: only the video's own book, from the panel's own words, never a neighbour's prompt
+  (job 416's field-guide panel was the coast picture again). (g) A season or hour the PICTURE'S own
+  words name is held too (`seasonHourClause` reads `showSubject` first; job 416's spring robin in
+  snow). (h) A THING THE PICTURE SAYS IS NOT THERE IS NOT IN IT (`saysAbsent`): never filed under it,
+  checked for it or its memory (job 416's empty lawn had become the robin's memory). (i) A steps list
+  told of another time carries that time (`listSetting`; job 418's chainsaw in a hand-roofing
+  passage). (j) A TOOL NOBODY HOLDS IS PUT DOWN (`UNHELD_TOOL_CLAUSE`): on a surface or in its holder,
+  in the work only where a real one stays, never hung or propped (job 418's froe on a wire hook).
+  (k) A PERSON NAMED BY WHAT THEY DO is a person on a person's sign (`agentAt`, guard `NOT_AN_AGENT`;
+  job 418's "log restorer" drawn as an empty cabin). KNOWN LIMIT: a froe's blade sunk IN the wood
+  failed three rounds although every rule says it — an image-model limit, not a missing rule.
+  Details: `graphics-lab/out/review4/round15-*.json`.
+- **The seating cases round 15 left** (round 16, 2026-10-20, Helena's job 421 on the round-15 code:
+  8 of 9 seated pictures right; two left). (a) A WRITTEN LOOK CARRIES NO STATE (`lookWithoutState` in
+  pictureMemory.ts, in `keyThingLookFor`, `otherThingLookFor`, `placeLooksFor` and `sheetWithoutLight`,
+  and the props-call rule): empty/full, who sits in it, contents, open/shut, lit, clean, wet, stowed and
+  any absence are cut — only the state, never the thing it was said of; what is built that way stays
+  (an open-top crate, a fold-down tray table). A thing named for a state keeps its name for matching
+  and is called by what it is (`stateFreeName`: "empty row" → "row"). Job 421 #2 had sent "no
+  passengers seated" into a picture of a woman sitting in that row, and the row came back front-on
+  beside her. (b) THE WRITERS NEVER PLACE THE ROOM BEHIND A PERSON (`server/peoplePlaced.ts`,
+  `PEOPLE_PLACED_RULE` in the shot list rule 6c, the line check and panel pass, the same-topic groups
+  and the prompt writer): a person picture says what they do and where they are, never a wall, aisle,
+  row or counter "behind/ahead of/in front of" someone seated or working, and never "seen from behind"
+  of people who talk or hand something over; the camera is the picture rules' job. Backstop
+  `personPlacedWords` removes such phrases before the prompt and the check; a room part saying where
+  someone IS ("the seat behind her") stays (`ROOM_IS_WHERE`). (c) THE STILL CHECK SEES WHICH WAY A
+  SEAT FACES: a seat or row facing another way than its rows, a person facing their own seat back, a
+  body through its seat — told by what hides what, never by a seat's padded side; seats built to face
+  each other (a booth, a train's facing pairs, chairs round a room) are right; its redraw is told
+  `SEAT_FACING_FIX` / `SEATED_PERSON_FIX` inside the existing budget. 421 #29 turned out to be a right
+  seat misread by the reviewer, and the line now says how not to misread it. Left open: the cutaway
+  writer still reduces a two-person picture to "a pair of bare hands" (421 #28's galley talk).
+  Details: `graphics-lab/out/review4/round16-seating.json`.
 - `server/hostPlate.ts` — **provider-independent**. The lip-sync model animates the image it
   is handed and never changes the setting, so `HOST_PLATES=1` generates a 16:9 plate of the host
   IN each beat's setting (host photo as identity reference) and syncs from that instead of the
@@ -876,7 +1167,9 @@ Express · tRPC · Drizzle · MySQL.
   (`brollHostLook`/`brollHostRef`, never a split's picture half), and `buildStillPrompt` /
   the clip prompt use `hostBrollClause` + `NO_OTHER_FIGURES_SUFFIX` with the host photo as the
   image reference — seen from behind or the side, the face NEVER shown (a drawn face would not
-  match the HeyGen host; the operator chose this). ONE BODY, TWO ARMS (`ONE_BODY_CLAUSE`, in `hostBrollClause`; `NO_FIGURES_SUFFIX` for
+  match the HeyGen host; the operator chose this). THE HEAD FACES THE WAY THE BODY DOES (`HOST_FRAMING_CLAUSE`, 2026-10-17,
+  Scarlett's job 395 drew a forward body with the head twisted away): a body facing the camera is framed
+  from the lips or chin down; a body turned away shows the back or side of the head; never a twisted head. ONE BODY, TWO ARMS (`ONE_BODY_CLAUSE`, in `hostBrollClause`; `NO_FIGURES_SUFFIX` for
   hands-only shots, 2026-09-29): over-the-shoulder hands shots are where the picture model adds an
   arm — Norbert's 3-min test (job 232, 2:19) had a third sleeve ending at the drill's battery, and
   neither Haiku nor Sonnet could see it at 768 px or full size, even told to trace every sleeve, so
@@ -1117,7 +1410,11 @@ Express · tRPC · Drizzle · MySQL.
   (d) REAL THINGS LOOK REAL: a real app, website, store or market the LINE names is a named kind —
   its real colours and layout (`REAL_APP_SCREEN_CLAUSE`), logo and words soft and unreadable (the
   operator's option A). (e) A list item is its own thing: never `partOf` a group, never drawn from
-  the item before it (`memorySourcesFor`), a part close-up is still held to not COPYING its memory,
+  the item before it (`memorySourcesFor`), and drawn from a key thing's picture only when its OWN
+  words name that thing or it is a part of it (`wordsName` — Dale's job 397: "Coasters, ornaments"
+  both inherited the pile of small pieces and came back as the pile twice); every item's prompt
+  names the other items of its list so it is drawn as what sets it apart (`scene.listItems`, set in
+  `attachMemory`; `listItemClause`); a part close-up is still held to not COPYING its memory,
   and writing a rewrite names but the line does not say is blurred (`blurredPrint` now covers
   engraved/monogram/initials). (f) LISTS STAY CUT: the pause-snap may no longer take a piece's own
   words away (`keepOwnWords` — "…ranking | Etsy, |" snapped over the word), the opening line hands
@@ -1308,8 +1605,9 @@ Express · tRPC · Drizzle · MySQL.
   it (`vanished`) fails even with hands in the shot, and the pair is laid SIDE BY SIDE (768 each):
   Granny Ruth's 3-min test (job 233, 1:00) had the quilt over the table front shrink away to bare
   table while she sewed; stacked, Sonnet called that pair "slight shifts" at 640 and 1024 px, side
-  by side it named it and still passed five good hands clips (2026-09-29). A glitch renders
-  the beat again once; a second makes it the still (`scene.motionGlitches`); a moving split panel
+  by side it named it and still passed five good hands clips (2026-09-29). A glitch makes the
+  beat the still its clip was rendered from — each video clip is paid for ONCE since 2026-10-18
+  (round 12; `CLIP_GLITCH_RERENDER=1` brings back one more render first) (`scene.motionGlitches`); a moving split panel
   that glitches falls back to its still panel. Skipped in rehearsals
 - **B-roll prompts** — the style bible is a HOME BASE plus the places the script travels to, not
   "the ONE physical world" (that put a whole Japanese-woodworking film in one garage, a Japanese
@@ -1610,7 +1908,9 @@ Express · tRPC · Drizzle · MySQL.
   0.65/0.75 was worse; stays 0.5. (b) Speed is clamped to 0.7-1.2 (`ELEVEN_SPEED_MIN/MAX` in the
   adapter, `SPEED_MIN/MAX` in delivery): 69Labs REFUSES anything else with 400, and a "slow" paragraph
   on a 0.8 channel asked for 0.68 — every Hank film's paced read was refused three times and re-voiced
-  flat. Hank's channel speed is now 0.9. (c) CLONE voices get a 0.3 s pause after every sentence in
+  flat. Hank's channel speed is now 0.9. (c) [RETIRED 2026-10-17: `CLONE_SENTENCE_PAUSE_SEC` is 0 — the
+  provider fills its pause mark with dead digital silence and cuts each sentence's last word to fit
+  (-38 dB to nothing in 0.1 s); the sentence-pause step above makes the pause for every voice] CLONE voices got a 0.3 s pause after every sentence in
   the voiced text only (`withSentencePauses`, MiniMax's `<#0.3#>`, never read aloud): the clone lane
   IGNORES speed (0.7 / 1.0 / 1.4 came back the same length — the Speed field does nothing on the 8
   clone channels), and about half of Frederick's takes came back rushed, 0.2-0.3 s between sentences,

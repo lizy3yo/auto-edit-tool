@@ -1,7 +1,7 @@
 import sharp from "sharp";
 import { escapeXml, estimateTextWidth, fitLines } from "./coverComposite";
 import { getInterFontsBase64 } from "./fontData";
-import { ensureFontConfig } from "./fontConfig";
+import { interFontReady } from "./fontConfig";
 
 /** Multiplier matching coverComposite's measurements for Inter semibold-ish body text. */
 const CAPTION_W = 0.56;
@@ -69,8 +69,9 @@ export async function renderCaptionCardPng(opts: {
       ? `${raw.slice(0, CAPTION_MAX_CHARS - 1).trimEnd()}…`
       : raw;
 
-  // librsvg has no system fonts in production — point fontconfig at the bundled Inter first.
-  ensureFontConfig();
+  // librsvg has no system fonts in production, and on Windows fontconfig never reads our config —
+  // register the bundled Inter first (`interFontReady`).
+  await interFontReady();
   const { bold, regular } = getInterFontsBase64();
 
   const W = opts.width;

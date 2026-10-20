@@ -10,7 +10,8 @@
  * Pure — unit-tested.
  */
 import type { StoryboardScene } from "@shared/types";
-import { SHOWS_SCREEN } from "./shotList";
+import { FACE_SHOWN } from "@shared/pictureFlaws";
+import { showsScreen } from "./shotList";
 
 /** The kinds, most failure-prone first: a picture is the FIRST one that fits. */
 export const PICTURE_KINDS = [
@@ -34,7 +35,7 @@ export interface PictureCheck {
 
 /** The kind of picture `visual` describes for this scene. */
 export function pictureKindOf(scene: StoryboardScene, visual: string): PictureKind {
-  if (SHOWS_SCREEN.test(visual)) return "screen";
+  if (showsScreen(visual)) return "screen";
   if (scene.pictureText || scene.blurPrint) return "writing";
   if (scene.namedLook) return "named kind";
   if (scene.humanPresent || scene.brollHostLook) return "person or hands";
@@ -46,9 +47,17 @@ export function pictureKindOf(scene: StoryboardScene, visual: string): PictureKi
 export function checkFlags(v: {
   broken?: boolean;
   unchecked?: boolean;
+  /** A person or a hand behind the big QR card (`person`). */
+  person?: boolean;
+  /** A face on a picture of someone else, whose face is never shown (`face`, job 410 scene 8). */
+  face?: boolean;
   overlay?: boolean;
   writing?: boolean;
   missing?: boolean;
+  /** The thing is there but not in the state, number or position described (`detail`). */
+  detail?: boolean;
+  /** The frame shows what its line rules out (`forbidden`, from `scene.forbids`). */
+  forbidden?: boolean;
   messy?: boolean;
   wrongPlace?: boolean;
   staged?: boolean;
@@ -56,30 +65,42 @@ export function checkFlags(v: {
   return [
     v.broken && "broken",
     v.unchecked && "unchecked",
+    v.person && "person",
+    // The same words as the host's face (`FACE_SHOWN`), so a shipped one reads "a drawn face".
+    v.face && FACE_SHOWN,
     v.overlay && "stamped text",
     v.writing && "writing",
     v.missing && "missing",
+    v.detail && "detail",
+    v.forbidden && "ruled out",
     v.messy && "brand or clutter",
     v.wrongPlace && "wrong place",
     v.staged && "staged",
   ].filter((f): f is string => !!f);
 }
 
-/** Note one check on its scene. Never throws — a record must not cost a picture. */
+/**
+ * Note one check on its scene. Never throws — a record must not cost a picture. Returns the entry,
+ * so what a LATER check refuses the same draw for ("different thing", "not the host", "near copy",
+ * `shared/pictureFlaws.ts`) is written onto it: one entry per drawn picture, and a draw that passed
+ * this check but was redrawn anyway no longer reads as a clean picture thrown away.
+ */
 export function recordPictureCheck(
   scene: StoryboardScene,
   visual: string,
   panel: boolean,
   verdict: Parameters<typeof checkFlags>[0]
-): void {
+): PictureCheck | undefined {
   try {
-    (scene.pictureChecks ??= []).push({
+    const entry: PictureCheck = {
       kind: pictureKindOf(scene, visual),
       ...(panel ? { panel: true } : {}),
       flags: checkFlags(verdict),
-    });
+    };
+    (scene.pictureChecks ??= []).push(entry);
+    return entry;
   } catch {
-    /* a record, nothing more */
+    return undefined; /* a record, nothing more */
   }
 }
 

@@ -1,4 +1,4 @@
-import { afterEach, expect, test, vi } from "vitest";
+import { afterEach, describe, expect, it, test, vi } from "vitest";
 import { isTransientR2Error, presignOwnBucketUrl, rehostToR2 } from "./storage";
 
 afterEach(() => {
@@ -71,4 +71,12 @@ test("retries an upload whose socket never connected, not one the bucket refused
   expect(isTransientR2Error({ message: "read ECONNRESET" })).toBe(true);
   expect(isTransientR2Error({ $metadata: { httpStatusCode: 503 } })).toBe(true);
   expect(isTransientR2Error({ name: "AccessDenied", $metadata: { httpStatusCode: 403 } })).toBe(false);
+});
+
+describe("a failed name lookup to our own bucket is waited out (job 394's book QR, 2026-10-17)", () => {
+  it("counts ENOTFOUND as temporary, a 4xx still not", async () => {
+    const { isTransientR2Error } = await import("./storage");
+    expect(isTransientR2Error({ code: "ENOTFOUND", message: "getaddrinfo ENOTFOUND auto-edit-assets.x.r2.cloudflarestorage.com" })).toBe(true);
+    expect(isTransientR2Error({ $metadata: { httpStatusCode: 403 }, message: "Forbidden" })).toBe(false);
+  });
 });

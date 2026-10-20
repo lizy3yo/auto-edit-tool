@@ -8,6 +8,9 @@ import {
   tokenizeNarration,
   unsnapImplausible,
   keepOwnWords,
+  retimeSpokenNumbers,
+  numberBreakPause,
+  endsSpelledNumber,
 } from "./narrationAlignment";
 import { auditStoryboardTimeline } from "./alignmentHeal";
 import type { WhisperWord } from "./_core/voiceTranscription";
@@ -876,5 +879,274 @@ describe("keepOwnWords — a pause-snap never takes a piece's own words away (Da
   it("does nothing without word timings", () => {
     const snapped = [0, 10.5, 10.6, 12];
     expect(keepOwnWords(aligned, snapped, [null, null, null, null])).toEqual(snapped);
+  });
+});
+
+describe("a cut before a spoken number lands in the pause before it, never inside it (job 406)", () => {
+  // Gary's practice film, 3:00: the book cover was cut from the host by text — "…working people
+  // actually run." | "Three hundred seventy pages, …" — and the voice says the number right after a
+  // 0.74 s pause (179.42-180.16). The transcriber heard it as ONE token, "370", at 180.53: a digit
+  // has no letters to time by, so its start is a guess, and a late one. The film shipped the cut at
+  // 180.69, between "Three hundred" and "seventy".
+  /** The film's own words as heard, 171-198 s (the graphics step's transcript of job 406). */
+  const HEARD =
+    "That@171.165-171.345 pattern@171.405-171.745 fills@171.785-172.005 a@172.065-172.105 digital@172.165-172.525 book@172.565-172.765 called@172.825-173.085 the@173.105-173.165 Garage@173.205-173.666 to@173.686-173.766 Profit@173.826-174.206 Bible,@174.246-174.606 put@174.846-175.006 together@175.046-175.406 under@175.486-175.646 this@175.686-175.846 channel's@175.886-176.267 name@176.307-176.547 from@176.607-176.747 the@176.767-176.867 honest@176.987-177.307 arithmetic@177.367-177.947 working@178.027-178.347 people@178.387-178.688 actually@178.888-179.308 run.@179.368-179.528 370@180.528-180.768 pages,@181.269-181.689 101@182.209-182.61 numbered@182.77-183.27 hustles@183.31-183.69 across@183.791-184.111 13@184.351-184.671 chapters,@184.731-185.212 each@185.752-185.912 one@186.032-186.152 printed@186.232-186.552 with@186.612-186.733 its@186.793-186.893 real@187.013-187.253 dollar@187.313-187.613 range@187.653-187.973 and@188.114-188.194 a@188.234-188.254 Know@188.334-188.534 Your@188.554-188.714 Limit@188.774-189.014 panel@189.054-189.374 that@189.434-189.575 states@189.635-189.935 the@189.975-190.095 downside@190.135-190.715 flat.@190.956-191.296 Tonight@191.936-192.256 covers@192.296-192.577 17@192.597-193.317 under@193.437-194.218 $500.@194.258-194.618 The@195.319-195.419 book@195.439-195.619 runs@195.659-195.879 the@195.939-196.039 same@196.099-196.339 math@196.399-196.639 on@196.72-196.78 the@196.8-196.9 other@196.98-197.16 84.@197.22-197.72";
+  const heard = (): WhisperWord[] =>
+    HEARD.split(" ").map(tok => {
+      const [, word, start, end] = /^(.*)@([\d.]+)-([\d.]+)$/.exec(tok)!;
+      return w(word, Number(start), Number(end));
+    });
+  /** The job's real pauses (`masterSilences`) over the same stretch. */
+  const PAUSES = [
+    [170.343, 170.507], [170.508, 171.063], [172.608, 172.733], [174.458, 174.783], [178.597, 178.719],
+    [178.85, 179.028], [179.423, 180.162], [181.513, 181.944], [184.013, 184.173], [184.836, 184.97],
+    [185.039, 185.626], [186.716, 186.842], [189.766, 189.913], [190.603, 190.914], [191.117, 191.853],
+    [193.498, 193.653], [194.431, 195.244], [197.287, 197.433], [197.594, 198.311],
+  ].map(([start, end]) => ({ start, end }));
+  const at = (words: WhisperWord[], word: string) => words.find(x => x.word === word)!;
+  const COVER =
+    "That pattern fills a digital book called The Garage to Profit Bible, put together under this channel’s name from the honest arithmetic working people actually run.";
+  const HOST =
+    "Three hundred seventy pages, a hundred and one numbered hustles across thirteen chapters, each one printed with its real dollar range and a Know Your Limit panel that states the downside flat. Tonight covers seventeen under five hundred dollars; the book runs the same math on the other eighty-four.";
+
+  it("a number goes back to the end of the pause before it — 'Three hundred seventy' and 'a hundred and one'", () => {
+    const out = retimeSpokenNumbers(heard(), PAUSES);
+    expect(at(out, "370").start).toBe(180.162);
+    expect(at(out, "101").start).toBe(181.944);
+    expect(at(out, "13").start).toBe(184.173);
+    // Its end, and the word before it, stay as heard.
+    expect(at(out, "370").end).toBe(180.768);
+    expect(at(out, "run.")).toEqual(w("run.", 179.368, 179.528));
+  });
+
+  it("a number the voice runs straight into, one heard after its pause, and every other word stay as heard", () => {
+    const before = heard();
+    const out = retimeSpokenNumbers(before, PAUSES);
+    // "covers 17": no pause between them — nothing to trust.
+    expect(at(out, "17").start).toBe(192.597);
+    // "84." starts before the pause after "other" — already where it was heard.
+    expect(at(out, "84.").start).toBe(197.22);
+    // "under" is heard running on past the pause before "$500." — maybe its own late start.
+    expect(at(out, "$500.").start).toBe(194.258);
+    const moved = new Set(["370", "101", "13"]);
+    out.forEach((x, k) => {
+      if (!moved.has(x.word)) expect(x).toEqual(before[k]);
+    });
+    // Without pauses there is nothing to go on.
+    expect(retimeSpokenNumbers(before, [])).toEqual(before);
+  });
+
+  it("speech of more than a second between the pause and the number is another word: left as heard", () => {
+    const words = heard().map(x => (x.word === "370" ? w("370", 181.25, 181.3) : x));
+    expect(at(retimeSpokenNumbers(words, PAUSES), "370").start).toBe(181.25);
+  });
+
+  it("the cover's cut goes in the pause before 'Three hundred seventy', on the film's own words", () => {
+    const scenes = [scene(COVER, 1), hostScene(HOST, 2)];
+    const ranges = assignSceneRanges(scenes, heard(), 198.271, PAUSES, PAUSES);
+    expectTiles(ranges, 198.271);
+    expect(ranges[0].endSec).toBeGreaterThanOrEqual(179.423);
+    expect(ranges[0].endSec).toBeLessThanOrEqual(180.162);
+  });
+
+  it("a number heard later than the snap reaches is cut in the pause before it, not on the dip inside it", () => {
+    // The same line, with "370" heard 0.8 s late and the short dip between "hundred" and "seventy"
+    // (180.665-180.722) in the fine scan. The pause before the sentence is out of the snap's reach
+    // from the late onset, so the dip took the cut: 180.69, the cut the film shipped.
+    const words = heard().map(x => (x.word === "370" ? w("370", 180.95, 181.19) : x));
+    const fine = [...PAUSES, { start: 180.665, end: 180.722 }].sort((a, b) => a.start - b.start);
+    const scenes = [scene(COVER, 1), hostScene(HOST, 2)];
+    const ranges = assignSceneRanges(scenes, words, 198.271, PAUSES, fine);
+    expect(ranges[0].endSec).toBeGreaterThanOrEqual(179.423);
+    expect(ranges[0].endSec).toBeLessThanOrEqual(180.162);
+  });
+});
+
+describe("a sentence break beside a spoken number is cut in the real pause, whatever the heard words say (job 413)", () => {
+  // Gary's verification film, 2:59 (#35 → #36): the book cover says "…working people actually run."
+  // and the host comes back on "Three hundred seventy pages". The voice pauses 0.81 s after "run."
+  // (179.146-179.958, the job's own `masterSilences`), but the transcriber heard "run." at
+  // 180.09-180.61 — over "Three hundred" — and the number as one late token, "370", at 180.71. The
+  // number's retiming (job 406) could not move it back: the pause sat before the word before it. So
+  // the cover held through the pause and the host came in on "seventy".
+  /** The film's own words as heard, 170.7-197.0 s (the graphics step's transcript of job 413). */
+  const HEARD =
+    "That@170.722-170.922 pattern@170.982-171.322 fills@171.362-171.582 a@171.642-171.682 digital@171.742-172.122 book@172.182-172.403 called@172.483-172.723 the@172.743-172.823 Garage@172.863-173.303 to@173.343-173.423 Profit@173.483-173.883 Bible,@173.923-174.284 put@174.564-174.724 together@174.764-175.104 under@175.184-175.344 this@175.384-175.544 channel's@175.604-175.984 name@176.045-176.285 from@176.345-176.485 the@176.505-176.605 honest@176.725-177.045 arithmetic@177.125-177.705 working@177.785-178.106 people@178.146-178.426 actually@178.666-179.306 run.@180.087-180.607 370@180.707-181.087 pages,@181.127-181.567 101@182.208-182.808 numbered@182.948-183.268 hustles@183.308-183.689 across@183.749-184.069 13@184.249-184.649 chapters,@184.689-185.189 each@185.75-185.91 one@186.03-186.13 printed@186.19-186.53 with@186.59-186.71 its@186.77-186.89 real@187.01-187.251 dollar@187.291-187.611 range@187.651-187.991 and@188.111-188.211 a@188.251-188.271 know-your-limit@188.351-189.031 panel@189.071-189.432 that@189.472-189.592 states@189.652-189.952 the@190.012-190.112 downside@190.152-190.732 flat.@190.892-191.213 Tonight@191.813-192.133 covers@192.193-192.493 17@192.713-193.214 under@193.334-193.514 $500.@193.594-194.494 The@194.995-195.095 book@195.135-195.315 runs@195.355-195.575 the@195.615-195.715 same@195.775-196.015 math@196.075-196.335 on@196.415-196.475 the@196.495-196.595 other@196.676-196.836 84.@196.856-196.916";
+  /** The film's opening, 0-12 s: "…costs $10,000." heard ending where it should, "A" heard inside the pause after it. */
+  const OPENING =
+    "Somewhere@0.232-0.592 along@0.652-0.872 the@0.912-0.992 line,@1.032-1.392 everybody@1.792-2.252 agreed@2.312-2.692 that@2.732-2.872 starting@2.933-3.273 a@3.313-3.373 business@3.433-3.853 costs@3.913-4.273 $10,000.@4.413-5.173 A@5.473-5.633 loan,@6.353-6.753 a@7.013-7.053 lease,@7.113-7.433 a@7.733-7.753 logo,@7.813-8.313 and@8.434-8.534 a@8.574-8.594 lawyer,@8.654-9.014 all@9.554-9.694 before@9.734-10.034 the@10.054-10.154 first@10.234-10.474 customer@10.534-10.994 ever@11.234-11.394 shows@11.454-11.734 up.@11.894-11.974";
+  const parse = (s: string): WhisperWord[] =>
+    s.split(" ").map(tok => {
+      const [, word, start, end] = /^(.*)@([\d.]+)-([\d.]+)$/.exec(tok)!;
+      return w(word, Number(start), Number(end));
+    });
+  /** The job's real pauses (`masterSilences`) over the same stretches. */
+  const pauses = (list: number[][]) => list.map(([start, end]) => ({ start, end }));
+  const PAUSES = pauses([
+    [169.923, 170.639], [172.25, 172.394], [174.179, 174.503], [178.356, 178.486], [179.146, 179.958],
+    [181.391, 181.858], [183.944, 184.116], [184.815, 184.941], [184.995, 185.631], [189.784, 189.935],
+    [190.6, 190.857], [191.024, 191.736], [193.384, 193.539], [194.317, 194.93], [196.984, 197.119],
+    [197.281, 197.997],
+  ]);
+  const OPENING_PAUSES = pauses([
+    [1.32506, 1.66475], [4.02113, 4.33237], [5.3655, 6.11894], [6.72125, 6.87012], [7.43888, 7.594],
+    [8.90788, 9.43463], [10.0272, 10.2016], [10.9147, 11.0731],
+  ]);
+  /** The stretch from the cover's start, moved to 0 so the scenes tile it. */
+  const OFF = 170.599;
+  const shift = <T extends { start: number; end: number }>(list: T[]) =>
+    list.map(x => ({ ...x, start: Math.max(0, x.start - OFF), end: x.end - OFF }));
+  const DUR = 197.957 - OFF;
+  const COVER =
+    "That pattern fills a digital book called The Garage to Profit Bible, put together under this channel’s name from the honest arithmetic working people actually run.";
+  const HOST =
+    "Three hundred seventy pages, a hundred and one numbered hustles across thirteen chapters, each one printed with its real dollar range and a Know Your Limit panel that states the downside flat. Tonight covers seventeen under five hundred dollars; the book runs the same math on the other eighty-four.";
+  const at = (words: WhisperWord[], word: string) => words.findIndex(x => x.word === word);
+
+  it("the pause found is the real one between the sentences, whichever way the words were dragged", () => {
+    const heard = parse(HEARD);
+    // "run. | 370": the number heard late, and the word before it dragged after the pause.
+    expect(numberBreakPause(heard, at(heard, "370"), PAUSES)).toEqual({ start: 179.146, end: 179.958 });
+    // "$500. | The": the number heard running on into the pause after it.
+    expect(numberBreakPause(heard, at(heard, "The"), PAUSES)).toEqual({ start: 194.317, end: 194.93 });
+    // "$10,000. | A": the word after the number heard inside the pause it really ends.
+    const opening = parse(OPENING);
+    expect(numberBreakPause(opening, at(opening, "A"), OPENING_PAUSES)).toEqual({ start: 5.3655, end: 6.11894 });
+  });
+
+  it("no number at the break, or no pauses, finds nothing", () => {
+    const heard = parse(HEARD);
+    expect(numberBreakPause(heard, at(heard, "Tonight"), PAUSES)).toBeNull(); // "flat. | Tonight"
+    expect(numberBreakPause(heard, at(heard, "370"), [])).toBeNull();
+    expect(numberBreakPause(heard, at(heard, "370"), null)).toBeNull();
+  });
+
+  it("the cover's cut goes to the end of the pause after 'run.', not onto 'seventy' (180.54 shipped)", () => {
+    const scenes = [scene(COVER, 1), hostScene(HOST, 2)];
+    const ranges = assignSceneRanges(scenes, shift(parse(HEARD)), DUR, shift(PAUSES), shift(PAUSES));
+    expectTiles(ranges, DUR);
+    const cut = ranges[0].endSec + OFF;
+    expect(cut).toBeGreaterThanOrEqual(179.146);
+    expect(cut).toBeLessThanOrEqual(179.958);
+    // Where the next sentence begins, with the usual 40 ms of clean lead.
+    expect(cut).toBeCloseTo(179.918, 3);
+  });
+
+  it("a dip inside the number in the fine scan does not take the cut either", () => {
+    // The shipped cut, 180.539, sat on such a dip: after "hundred", before the "s" of "seventy".
+    const fine = shift([...PAUSES, { start: 180.5, end: 180.579 }].sort((a, b) => a.start - b.start));
+    const scenes = [scene(COVER, 1), hostScene(HOST, 2)];
+    const ranges = assignSceneRanges(scenes, shift(parse(HEARD)), DUR, shift(PAUSES), fine);
+    expect(ranges[0].endSec + OFF).toBeCloseTo(179.918, 3);
+  });
+
+  it("the list's first picture, 'A loan,', comes on its word, not 0.65 s early in the pause before it", () => {
+    const scenes = [
+      hostScene("Somewhere along the line, everybody agreed that starting a business costs ten thousand dollars.", 1),
+      scene("A loan,", 2),
+      scene("a lease,", 3),
+      scene("a logo,", 4),
+      scene("and a lawyer —", 5),
+      scene("all before the first customer ever shows up.", 6),
+    ];
+    const ranges = assignSceneRanges(scenes, parse(OPENING), 12.525, OPENING_PAUSES, OPENING_PAUSES);
+    expectTiles(ranges, 12.525);
+    expect(ranges[1].startSec).toBeCloseTo(6.11894 - 0.04, 3);
+    // The item keeps the cut after it: "a lease," still starts in the pause after "loan,".
+    expect(ranges[1].endSec).toBeGreaterThanOrEqual(6.72125);
+    expect(ranges[1].endSec).toBeLessThanOrEqual(6.87012);
+  });
+
+  it("unchanged: a sentence break with no number at it keeps the ordinary snap", () => {
+    // "…states the downside flat. | Tonight covers…" — cut at the end of the real pause, as before.
+    const [a, b] = HOST.split(/(?<=flat\.) /);
+    const scenes = [scene(COVER, 1), hostScene(a, 2), scene(b, 3)];
+    const ranges = assignSceneRanges(scenes, shift(parse(HEARD)), DUR, shift(PAUSES), shift(PAUSES));
+    expect(ranges[1].endSec + OFF).toBeCloseTo(191.736 - 0.04, 3);
+  });
+
+  it("unchanged: inside a sentence a number keeps the cut its words give — no sentence break to go to", () => {
+    // "Tonight covers | seventeen under five hundred dollars;" — the voice runs straight on.
+    const [a, b] = HOST.split(/(?<=covers) /);
+    const mid = assignSceneRanges(
+      [scene(COVER, 1), hostScene(a, 2), scene(b, 3)],
+      shift(parse(HEARD)),
+      DUR,
+      shift(PAUSES),
+      shift(PAUSES)
+    );
+    expect(mid[1].endSec + OFF).toBeCloseTo(192.713, 3);
+    // A clause running on into the number (no full stop before it) is no sentence break either.
+    const runOn = assignSceneRanges(
+      [scene(COVER.replace(/\.$/, ""), 1), hostScene(HOST, 2)],
+      shift(parse(HEARD)),
+      DUR,
+      shift(PAUSES),
+      shift(PAUSES)
+    );
+    expect(runOn[0].endSec + OFF).toBeCloseTo(180.707, 3);
+  });
+
+  it("unchanged: a gap a breath split in two is one gap — the cut still comes where the number begins (job 409)", () => {
+    // "…all seven of the thieves." — 1.0 s of silence, a 0.17 s breath, 0.55 s of silence — "Two
+    // thousand years ago", heard as "2,000" at 100.90. The longest pause alone would have put the cut
+    // before the breath, 0.77 s early; it stays at the end of the second, where it always was.
+    const heard = parse(
+      "you@96.294-96.394 will@96.434-96.574 be@96.614-96.694 able@96.754-96.934 to@96.974-97.054 name@97.114-97.334 all@97.594-97.774 seven@97.914-98.274 of@98.314-98.374 the@98.414-98.515 thieves.@98.575-98.975 2,000@100.895-101.175 years@101.215-101.455 ago,@101.535-101.835 a@102.175-102.215 man@102.275-102.516"
+    );
+    const gaps = pauses([
+      [96.0715, 96.194], [97.2635, 97.4085], [98.2274, 98.3594], [98.4144, 98.5567], [98.6814, 98.9481],
+      [98.9947, 99.9863], [100.161, 100.715], [101.774, 102.057],
+    ]);
+    expect(numberBreakPause(heard, at(heard, "2,000"), gaps)).toEqual({ start: 100.161, end: 100.715 });
+    const back = (list: { start: number; end: number }[]) =>
+      list.map(x => ({ ...x, start: x.start - 96, end: x.end - 96 }));
+    const ranges = assignSceneRanges(
+      [scene("you will be able to name all seven of the thieves.", 1), scene("Two thousand years ago, a man", 2)],
+      back(heard) as WhisperWord[],
+      6.6,
+      back(gaps),
+      back(gaps)
+    );
+    expect(ranges[0].endSec + 96).toBeCloseTo(100.715 - 0.04, 3);
+  });
+
+  it("a pause the voice leaves BEFORE a number that ends the sentence is never taken for the gap after it", () => {
+    // The opening read slower: "…costs… ten thousand dollars. | A loan," — 0.75 s before the price,
+    // 0.55 s after it, "A" heard early again. Reached from the word before "costs", the pause before
+    // the price would win and hand "ten thousand dollars." to the list's first picture.
+    const slow = parse("business@3.433-3.853 costs@3.913-4.273 $10,000.@5.1-5.8 A@6.0-6.1 loan,@6.85-7.2");
+    const gaps = pauses([[4.3, 5.05], [5.85, 6.4]]);
+    expect(numberBreakPause(slow, at(slow, "A"), gaps)).toEqual({ start: 5.85, end: 6.4 });
+  });
+
+  it("a breath-sized gap is never chained past the first word after the break", () => {
+    // "$10,000. | A loan," — the pause after "A" would be a word away: "A" was heard (early) before it.
+    const opening = parse(OPENING);
+    const withShortGap = pauses([[4.02113, 4.33237], [5.3655, 6.11894], [6.3, 6.4]]);
+    expect(numberBreakPause(opening, at(opening, "A"), withShortGap)).toEqual({ start: 5.3655, end: 6.11894 });
+  });
+
+  it("a cut made at a number's sentence break is never put back for the heard words it got past", () => {
+    // The opening's "A loan," judged by the "A" heard inside the pause (5.473): its snapped slice
+    // held 53% of "its own" time, and both cuts went back — the picture 0.65 s early again.
+    const aligned = [0, 5.473, 7.013, 12.525];
+    const snapped = [0, 6.07894, 6.83012, 12.525];
+    const meets = [null, [5.173, 5.473], [6.753, 7.013], null] as const;
+    expect(keepOwnWords(aligned, snapped, meets)).toEqual(aligned);
+    expect(keepOwnWords(aligned, snapped, meets, [false, true, false, false])).toEqual(snapped);
+  });
+});
+
+describe("a word that ends a number the script spells out (the gate's anchor for '…seventy-five dollars.')", () => {
+  it("the last word of an amount, a count or a price is one, with its punctuation", () => {
+    // Job 413's script against what was heard: "seventy-five dollars." ⇄ "$75.", "eighty-four." ⇄
+    // "84.", "five hundred dollars," ⇄ "$500,", "Number one." ⇄ "1." (job 411).
+    for (const w of ["dollars.", "eighty-four.", "dollars,", "one.", "hundred", "seventy-five", "percent.", "Fourteen,"])
+      expect(endsSpelledNumber(w)).toBe(true);
+  });
+  it("any other word is not — a word that only holds a number word, or mixes one in, included", () => {
+    for (const w of ["run.", "pages,", "backward.", "anyone.", "one-on-one.", "ten-year", "often.", "", undefined])
+      expect(endsSpelledNumber(w)).toBe(false);
   });
 });

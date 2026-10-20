@@ -57,6 +57,21 @@ describe("picture takes", () => {
     expect(s.visualPrompt).toBe("a folded quilt");
   });
 
+  // A picture's "check not passed" badge belongs to that picture (`shared/pictureFlaws.ts`).
+  it("what a picture shipped with follows it when the operator switches between takes", () => {
+    const s = scene({ pictureFlaws: ["writing"] });
+    const before = currentPicture(s, "original");
+    s.clipUrls = ["new.mp4"];
+    s.clipUrl = "new.mp4";
+    delete s.pictureFlaws; // the regenerate came back clean
+    recordRegeneratedPicture(s, before);
+    expect(s.pictureFlaws).toBeUndefined();
+    selectPictureTake(s, 0);
+    expect(s.pictureFlaws).toEqual(["writing"]);
+    selectPictureTake(s, 1);
+    expect(s.pictureFlaws).toBeUndefined();
+  });
+
   it("a second regenerate adds a third picture and never repeats one", () => {
     const s = scene();
     regenerate(s, "new1.mp4", "one");

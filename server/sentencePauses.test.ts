@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { LEVEL_FRAME_SEC, MIN_GAP_SEC, holdsSpeech, planSentencePauses, speechLevelDb } from "./sentencePauses";
+import { LEVEL_FRAME_SEC, MIN_GAP_SEC, holdsSpeech, planSentencePauses, soundEnd, soundStart, speechLevelDb } from "./sentencePauses";
 
 const w = (word: string, start: number, end: number) => ({ word, start, end });
 
@@ -50,10 +50,23 @@ describe("a gap the transcript calls quiet is checked against the audio (Dale's 
   it("still quiets a real breath, and still adds a pause where the voice ran on", () => {
     const words = [w("Done.", 0, 0.4), w("Next", 1.0, 1.3), w("end.", 1.3, 1.6), w("Go", 1.62, 1.9)];
     const lv = levels([[0, 0.4, -16], [0.55, 0.85, -42], [1.0, 1.6, -16], [1.62, 1.9, -16]], 3);
+    // the gap's edges come from the SOUND (where "Done." died away, where "Next" begins), and the
+    // pause for "end. Go" goes in at the quietest moment between them
     expect(planSentencePauses(words, 0.3, lv)).toEqual([
-      { atSec: 0.7, addSec: 0, muteFrom: 0.44, muteTo: 0.96 },
-      { atSec: 1.61, addSec: 0.28 },
+      { atSec: 0.7, addSec: 0, muteFrom: 0.43, muteTo: 0.97 },
+      { atSec: 1.61, addSec: 0.3 },
     ]);
+  });
+
+  it("never quiets a word's own fade-out: the gap starts where the sound died away, not where the transcript ended it (Frederick's 'The type.')", () => {
+    // the transcript ends "type." at 71.06, but the word's tail rings on to 71.2
+    const words = [w("the", 70.64, 70.72), w("type.", 70.78, 71.06), w("Ionization", 71.94, 72.66)];
+    const lv = levels([[70.6, 71.06, -16], [71.06, 71.2, -40], [71.2, 71.9, -62], [71.9, 72.7, -16]], 74);
+    const [p] = planSentencePauses(words, 0.3, lv);
+    expect(p.muteFrom).toBeGreaterThanOrEqual(71.2);
+    expect(p.muteTo).toBeLessThanOrEqual(71.9);
+    expect(soundEnd(lv, 71.06, 71.94, -16)).toBeCloseTo(71.23, 2);
+    expect(soundStart(lv, 71.94, 71.2, -16)).toBeCloseTo(71.87, 2);
   });
 
   it("a click or a short loud peak is not a word", () => {

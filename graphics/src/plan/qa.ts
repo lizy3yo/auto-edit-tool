@@ -2,8 +2,8 @@
 // lab's composite. Pure: it reads frame-to-frame change measured off the RENDERED files (the
 // faults it catches — a one-frame flash, a graphic still up after its words — only exist in the
 // output), the resolved cues and the readability readings.
-import { CARD_HOLD_MAX_SEC, CUT_SNAP_SEC, MAX_LINGER_SEC, MIN_SHOT_SEC, type ResolvedCue } from "../cueResolve";
-import { templateById } from "../registry";
+import { CUT_SNAP_SEC, MIN_ON_SCREEN_SEC, blinkBeside, readableFrames, stillUpAfterWords, tooShortToRead, type ResolvedCue } from "../cueResolve";
+import { replacesPicture, templateById } from "../registry";
 import { appearFrame } from "../timing";
 import type { RuleProblem } from "./rules";
 
@@ -47,6 +47,21 @@ export function preCutPumps(reel: number[], film: number[], cutFrames: number[],
 
 export type Readability = { id: string; pass: boolean; summary: string; steps: string[] };
 
+/** The number at `path` ("left.subAt", "items[1].at") in a graphic's props, or undefined. */
+function propSec(props: unknown, path: string): number | undefined {
+  let v: unknown = props;
+  for (const key of path.split(/[.[\]]+/).filter(Boolean)) v = v && typeof v === "object" ? (v as Record<string, unknown>)[key] : undefined;
+  return typeof v === "number" && Number.isFinite(v) ? v : undefined;
+}
+
+/** When a word-timed element is DRAWN, in its graphic's own seconds: where its `prop` says (a Versus
+ * side's sub, `left.subAt`), else on its word. The one reading for the app's QA and the lab's
+ * composite, so the lab cannot pass a sub drawn with its title that the app fails (job 408). */
+export function drawnSec(c: Pick<ResolvedCue, "start" | "props">, s: ResolvedCue["sync"][number]): number {
+  const drawn = s.prop === undefined ? undefined : propSec(c.props, s.prop);
+  return drawn ?? s.wordStart - c.start;
+}
+
 export type QaInput = {
   fps: number;
   cues: ResolvedCue[];
@@ -77,11 +92,13 @@ export function judgeFilm(q: QaInput): QaResult {
 
   // Every word-timed element: the frame it appears on vs. the word it waits for. Text that would
   // start just before a shot change starts ON it (the subtitling shot-change rule, BBC subtitle
-  // guidelines): listed as aligned to the cut, not out of sync.
+  // guidelines): listed as aligned to the cut, not out of sync. An element drawn at a time of its own (a
+  // Versus side's sub, `prop`) is read where it is DRAWN: job 408's subs entered with their titles, up to
+  // 2.3 s before their words, and this line said "worst 66 ms" — it had rows for the titles only.
   const rows: { cue: string; offsetMs: number; onCut: boolean }[] = [];
   for (const c of cues)
     for (const s of c.sync) {
-      const rel = appearFrame(s.wordStart - c.start, fps);
+      const rel = appearFrame(drawnSec(c, s), fps);
       const offsetMs = Math.round(((c.startFrame + rel) / fps - s.wordStart) * 1000);
       rows.push({ cue: c.id, offsetMs, onCut: ((rel === 0 && c.conformed.start) || !!s.onCut) && Math.abs(offsetMs) <= CUT_SNAP_SEC * 1000 });
     }
@@ -89,22 +106,24 @@ export function judgeFilm(q: QaInput): QaResult {
   const onCut = rows.filter(r => r.onCut && Math.abs(r.offsetMs) > 100);
 
   const structural = (c: ResolvedCue) => !!templateById(c.template).structural;
-  const lingering = cues.filter(
-    c => !structural(c) && c.contentEnd !== undefined && c.end - (c.spokenEnd ?? c.contentEnd) > (c.conformed.held ? CARD_HOLD_MAX_SEC : MAX_LINGER_SEC)
-  );
-  // A blink of footage (under MIN_SHOT_SEC) between a picture-replacing graphic and the next or
-  // previous shot change: card → b-roll for 0.8 s → host reads as a glitch.
-  const replaces = (c: ResolvedCue) => templateById(c.template).kind === "card" || templateById(c.template).underlay === "window";
-  const minShot = Math.round(MIN_SHOT_SEC * fps);
-  const blinks = cues.filter(c => {
-    if (!replaces(c)) return false;
-    const after = filmCuts.find(k => k >= c.endFrame);
-    const before = [...filmCuts].reverse().find(k => k <= c.startFrame);
-    return (after !== undefined && after > c.endFrame && after - c.endFrame < minShot) || (before !== undefined && before < c.startFrame && c.startFrame - before < minShot);
-  });
+  // Still up after its words: asked by the resolver's own rules (`stillUpAfterWords`), on what it
+  // recorded from the same words — a hold to the cut through the pause, a pause it left in, its
+  // reading time. QA kept its own copy of those rules, which drifted: it failed job 400's
+  // "7 thieves" card, which left on the cut in the silence after its own sentence (1:41).
+  const lingering = cues.filter(c => !structural(c) && stillUpAfterWords(c, fps));
+  // A blink of footage (under MIN_SHOT_SEC) between a graphic that hides the picture and the next or
+  // previous shot change: card → b-roll for 0.8 s → host reads as a glitch. The planner refuses a new
+  // graphic by the same test (`blinkBeside`), and a quote over the blurred picture is one of them
+  // (`replacesPicture`): job 407's ended 0.54 s before the cut to the host and this line said 0.
+  const blinks = cues.filter(c => replacesPicture(templateById(c.template)) && !!blinkBeside(c, filmCuts, fps));
   // A graphic carrying a tail of less than a second onto the next shot (one that ENDS on a cut
   // covers its last shot whole, which is not a spill).
   const spills = cues.filter(c => !c.conformed.end && filmCuts.some(k => k > c.startFrame + 3 && k < c.endFrame && c.endFrame - k < fps));
+  // Up too short to read (under MIN_ON_SCREEN_SEC) — titles and approved graphics too, which the
+  // planner raises or keeps rather than refuses: Dale's "3 piles" stood 1.27 s and his "The ad fee"
+  // chapter 1.40 s, and QA said pass (job 397). Counted from when its words are drawn (`readableFrames`),
+  // not from the cue's start: job 413's "A mower blade" was read 1.0 s of a 2.1 s cue, and passed.
+  const tooShort = cues.filter(c => tooShortToRead(c, fps));
   const unreadable = q.readability.filter(r => !r.pass);
 
   const failures: string[] = [];
@@ -115,6 +134,7 @@ export function judgeFilm(q: QaInput): QaResult {
   if (lingering.length) failures.push(`still up after its words: ${lingering.map(c => c.id).join(", ")}`);
   if (blinks.length) failures.push(`a blink of footage beside ${blinks.map(c => c.id).join(", ")}`);
   if (spills.length) failures.push(`a tail onto the next shot: ${spills.map(c => c.id).join(", ")}`);
+  if (tooShort.length) failures.push(`up too short to read (under ${MIN_ON_SCREEN_SEC} s): ${tooShort.map(c => `${c.id} (${at(readableFrames(c, fps))})`).join(", ")}`);
   if (q.rules.length) failures.push(`placement: ${q.rules.map(p => `${p.cue} ${p.problem}`).join("; ")}`);
   if (unreadable.length) failures.push(`text not readable: ${unreadable.map(r => `${r.id} (${r.summary})`).join(", ")}`);
 
@@ -124,6 +144,7 @@ export function judgeFilm(q: QaInput): QaResult {
     `Flicker before a cut: ${pumps.length}`,
     `Words on screen vs. heard: worst ${worstSync} ms over ${rows.length - onCut.length} elements${onCut.length ? `; ${onCut.length} moved onto a shot change` : ""}`,
     `Still up after their words: ${lingering.length}`,
+    `Shorter than ${MIN_ON_SCREEN_SEC} s: ${tooShort.length}`,
     `Tails onto the next shot: ${spills.length}`,
     `Blinks of footage beside a card: ${blinks.length}`,
     `Placement rules: ${q.rules.length ? q.rules.length + " problem(s)" : "pass"}`,

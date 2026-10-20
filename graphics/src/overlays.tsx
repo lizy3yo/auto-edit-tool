@@ -2,13 +2,15 @@
 // assembly composites them over whatever picture is under them — a b-roll still, a clip or the
 // host take. They enter on the word that names them and fade out over their last frames.
 //
-// Placement keeps clear of what the film already owns: the host name card (bottom-left, cold
-// open only) and the CTA QR card (bottom-right). Labels sit bottom-LEFT but above the name
-// card's band, and nothing is ever planned inside a CTA block (the planner's rule, not ours).
+// Placement keeps clear of what the film already owns: the host name card (bottom-left, on one
+// host take — the self-introduction, else the first that can hold it) and the CTA QR card
+// (bottom-right). Labels sit bottom-LEFT, and over a host take below the chin — on the right while
+// the name card is up (`chapterBox`) — and nothing is ever planned inside a CTA block (the
+// planner's rule, not ours).
 import React from "react";
 import { AbsoluteFill, useCurrentFrame, useVideoConfig } from "remotion";
 import { Arrow, Icon, NumberDot, TEXT_SHADOW, WordReveal, placeStyle, shaded, textPool, useEnter, useTheme, type Place } from "./components";
-import { LAYOUT, TYPE } from "./theme";
+import { HEIGHT, LAYOUT, TYPE, WIDTH } from "./theme";
 import { appearFrame, fadeIn, fadeOutAtEnd, scrimIn, scrimOut, type Phrase } from "./timing";
 import type { BaseProps } from "./cards";
 
@@ -52,24 +54,84 @@ export type ChapterProps = BaseProps & {
   kicker: string;
   number: number;
   title: string;
+  /** Over a host take: drawn smaller and below the host's chin (`chapterBox`). Set by the finishing
+   * step from the film's layout (src/plan/rules.ts `placementFor`), never by the planner. */
+  low?: boolean;
+  /** Which side a low label sits on: "right" while the host's name card holds the bottom-left. */
+  side?: "left" | "right";
+  /** On a SPLIT, the host's panel (px): the label stays inside it, clear of the seam and the
+   * picture beside it. Implies `low` — a split is a host take. */
+  panel?: { x: number; w: number };
+  /** Over b-roll only, which corner band it takes (bottom-left as designed): the one clear of the
+   * picture's subject, set by the finishing step (registry `spots`). Over a host take `low`, `side`
+   * and `panel` place it and this is not read. */
+  place?: Place;
 };
 
-export const ChapterLabel: React.FC<ChapterProps> = ({ kicker, number, title }) => {
+/** The chapter label's plate as designed (px at 1920×1080): bottom-left over b-roll. */
+export const CHAPTER_PLATE = { left: 100, bottom: 155, w: 960, h: 265 } as const;
+/** Its top over b-roll when it takes a top band (`place.v` "top"): the other graphics' top band. */
+export const CHAPTER_TOP = 150;
+/** Its size over a host take: from `LAYOUT.belowChinY` down it has ~290 px of room, and at this
+ * size it ends 78 px above the frame's bottom (inside the action-safe area). */
+export const CHAPTER_LOW_SCALE = 0.8;
+/** The narrowest the plate's own layout goes (px before scaling): room for the number and a title
+ * of two short lines. A host panel narrower than that shrinks the label instead of crossing the seam. */
+const CHAPTER_MIN_W = 640;
+/** A low label keeps this far in from a split's seam; from the frame's edge it keeps the plate's
+ * own margin (`CHAPTER_PLATE.left`). */
+const CHAPTER_SEAM_INSET = 48;
+
+/** Where the chapter label's plate is drawn: its left and top on the frame, its layout width before
+ * scaling, and the scale (the plate is `CHAPTER_PLATE.h` tall before scaling). */
+export type ChapterBox = { left: number; top: number; width: number; scale: number };
+
+/**
+ * Where the chapter label goes. Over b-roll: as designed, bottom-left at full size. Over a host take
+ * (`low`, or a split's `panel`): smaller and BELOW THE CHIN, inside the host's panel on a split, on
+ * the right while the name card holds the bottom-left. Job 407 (scene 21, "Number two squared the
+ * walls…"): the plate as designed spans y 660-925 and its top edge cut across the centred host's
+ * beard for 3 s; job 402's on a split (scene 14) also ran across the seam onto the picture. Over
+ * b-roll it takes the corner band `place` names, the one clear of the picture's subject (job 414's
+ * "1 The roof" covered the froe it was about, its socket and half its blade). Pure.
+ */
+export function chapterBox(p: Pick<ChapterProps, "low" | "side" | "panel" | "place">): ChapterBox {
+  if (!p.low && !p.panel)
+    return {
+      left: p.place?.h === "right" ? WIDTH - CHAPTER_PLATE.left - CHAPTER_PLATE.w : CHAPTER_PLATE.left,
+      top: p.place?.v === "top" ? CHAPTER_TOP : HEIGHT - CHAPTER_PLATE.bottom - CHAPTER_PLATE.h,
+      width: CHAPTER_PLATE.w,
+      scale: 1,
+    };
+  const x0 = p.panel?.x ?? 0;
+  const x1 = p.panel ? p.panel.x + p.panel.w : WIDTH;
+  const left = x0 <= 0 ? CHAPTER_PLATE.left : x0 + CHAPTER_SEAM_INSET;
+  const right = x1 >= WIDTH ? WIDTH - CHAPTER_PLATE.left : x1 - CHAPTER_SEAM_INSET;
+  const room = Math.max(1, right - left);
+  const scale = Math.min(CHAPTER_LOW_SCALE, room / CHAPTER_MIN_W);
+  const width = Math.min(CHAPTER_PLATE.w, room / scale);
+  return { left: p.side === "right" ? right - width * scale : left, top: LAYOUT.belowChinY, width, scale };
+}
+
+export const ChapterLabel: React.FC<ChapterProps> = ({ kicker, number, title, low, side, panel, place }) => {
   const t = useTheme();
   const frame = useCurrentFrame();
   const wipe = fadeIn(frame, 0, 12);
   const k = useEnter(5, 10);
   const n = useEnter(8, 16);
   const ti = useEnter(12, 16);
+  const box = chapterBox({ low, side, panel, place });
   return (
     <Leave>
       <div
         style={{
           position: "absolute",
-          left: 100,
-          bottom: 155,
-          height: 265,
-          width: 960,
+          left: box.left,
+          top: box.top,
+          height: CHAPTER_PLATE.h,
+          width: box.width,
+          // Scaled as one drawing, so a low label keeps the designed proportions.
+          ...(box.scale !== 1 ? { transform: `scale(${box.scale})`, transformOrigin: "0 0" } : {}),
           clipPath: `inset(0 ${(1 - wipe) * 100}% 0 0)`,
           ...plate(usePlate(0.62)),
           borderRadius: 0,
@@ -235,7 +297,9 @@ export const WarningLabel: React.FC<WarningProps> = ({ label = "Warning", text, 
 
 /* ───────────────────────── Icon labels ───────────────────────── */
 
-export type IconLabelsProps = BaseProps & { items: { icon: string; text: string; at: number }[] };
+/** The icons are optional: each is the thing its label names, or none (round 10 review); the planner
+ * gives every item one or none. */
+export type IconLabelsProps = BaseProps & { items: { icon?: string; text: string; at: number }[] };
 
 export const IconLabels: React.FC<IconLabelsProps> = ({ items }) => {
   const at = useAt();
@@ -254,7 +318,7 @@ export const IconLabels: React.FC<IconLabelsProps> = ({ items }) => {
       >
         {items.map((it, i) => (
           <Pill key={i} at={at(it.at)}>
-            <Icon code={it.icon} size={60} />
+            {it.icon && <Icon code={it.icon} size={60} />}
             <span style={{ fontSize: 36, fontWeight: 800 }}>{it.text}</span>
           </Pill>
         ))}
@@ -280,8 +344,8 @@ export type HostCaptionProps = BaseProps & {
   /**
    * Top of the caption, px. Must sit BELOW the chin: our hosts are framed closer than the
    * reference's (Frederick's chin is at ~0.66 of the height, Steve's ~0.5), so the reference's
-   * chest-height 610 lands on the beard. Phase 2 sets this from the face box the split-screen
-   * code already measures (`pico.ts`); 790 clears every host photo we have.
+   * chest-height 610 lands on the beard. Default `LAYOUT.belowChinY` (790), which clears every
+   * host photo we have.
    */
   top?: number;
   /** On a SPLIT host scene, the host's panel (px): the caption stays inside it and never runs
@@ -293,7 +357,10 @@ export type HostCaptionProps = BaseProps & {
  * Big uppercase words over the host, each landing as it is said ("NOT · THE · BOWL"), centred
  * below the face and clear of the name card (bottom-left) and the CTA QR (bottom-right).
  */
-export const HostCaption: React.FC<HostCaptionProps> = ({ phrase, emphasis, top = 790, panel }) => {
+/** Words a caption shows at once; a longer sentence pages (see WordReveal). */
+export const CAPTION_PAGE_WORDS = { HostCaption: 8, DimCaption: 10, ArrowCaption: 10 } as const;
+
+export const HostCaption: React.FC<HostCaptionProps> = ({ phrase, emphasis, top = LAYOUT.belowChinY, panel }) => {
   const t = useTheme();
   const shade = React.useContext(ShadeContext);
   return (
@@ -304,6 +371,7 @@ export const HostCaption: React.FC<HostCaptionProps> = ({ phrase, emphasis, top 
           phrase={phrase}
           emphasis={emphasis}
           uppercase
+          pageWords={CAPTION_PAGE_WORDS.HostCaption}
           style={{
             fontFamily: t.font,
             fontWeight: 900,
@@ -346,6 +414,7 @@ export const DimCaption: React.FC<DimCaptionProps> = ({ phrase, emphasis, dim = 
         <WordReveal
           phrase={phrase}
           emphasis={emphasis}
+          pageWords={CAPTION_PAGE_WORDS.DimCaption}
           style={{
             fontFamily: t.font,
             fontWeight: 800,

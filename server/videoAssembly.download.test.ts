@@ -47,7 +47,8 @@ async function run(name: string): Promise<string> {
     value => ({ value, err: undefined }),
     (err: unknown) => ({ value: undefined, err })
   );
-  await vi.advanceTimersByTimeAsync(10_000);
+  // the backoff waits 2, 4, 8 and 16 s before giving up (a flaky connection lasts seconds)
+  await vi.advanceTimersByTimeAsync(40_000);
   const { value, err } = await settled;
   if (err) throw err;
   return value!;
@@ -72,11 +73,11 @@ describe("downloadToTemp", () => {
     expect(readFileSync(filePath, "utf8")).toBe("scene-bytes");
   });
 
-  it("retries a 5xx up to three attempts, then gives up", async () => {
+  it("retries a 5xx up to five attempts, then gives up", async () => {
     fetchMock.mockResolvedValue(notOk(503));
 
     await expect(run("flaky.mp4")).rejects.toThrow(/503/);
-    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock).toHaveBeenCalledTimes(5);
   });
 
   it("passes an abort signal so a stalled socket cannot park the assembly", async () => {

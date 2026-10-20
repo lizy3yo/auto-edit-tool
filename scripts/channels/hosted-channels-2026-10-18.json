@@ -1,0 +1,91 @@
+{
+  "source": "auto-edit-tool-production (read only, 2026-10-18): channelConfig.list, book.list, and the host photo each channel's latest video was lip-synced from",
+  "base": "https://pub-fd5853f50f47422f827867dae374bcf2.r2.dev/",
+  "channels": [
+    {
+      "channelKey": "garys_garage_secrets",
+      "displayName": "Gary's Garage Secrets",
+      "hostName": "Gary",
+      "authorName": "Gary's Garage Secrets",
+      "voiceId": "KdlWohOPG3FU2KOnGrdV",
+      "voiceName": "Bob - Southern American",
+      "ttsModel": "eleven_v4",
+      "nicheSlug": "gardening",
+      "photos": ["style-references/2/p8jD4GfW_qVw.jpg"],
+      "books": [{ "title": "The Garage To Profitable Bible", "cover": "style-references/2/38l2Y7pF8rtV.png", "shopUrl": "https://www.garysgaragesecrets.com/" }]
+    },
+    {
+      "channelKey": "gideon_grant",
+      "displayName": "Gideon Grant",
+      "hostName": "Gideon Grant",
+      "authorName": "Gideon Grant",
+      "voiceId": "kTPvNEwuWEZMKvOhvWEi",
+      "voiceName": "Phillip Lerdahl",
+      "ttsModel": "eleven_v4",
+      "nicheSlug": "gardening",
+      "photos": ["style-references/2/ae993GmZRXFv.jpg"],
+      "books": [{ "title": "The Stoic Way", "cover": "style-references/2/LB_v7gQCLScx.png", "shopUrl": "https://www.gideongrantphilosophy.com/" }]
+    },
+    {
+      "channelKey": "helena_hart",
+      "displayName": "Helena Hart",
+      "hostName": "Helena Hart",
+      "authorName": "Helena Hart",
+      "voiceId": "2BGq7ZCF2MekQu34i31K",
+      "voiceName": "Bailey - Passioante, Warm",
+      "ttsModel": "eleven_v4",
+      "nicheSlug": "gardening",
+      "photos": ["style-references/2/SG4WXnxcI9hn.png", "style-references/2/ay2ws361kf3k.jpg"],
+      "books": [{ "title": "100 Air Hostess Secrets", "cover": "style-references/2/9iWqJZLFNG89.png", "shopUrl": "https://www.helenahartbooks.com/" }]
+    },
+    {
+      "channelKey": "luca_marino",
+      "displayName": "Luca Marino",
+      "hostName": "Luca Marino",
+      "hostTitle": "Cat Trainer",
+      "authorName": "Luca Marino",
+      "voiceId": "sp6F311QRVXR53QPGIgK",
+      "voiceName": "Luca – Clear Neutral Narration",
+      "ttsModel": "eleven_v4",
+      "nicheSlug": "gardening",
+      "photos": ["style-references/2/i4HLvyWioV2b.jpg"],
+      "books": [{ "title": "Everything Your Cat Can't Tell You", "cover": "style-references/6/5cAWBnWABmFu.png", "shopUrl": "https://www.lucamarinobooks.com/" }]
+    },
+    {
+      "channelKey": "sawdust_sam",
+      "displayName": "Sawdust Sam",
+      "hostName": "Sawdust Sam",
+      "authorName": "Sawdust Sam",
+      "voiceId": "Cz0K1kOv9tD8l0b5Qu53",
+      "voiceName": "Jon - Relaxed, Deep and Approachable",
+      "ttsModel": "eleven_multilingual_v2",
+      "nicheSlug": "gardening",
+      "photos": ["style-references/2/PAk6IDzENeoP.jpg", "style-references/2/iKdMTpYuTgTt.jpg"],
+      "books": []
+    },
+    {
+      "channelKey": "walter_wren",
+      "displayName": "Walter Wren",
+      "hostName": "Walter Wren",
+      "authorName": "Walter Wren",
+      "voiceId": "ch0vU2DwfJVmFG2iZy89",
+      "voiceName": "Joe Davis - Deep, Clear, and Warm",
+      "ttsModel": "eleven_v4",
+      "nicheSlug": "gardening",
+      "photos": ["style-references/2/xIQlK12fDJI-.jpg"],
+      "books": [{ "title": "The Backyard Birder", "cover": "style-references/2/9Jb9u_VZp29_.png", "shopUrl": "https://www.walterwren.com/" }]
+    },
+    {
+      "channelKey": "werner_finkbeiner",
+      "displayName": "Werner Finkbeiner",
+      "hostName": "Werner Finkbeiner",
+      "authorName": "Werner Finkbeiner",
+      "voiceId": "au7Q2pqB7wdio9LWlvt7",
+      "voiceName": "Herrmann - Professional and Measured",
+      "ttsModel": "eleven_v4",
+      "nicheSlug": "gardening",
+      "photos": ["style-references/2/YjbhoS0QYyDt.jpg", "style-references/2/_4ZJ4MDw-QTM.jpg"],
+      "books": [{ "title": "Werner's 101 Free Repairs", "cover": "style-references/2/fe87-C-nn40g.png", "shopUrl": "https://www.wernerfinkbeiner.com/" }]
+    }
+  ]
+}

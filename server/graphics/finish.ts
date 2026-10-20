@@ -24,18 +24,20 @@ import { argbFromRgb } from "@material/material-color-utilities";
 import { invokeClaude } from "../claude";
 import { presignOwnBucketUrl } from "../storage";
 import { transcribeWordsFromBuffer } from "../_core/voiceTranscription";
-import { CueError, resolveCues, type CueSpec, type ResolvedCue, type Word } from "../../graphics/src/cueResolve";
-import { TEMPLATES, templateById } from "../../graphics/src/registry";
+import { CueError, endWithFilm, resolveCues, type CueSpec, type ResolvedCue, type Word } from "../../graphics/src/cueResolve";
+import { resolveSets, templateById } from "../../graphics/src/registry";
 import { FPS, type Theme } from "../../graphics/src/theme";
 import { themeFromPixels } from "../../graphics/src/palette";
 import { WINDOW } from "../../graphics/src/more";
-import { NOTO_PNG, planGraphics, type PlanMessage } from "../../graphics/src/plan/planner";
-import { checkRules, type FilmLayout } from "../../graphics/src/plan/rules";
+import { NOTO_PNG, planGraphics, respellCue, type PlanMessage, type PlanRound } from "../../graphics/src/plan/planner";
+import { checkRules, placementFor, type FilmLayout } from "../../graphics/src/plan/rules";
 import { detectCuts, judgeFilm, type QaResult, type Readability } from "../../graphics/src/plan/qa";
 import { getMediaDuration } from "../mediaProbe";
 import { ffmpeg, frameDiffs, levelsOf, narrationOf } from "./media";
-import { LEVEL_FRAME_SEC, retimeNumbers } from "../../graphics/src/plan/wordTiming";
-import { calmestPlace, describe, measureCue, score, subjectOf } from "./readable";
+import { driftedStretches, LEVEL_FRAME_SEC, retimeWords, spliceStretch } from "../../graphics/src/plan/wordTiming";
+import { execFfmpeg } from "../ffmpegSpawn";
+import { notAListAsSaid } from "../spokenLists";
+import { calmestPlace, clearOfSubject, describe, makeReadable, measureCue, placeAndRead, subjectOf } from "./readable";
 import { GRAPHICS_DIR, renderGraphic } from "./render";
 
 /** The model that writes the plan (the lab measured Opus best at following the moments). */
@@ -56,7 +58,8 @@ export type GraphicsRecord = {
   theme?: { accent: string; bg: string };
   qa: QaResult;
   readability: Readability[];
-  planner?: { model: string; rounds: number };
+  /** How the plan was written, round by round — unset when the saved plan was reused (no model call). */
+  planner?: { model: string; rounds: PlanRound[] };
 };
 
 export type AddGraphicsInput = {
@@ -69,6 +72,8 @@ export type AddGraphicsInput = {
   /** The plan saved on the job (reused as it is unless `replan`). */
   savedPlan?: CueSpec[];
   replan?: boolean;
+  /** The spoken lists the pipeline found in the script: each gets a list graphic where one may go. */
+  lists?: { items: string[]; kind?: "things" | "steps" }[];
   /** Progress, 0-100, for the job card. */
   onProgress?: (label: string, pct: number) => void;
   log?: (m: string) => void;
@@ -76,10 +81,10 @@ export type AddGraphicsInput = {
 
 /** Templates whose decorations (not words) carry the theme's colours: measured without them. */
 const MEASURE_WITHOUT_DECORATION = new Set(["CrossedList"]);
-const structural = new Set(TEMPLATES.filter(t => t.structural).map(t => t.id));
-const cards = new Set(TEMPLATES.filter(t => t.kind === "card").map(t => t.id));
-/** Graphics that replace the picture (cards, framed windows): held to the cut, never a blink of footage. */
-const fullFrame = new Set(TEMPLATES.filter(t => t.kind === "card" || t.underlay === "window").map(t => t.id));
+/** The resolver's template sets — graphics that replace the picture (cards, framed windows, a quote
+ * over the blurred picture) are held to the cut, never a blink of footage — from the one definition
+ * the planner and QA use (`resolveSets`). */
+const { structural, cards, fullFrame, windows } = resolveSets();
 const sha = (x: Buffer | string) => createHash("sha1").update(x).digest("hex");
 
 function ensureDir(d: string): string {
@@ -103,11 +108,46 @@ async function wordsOf(filmPath: string): Promise<Word[]> {
     words = t.words.map(w => ({ text: w.word, start: w.start, end: w.end }));
     writeFileSync(file, JSON.stringify(words));
   }
-  return retimeNumbers(words, await levelsOf(filmPath, LEVEL_FRAME_SEC).catch(() => []));
+  const levels = await levelsOf(filmPath, LEVEL_FRAME_SEC).catch(() => [] as number[]);
+  const healed = path.join(CACHE, "words", `${sha(audio)}.healed.json`);
+  if (existsSync(healed)) words = JSON.parse(readFileSync(healed, "utf8")) as Word[];
+  else if (levels.length) {
+    words = await healDrift(filmPath, words, levels);
+    writeFileSync(healed, JSON.stringify(words));
+  }
+  return retimeWords(words, levels);
+}
+
+/**
+ * A stretch whose words the sound says are seconds off (`driftedStretches`) is heard again on its
+ * own and spliced in when it says the same words and fits the sound better (`spliceStretch`).
+ * Hank's job 398 at 1:18: the caption ran 3 s ahead of the voice. Never throws: a stretch that
+ * cannot be heard again keeps its first times.
+ */
+async function healDrift(filmPath: string, words: Word[], levels: number[]): Promise<Word[]> {
+  let out = words;
+  for (const s of driftedStretches(words, levels)) {
+    const label = `${s.start.toFixed(1)}–${s.end.toFixed(1)} s`;
+    try {
+      const { stdout } = await execFfmpeg(
+        ["-hide_banner", "-loglevel", "error", "-ss", s.start.toFixed(3), "-t", (s.end - s.start).toFixed(3), "-i", filmPath, "-vn", "-ac", "1", "-ar", "16000", "-b:a", "64k", "-f", "mp3", "-"],
+        { encoding: "buffer", maxBuffer: 64 << 20, windowsHide: true }
+      );
+      const t = await transcribeWordsFromBuffer(stdout as Buffer);
+      if ("error" in t) throw new Error(t.error);
+      const patch = t.words.map(w => ({ text: w.word, start: w.start + s.start, end: w.end + s.start }));
+      const r = spliceStretch(out, patch, levels, s.start, s.end);
+      out = r.words;
+      console.log(`[Graphics] word times ${label}: ${r.used ? "heard again and corrected" : "kept (the second hearing was no better)"}`);
+    } catch (e) {
+      console.warn(`[Graphics] word times ${label} could not be heard again (${e instanceof Error ? e.message : e})`);
+    }
+  }
+  return out;
 }
 
 /** The video's colours, from its host photo; none (the default navy) when it cannot be read. */
-async function themeOf(photoUrl: string | undefined): Promise<Theme | undefined> {
+export async function themeOf(photoUrl: string | undefined): Promise<Theme | undefined> {
   if (!photoUrl) return undefined;
   try {
     // Our own photo read over the storage endpoint, never the public r2.dev address: that one is
@@ -154,7 +194,7 @@ async function inlineIcons(node: unknown): Promise<void> {
 
 /* ───────────── the plan ───────────── */
 
-async function plan(input: AddGraphicsInput, words: Word[], cuts: number[]): Promise<{ cues: CueSpec[]; rounds?: number }> {
+async function plan(input: AddGraphicsInput, words: Word[], cuts: number[]): Promise<{ cues: CueSpec[]; rounds?: PlanRound[] }> {
   if (input.savedPlan?.length && !input.replan) return { cues: input.savedPlan };
   const ask = async (system: string, messages: PlanMessage[]): Promise<string> => {
     // The repair round is one message carrying the first answer, on the same metered call.
@@ -171,19 +211,22 @@ async function plan(input: AddGraphicsInput, words: Word[], cuts: number[]): Pro
     });
     return r.text;
   };
-  const p = await planGraphics({ words, cuts, film: input.film, ask, ensureIcon: async code => !!(await iconFile(code)) });
-  // What each round asked for and what the checks refused, so a thin plan can be explained.
+  // A list window is held to the rules every spoken list is found by (`notAListAsSaid`).
+  const p = await planGraphics({ words, cuts, film: input.film, ask, ensureIcon: async code => !!(await iconFile(code)), lists: input.lists, listCheck: notAListAsSaid });
+  // What each round asked for and what the checks refused, so a thin plan can be explained. The
+  // rounds are also kept on the job (`withGraphics`): the render log is gone after a restart.
   p.rounds.forEach((r, i) => {
-    input.log?.(`graphics plan round ${i + 1}: ${r.asked} asked, ${r.kept} kept${r.problems.length ? `, ${r.problems.length} refused` : ""}`);
+    const offered = r.offered ? `, ${r.offered.length} sentences offered (${r.offered.filter(o => !o.asked.length && !o.placed).length} passed over)` : "";
+    input.log?.(`graphics plan round ${i + 1} (${r.step}): ${r.asked} asked, ${r.kept} kept${r.problems.length ? `, ${r.problems.length} refused` : ""}${offered}${r.error ? ` — ${r.error}` : ""}`);
     for (const pr of r.problems) input.log?.(`  refused ${pr.cue}: ${pr.problem}`);
   });
-  return { cues: p.cues, rounds: p.rounds.length };
+  return { cues: p.cues, rounds: p.rounds };
 }
 
 /** Resolve a plan cue by cue (film order), leaving out any that no longer resolve or break a
  * placement rule — a saved plan on a film that was edited since must not bring a broken graphic. */
 function resolveKeeping(specs: CueSpec[], words: Word[], cuts: number[], film: FilmLayout, dropped: GraphicsRecord["dropped"]): { specs: CueSpec[]; cues: ResolvedCue[] } {
-  const opts = { cuts, fps: FPS, structural, cards, fullFrame };
+  const opts = { cuts, fps: FPS, structural, cards, fullFrame, windows };
   const kept: CueSpec[] = [];
   let resolved: ResolvedCue[] = [];
   for (const spec of specs) {
@@ -240,6 +283,19 @@ export async function addGraphics(input: AddGraphicsInput): Promise<GraphicsReco
   progress(input.savedPlan?.length && !input.replan ? "Using the saved graphics plan" : "Planning the graphics", 12);
   const planned = await plan(input, words, cuts);
   const { specs, cues } = resolveKeeping(planned.cues, words, cuts, input.film, dropped);
+  // A SAVED plan is shown in the script's spelling too (`respellCue`; the planner does it for a new
+  // one): a plan approved before kept the transcript's spelling of a script word on screen (job 411's
+  // "migratorious"). Only shown words change, a word for a word, so every time stays and the resolved
+  // cue is mended the same way as its plan.
+  for (const c of cues) {
+    const changed = respellCue(c, c, input.film, words);
+    const spec = specs.find(s => s.id === c.id);
+    if (spec) respellCue(spec, c, input.film, words);
+    if (changed.length) log(`graphics: ${c.id} in the script's spelling: ${changed.join(", ")}`);
+  }
+  // Nothing outlasts the film (`endWithFilm`): ended on its last frame, and left out when that
+  // leaves it too short to read.
+  for (const id of endWithFilm(cues, filmDiffs.length - 1, FPS)) dropped.push({ id, why: "the film ends before it can be read" });
   log(`graphics: ${cues.length} placed${dropped.length ? `, ${dropped.length} left out` : ""}${theme ? `, accent ${theme.accent}` : ""}`);
 
   // Render each graphic (cached by what it is), text on footage held to readability.
@@ -269,55 +325,49 @@ export async function addGraphics(input: AddGraphicsInput): Promise<GraphicsReco
   for (let i = 0; i < cues.length; i++) {
     const c = cues[i];
     progress(`Rendering graphics ${i + 1}/${cues.length}`, 15 + Math.round((70 * i) / Math.max(1, cues.length)));
-    const def = templateById(c.template);
-    if (theme) c.props.theme = theme;
-    await inlineIcons(c.props);
-    if (c.template === "ArrowCaption" && !c.props.target) {
-      const s = await subjectOf(input.filmPath, (c.start + c.end) / 2);
-      c.props.target = { x: s.x, y: s.y };
+    // One graphic that cannot be drawn or measured is left out with the reason; it never takes
+    // the rest down (Scarlett's job 395 shipped with NO graphics over one bad cue).
+    try {
+      const def = templateById(c.template);
+      if (theme) c.props.theme = theme;
+      // Where it goes on this film's frame (`placementFor`): on a split the caption stays in the
+      // host's panel (job 400 at 2:18 ran across the seam onto the picture), and over a host take a
+      // chapter label goes below the chin (job 407's crossed the host's beard). Set BEFORE the first
+      // drawing, so every readability measure — the measuring copy and each fix — reads the words
+      // where they ship, and the render cache keys the placement.
+      Object.assign(c.props, placementFor(c.template, c, input.film));
+      await inlineIcons(c.props);
+      if (c.template === "ArrowCaption" && !c.props.target) {
+        const s = await subjectOf(input.filmPath, (c.start + c.end) / 2);
+        c.props.target = { x: s.x, y: s.y };
+      }
+      let file = await renderCue(c);
+      if (def.kind === "overlay" && def.underlay !== "window") {
+        const io = { render: renderCue, measure, calmest: (cue: ResolvedCue, size: { w: number; h: number }) => calmestPlace(input.filmPath, cue, cuts, size, def.spots) };
+        // A graphic with places of its own, drawn as designed over b-roll (not placed by the layout
+        // below a host's chin or in a host's panel), goes where it is clear of the picture's subject
+        // first (`placeAndRead`): job 413's price pair sat on the phone it priced, job 412's MYTH stamp
+        // on the sleeper's head and across the cat's eye, job 414's chapter plate on its froe.
+        const spots = def.spots && !c.props.low && !c.props.panel ? def.spots : undefined;
+        const made = spots
+          ? await placeAndRead(c, !!def.movable, file, { ...io, clear: (cue, designed) => clearOfSubject(input.filmPath, designed, cue, cuts, spots) }, attempts)
+          : await makeReadable(c, !!def.movable, file, io, attempts);
+        const move = made.steps.find(s => s.startsWith("clear of the picture's subject"));
+        if (move) log(`graphics: ${c.id} ${move}`);
+        file = made.file;
+        readability.push({ id: c.id, pass: made.r.pass, summary: describe(made.r), steps: made.steps });
+        // Text that cannot be read is left out, never shipped.
+        if (!made.r.pass) {
+          dropped.push({ id: c.id, why: `text not readable on the picture (${describe(made.r)})` });
+          continue;
+        }
+      }
+      rendered.push({ cue: c, file });
+    } catch (e) {
+      const why = e instanceof Error ? e.message : String(e);
+      log(`graphic ${c.id} (${c.template}) could not be drawn: ${why}`);
+      dropped.push({ id: c.id, why: `could not be drawn (${why})` });
     }
-    let file = await renderCue(c);
-    if (def.kind === "overlay" && def.underlay !== "window") {
-      const steps: string[] = [];
-      let r = await measure(c, file);
-      steps.push(`as designed: ${describe(r)}`);
-      let best = { r, file, props: { ...c.props } };
-      const keep = () => {
-        attempts.push(file);
-        if (r.pass || score(r) > score(best.r)) best = { r, file, props: { ...c.props } };
-      };
-      for (const shade of [0.5, 1]) {
-        if (r.pass) break;
-        c.props.shade = shade;
-        file = await renderCue(c);
-        r = await measure(c, file);
-        steps.push(`darker behind the words (${shade}): ${describe(r)}`);
-        keep();
-      }
-      if (!r.pass && r.colour !== undefined && r.colour < 4.5) {
-        c.props.lift = 1;
-        file = await renderCue(c);
-        r = await measure(c, file);
-        steps.push(`lighter shade of the coloured words: ${describe(r)}`);
-        keep();
-      }
-      if (!r.pass && def.movable && r.box) {
-        c.props.place = await calmestPlace(input.filmPath, c, cuts, { w: r.box.x1 - r.box.x0, h: r.box.y1 - r.box.y0 });
-        file = await renderCue(c);
-        r = await measure(c, file);
-        steps.push(`moved to the calmest part of the picture: ${describe(r)}`);
-        keep();
-      }
-      c.props = best.props as typeof c.props;
-      file = best.file;
-      readability.push({ id: c.id, pass: best.r.pass, summary: describe(best.r), steps });
-      // Text that cannot be read is left out, never shipped.
-      if (!best.r.pass) {
-        dropped.push({ id: c.id, why: `text not readable on the picture (${describe(best.r)})` });
-        continue;
-      }
-    }
-    rendered.push({ cue: c, file });
   }
   // Attempts the readability check turned down are not kept.
   const shipped = new Set(rendered.map(r => r.file));

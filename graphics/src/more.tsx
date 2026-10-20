@@ -24,7 +24,8 @@ import {
   type Place,
 } from "./components";
 import { withAlpha } from "./palette";
-import { Leave, ShadeContext, plate, useAt, usePlate } from "./overlays";
+import { CAPTION_PAGE_WORDS, Leave, ShadeContext, plate, useAt, usePlate } from "./overlays";
+import { numberLabelAnchor } from "./spots";
 import { LAYOUT, TYPE } from "./theme";
 import { fadeIn, scrimIn, type Phrase } from "./timing";
 
@@ -97,12 +98,21 @@ export const BigNumberOverlay: React.FC<BigNumberProps> = props => {
   );
 };
 
-/* ───────────────────────── Number label (two values compared) ───────────────────────── */
+/* ───────────────────────── Number label (two values side by side) ───────────────────────── */
 
 export type NumberLabelProps = BaseProps & {
   kicker?: string;
   a: { label: string; value: string; at: number };
   b: { label: string; value: string; at: number };
+  /** The two are COMPARED: "vs" between them. Set by the resolver (cueResolve `pairCompared`) from
+   * the plan's mark and the words said between the values — a range ("$150 to $600", job 397) or a
+   * price for each of two things ("$5 to $10 a knife and $10 to $20 a mower blade", job 406) is not
+   * a comparison, and "vs" there said the wrong thing. Without it the two sit side by side. */
+  compare?: boolean;
+  /** Which corner it sits in (bottom-left as designed): the one clear of the picture's subject, set by
+   * the finishing step (registry `spots`). Job 413's "From $25 / To $75" sat on the phone screen whose
+   * listing it priced, over the listing's title and the thumb holding the phone. */
+  place?: Place;
 };
 
 const ValuePill: React.FC<{ label: string; value: string; at: number; strong: boolean }> = ({ label, value, at: atSec, strong }) => {
@@ -117,20 +127,28 @@ const ValuePill: React.FC<{ label: string; value: string; at: number; strong: bo
   );
 };
 
-/** Two values side by side on the footage ("Dog 39 °C / You 37 °C"). */
-export const NumberLabel: React.FC<NumberLabelProps> = ({ kicker, a, b }) => {
+/** Two values side by side on the footage ("Dog 39 °C / You 37 °C"), with "vs" between them only when
+ * they are compared (`compare`). The "vs" enters WITH the second value: drawn from the first frame,
+ * it stood alone beside the kicker before either value, then pointed at empty space until the second
+ * was said (job 406: alone 82.03-82.7 s, then beside one value for 1.7 s; job 401: "HIS AGE 64 vs"
+ * for 3.5 s before "81"). */
+export const NumberLabel: React.FC<NumberLabelProps> = ({ kicker, a, b, compare, place }) => {
   const t = useTheme();
+  const at = useAt();
+  const versus = useEnter(at(b.at), 14);
   return (
     <Leave>
-      <div style={{ position: "absolute", left: LAYOUT.actionSafeX + 24, bottom: 120, display: "flex", flexDirection: "column", gap: 16 }}>
+      <div style={{ ...numberLabelAnchor(place), display: "flex", flexDirection: "column", gap: 16 }}>
         {kicker && (
-          <div style={{ ...plate(usePlate(0.74)), alignSelf: "flex-start", padding: "8px 16px", borderRadius: 8 }}>
+          <div style={{ ...plate(usePlate(0.74)), padding: "8px 16px", borderRadius: 8 }}>
             <Kicker text={kicker} size={24} />
           </div>
         )}
         <div style={{ display: "flex", alignItems: "stretch", gap: 18 }}>
           <ValuePill {...a} strong />
-          <div style={{ alignSelf: "center", fontFamily: t.font, fontWeight: 800, fontSize: 34, color: "rgba(255,255,255,0.8)", textShadow: TEXT_SHADOW }}>vs</div>
+          {compare === true && (
+            <div style={{ ...versus, alignSelf: "center", fontFamily: t.font, fontWeight: 800, fontSize: 34, color: "rgba(255,255,255,0.8)", textShadow: TEXT_SHADOW }}>vs</div>
+          )}
           <ValuePill {...b} strong={false} />
         </div>
       </div>
@@ -272,6 +290,19 @@ export const CrossedList: React.FC<CrossedListProps> = ({ items }) => {
 
 export type MythStampProps = BaseProps & { label?: string; at: number; phrase?: Phrase; place?: Place };
 
+/** The MYTH stamp's band height (`placeStyle`), and its places: top-right as designed, then the
+ * other side, then the bands below — the one clear of the picture's subject is chosen by the
+ * finishing step (registry `spots`). */
+export const MYTH_STAMP_BAND = 300;
+export const MYTH_STAMP_PLACES: Place[] = [
+  { h: "right", v: "top" },
+  { h: "left", v: "top" },
+  { h: "right", v: "middle" },
+  { h: "left", v: "middle" },
+  { h: "right", v: "bottom" },
+  { h: "left", v: "bottom" },
+];
+
 /** A red stamp slammed onto the picture when a myth is said; the myth itself, if shown, underneath. */
 export const MythStamp: React.FC<MythStampProps> = ({ label = "Myth", at: atSec, phrase, place }) => {
   const t = useTheme();
@@ -283,7 +314,7 @@ export const MythStamp: React.FC<MythStampProps> = ({ label = "Myth", at: atSec,
   const shade = useShade();
   return (
     <Leave>
-      <div style={placeStyle(place ?? { h: "right", v: "top" }, 300)}>
+      <div style={placeStyle(place ?? MYTH_STAMP_PLACES[0], MYTH_STAMP_BAND)}>
         <div style={{ opacity: frame < f ? 0 : 1, transform: `rotate(-9deg) scale(${frame < f ? 1.6 : 1.6 - 0.6 * s})`, border: `10px solid ${t.danger}`, borderRadius: 18, padding: "6px 40px 10px", fontFamily: t.font, fontWeight: 900, fontSize: 120, letterSpacing: "0.08em", textTransform: "uppercase", color: t.danger, background: `rgba(12,16,22,${shaded(0.35, shade)})`, textShadow: "0 4px 18px rgba(0,0,0,0.35)" }}>
           {label}
         </div>
@@ -505,7 +536,7 @@ export const ArrowCaption: React.FC<ArrowCaptionProps> = ({ phrase, emphasis, pl
       </svg>
       <div style={box}>
         <div style={textPool(shade)}>
-          <WordReveal phrase={phrase} emphasis={emphasis} style={{ fontFamily: t.font, fontWeight: 800, fontSize: 72, lineHeight: 1.12, color: t.text, maxWidth: 820, textShadow: TEXT_SHADOW }} />
+          <WordReveal phrase={phrase} emphasis={emphasis} pageWords={CAPTION_PAGE_WORDS.ArrowCaption} style={{ fontFamily: t.font, fontWeight: 800, fontSize: 72, lineHeight: 1.12, color: t.text, maxWidth: 820, textShadow: TEXT_SHADOW }} />
         </div>
       </div>
     </Leave>
@@ -514,7 +545,10 @@ export const ArrowCaption: React.FC<ArrowCaptionProps> = ({ phrase, emphasis, pl
 
 /* ───────────────────────── Icon callout ───────────────────────── */
 
-export type IconCalloutProps = BaseProps & { icon: string; phrase: Phrase; emphasis?: string[]; place?: Place };
+/** `icon` is required by the planner (the callout IS its icon). Typed optional because the finishing
+ * step takes off an icon whose image cannot be had (server/graphics `inlineIcons`): a saved cue then
+ * draws its words alone instead of crashing the render on a missing code. */
+export type IconCalloutProps = BaseProps & { icon?: string; phrase: Phrase; emphasis?: string[]; place?: Place };
 
 /** One short point with one icon on the footage ("Nobody earns a dime"). */
 export const IconCallout: React.FC<IconCalloutProps> = ({ icon, phrase, emphasis, place }) => {
@@ -525,10 +559,12 @@ export const IconCallout: React.FC<IconCalloutProps> = ({ icon, phrase, emphasis
   return (
     <Leave>
       <div style={placeStyle(place ?? { h: "left", v: "bottom" }, 150)}>
-        <div style={{ display: "flex", alignItems: "center", gap: 28, clipPath: `inset(0 ${(1 - wipe) * 100}% 0 0)`, ...plate(usePlate(0.7)), borderRadius: 80, padding: "18px 44px 18px 18px" }}>
-          <div style={{ ...ic, width: 110, height: 110, borderRadius: "50%", background: withAlpha(t.accent, 0.18), border: `3px solid ${t.accent}`, display: "flex", alignItems: "center", justifyContent: "center", flex: "none" }}>
-            <Icon code={icon} size={70} />
-          </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 28, clipPath: `inset(0 ${(1 - wipe) * 100}% 0 0)`, ...plate(usePlate(0.7)), borderRadius: 80, padding: icon ? "18px 44px 18px 18px" : "18px 44px" }}>
+          {icon && (
+            <div style={{ ...ic, width: 110, height: 110, borderRadius: "50%", background: withAlpha(t.accent, 0.18), border: `3px solid ${t.accent}`, display: "flex", alignItems: "center", justifyContent: "center", flex: "none" }}>
+              <Icon code={icon} size={70} />
+            </div>
+          )}
           <WordReveal phrase={phrase} emphasis={emphasis} style={{ fontFamily: t.font, fontWeight: 800, fontSize: 52, lineHeight: 1.12, color: t.text, maxWidth: 900 }} />
         </div>
       </div>
