@@ -401,7 +401,7 @@ const WHEELED_THING = String.raw`(?:(?<!\b(?:golf|go|horse|horse-drawn|ox|donkey
 const SWUNG_THING = String.raw`(?:(?<!\b(?:automatic|revolving|elevator|lift|garage|train|subway|bus)\s)(?:doors?|gates?)|drawers?)`;
 /** Words saying a wheeled thing is on its way — said AFTER it ("a cart being pushed", "…, rolling"). */
 const ON_ITS_WAY = new RegExp(
-  String.raw`\b(?:roll(?:s|ing)?(?![\s-](?:pins?|hills?|fields?|countryside|meadows?)\b)|rolled(?![\s-]up\b)|pushed|pulled|wheeled|dragged|towed|hauled|carried|ridden|pedall?ed|trundl(?:es|ing|ed)|glid(?:es|ing|ed)|coast(?:s|ing)|careen(?:s|ing|ed)|mov(?:es|ing)|on the move|in motion|underway|making its way|working its way|on its way|(?:head(?:s|ing)|go(?:es|ing)|com(?:es|ing)|travell?(?:s|ing)|rac(?:es|ing)|speed(?:s|ing)|zoom(?:s|ing)|whizz(?:es|ing)|cruis(?:es|ing)|rattl(?:es|ing)|clatter(?:s|ing))\s+(?:down|up|along|toward|towards|across|through|past|by|round|around|into|out|back|over|off|away|forward|in))\b`,
+  String.raw`\b(?:roll(?:s|ing)?(?![\s-](?:pins?|hills?|fields?|countryside|meadows?)\b)|rolled(?![\s-]up\b)|pushed|pulled|wheeled|dragged|towed|hauled|carried|ridden|pedall?ed|trundl(?:es|ing|ed)|glid(?:es|ing|ed)|coast(?:s|ing)|careen(?:s|ing|ed)|mov(?:es|ing)(?![\s-](?:box(?:es)?|vans?|trucks?|day|parts?|blankets?)\b)|on the move|in motion|underway|making its way|working its way|on its way|(?:head(?:s|ing)|go(?:es|ing)|com(?:es|ing)|travell?(?:s|ing)|rac(?:es|ing)|speed(?:s|ing)|zoom(?:s|ing)|whizz(?:es|ing)|cruis(?:es|ing)|rattl(?:es|ing)|clatter(?:s|ing))\s+(?:down|up|along|toward|towards|across|through|past|by|round|around|into|out|back|over|off|away|forward|in))\b`,
   "gi"
 );
 /**
@@ -419,13 +419,35 @@ const MOVING_IT = new RegExp(
 );
 /**
  * What really moves on its own — an engine, an animal, water, fire, smoke, steam, weather. Named
- * between the pushed thing and the motion words, it is what those words are about ("a shopping cart
- * by the stream, water moving over the stones"); named as the agent ("pulled by a horse") or the
- * mover ("a tractor pulling a wagon"), it is the one moving.
+ * right before the motion words, it is what those words are about ("a shopping cart by the stream,
+ * water moving over the stones"); named as the agent ("pulled by a horse", "towed behind a tractor")
+ * or the mover ("a tractor pulling a wagon"), it is the one moving. Named as WHERE the thing is ("in
+ * an airplane cabin", "the aisle of a plane", "on the train platform") it moves nothing — and a
+ * pushed thing is most often drawn inside one: job 417's cart panel says "in an airline cabin", and
+ * the same panel worded "airplane cabin" read as the plane moving and escaped.
  */
 const SELF_MOVER = String.raw`\b(?:traffic|cars?|trucks?|lorr(?:y|ies)|bus(?:es)?|vans?|tractors?|trains?|trams?|(?:air|aero)?planes?|airliners?|jets?|helicopters?|boats?|ships?|ferr(?:y|ies)|motorcycles?|motorbikes?|water|waves?|tides?|rivers?|streams?|creeks?|current|rain|raindrops|snow(?:flakes)?|sleet|hail|wind|breeze|gusts?|smoke|steam|fog|mist|clouds?|flames?|fire|sparks?|embers?|leaves|grass|branches|birds?|dogs?|cats?|horses?|ponies|donkeys?|oxen|cows?|cattle|sheep|lambs?|goats?|pigs?|chickens?|hens?|ducks?|geese|deer|fish|squirrels?|bees?|butterfl(?:y|ies)|animals?)\b`;
-const NAMES_SELF_MOVER = new RegExp(SELF_MOVER, "i");
-const BY_A_SELF_MOVER = new RegExp(String.raw`^\W*by\s+(?:[\w-]+\s+){0,3}?${SELF_MOVER}`, "i");
+const SELF_MOVER_G = new RegExp(SELF_MOVER, "gi");
+const BY_A_SELF_MOVER = new RegExp(String.raw`^\W*(?:by|behind)\s+(?:[\w-]+\s+){0,3}?${SELF_MOVER}`, "i");
+/** Words naming a place the self-mover is — "in an …", "of the …", "aboard a …", "on the …". */
+const AS_A_PLACE =
+  /\b(?:in|inside|on|onto|aboard|of|within|into|at|across|along|through|under|beneath|below|above|over|beside|near|outside|around|off)\s+(?:(?:a|an|the|its|their|his|her|our|my|your|this|that)\s+)?(?:[\w-]+\s+){0,2}$/i;
+/** All that may stand between a mover and its own motion words: a comma, or up to three words. */
+const RIGHT_BEFORE = /^\s*,?\s*(?:[\w'-]+\s+){0,3}$/;
+
+/**
+ * `before` (the words leading up to a motion word) names a thing that really moves on its own as
+ * the one doing it: not as a place ("in an airplane cabin, …, rolling"), and close enough to be
+ * the motion's subject ("water moving", "cars on the road speeding past", "a tractor pulling") —
+ * "rain on the glass, rolling slowly forward" is still the wheelchair rolling. Pure.
+ */
+function selfMoverDoes(before: string): boolean {
+  for (const m of Array.from(before.matchAll(SELF_MOVER_G))) {
+    if (AS_A_PLACE.test(before.slice(0, m.index))) continue;
+    if (RIGHT_BEFORE.test(before.slice(m.index! + m[0].length))) return true;
+  }
+  return false;
+}
 /** Something powered that carries the pushed thing along — the carrier is what moves. */
 const CARRIED_ALONG =
   /\b(?:conveyors?|carousels?|escalators?|travelators?|moving (?:walkways?|sidewalks?|belts?)|baggage claim|(?:baggage|luggage) belts?)\b/i;
@@ -434,13 +456,14 @@ const SWUNG_THING_G = new RegExp(String.raw`\b${SWUNG_THING}\b`, "gi");
 
 /**
  * The first of `motion`'s words in `after` that are about the thing just named: never an adjective
- * of something else ("a rolled towel", "the moving van"), never past a thing that really moves on
- * its own, and never a move made BY one ("pulled by a horse"). Null when there is none. Pure.
+ * of something else ("a rolled towel", "the moving van"), never the move of a thing that really
+ * moves on its own named right before it (`selfMoverDoes`), and never a move made BY one ("pulled
+ * by a horse"). Null when there is none. Pure.
  */
 function itsOwnMove(after: string, motion: RegExp): RegExpMatchArray | null {
   for (const move of Array.from(after.matchAll(motion))) {
     const before = after.slice(0, move.index!);
-    if (NAMES_SELF_MOVER.test(before)) return null;
+    if (selfMoverDoes(before)) return null;
     if (/\b(?:a|an|the)\s+$/i.test(before)) continue;
     if (BY_A_SELF_MOVER.test(after.slice(move.index! + move[0].length))) return null;
     return move;
@@ -467,7 +490,7 @@ export function pushedThingMoves(show: string | undefined): boolean {
   for (const sentence of (show ?? "").split(/(?<=[.!?])\s+/)) {
     if (CARRIED_ALONG.test(sentence)) continue;
     const doer = MOVING_IT.exec(sentence);
-    if (doer && !NAMES_SELF_MOVER.test(sentence.slice(0, doer.index))) return true;
+    if (doer && !selfMoverDoes(sentence.slice(0, doer.index))) return true;
     for (const [things, motion] of [
       [WHEELED_THING_G, ON_ITS_WAY],
       [SWUNG_THING_G, SWINGING],

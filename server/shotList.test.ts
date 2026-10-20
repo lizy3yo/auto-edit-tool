@@ -1146,8 +1146,31 @@ describe("a thing someone pushes never moves by itself (job 417, 2026-10-19)", (
       // Stored storyboards (jobs 12, 242): a door with no swing in its words.
       "A closed wooden door to a spare room, a rolled towel wedged tightly underneath its base, resting on worn floorboards.",
       "A close view of pine wood at a door frame showing a split where the factory strike plate was pulled away from the frame",
+      // What really moves is named as the mover, right before the motion words or as its agent.
+      "a wagon pulled behind a tractor across the field",
+      "a wagon behind a tractor, moving across the field",
+      "a shopping cart in the lot, cars on the road speeding past",
+      "a horse in the field pulling a cart",
+      // "moving" naming the boxes, not saying the dolly moves.
+      "a dolly stacked with moving boxes in the hallway",
     ])
       expect(pushedThingMoves(show), show).toBe(false);
+  });
+
+  it("a plane, a train or a ferry the thing is IN is a place, not what moves it", async () => {
+    // Job 417's panel says "in an airline cabin"; worded "airplane cabin" the plane read as the
+    // mover and the cart escaped — on a channel whose carts are always inside a plane.
+    const { pushedThingMoves } = await import("./shotList");
+    for (const show of [
+      PANEL_28.replace("airline cabin", "airplane cabin"),
+      "a beverage cart in the aisle of a plane, rolling toward the galley",
+      "a beverage cart midway down the aisle of the airliner, rolling toward the rear",
+      "a luggage trolley on the train platform, rolling along",
+      "a stroller on the ferry deck rolling toward the rail",
+      "a hospital wheelchair in a corridor by the window, rain on the glass, rolling slowly forward",
+      "a flight attendant aboard the plane pushing the beverage cart down the aisle",
+    ])
+      expect(pushedThingMoves(show), show).toBe(true);
   });
 
   it("is never a video, and the judge's yes on it is overruled — a plane and steam keep theirs", async () => {

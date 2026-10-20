@@ -9776,4 +9776,12 @@ describe("round 15: a cart someone pushes never rolls by itself (job 417 scenes 
     expect(plane.stillImage).toBe(false);
     expect(split.splitMotion).toBeUndefined();
   });
+
+  it("417 #28 worded 'in an airplane cabin': the plane it is in moves nothing, so the cart panel stays still", async () => {
+    // The same panel with one word changed — the backstop first read "airplane" as what was moving.
+    const { applySelfMoving } = await import("./shotList");
+    const scenes = [panel(1, PANEL_28.replace("airline cabin", "airplane cabin"))];
+    applySelfMoving(scenes, [0], [0]);
+    expect(scenes[0].splitSelfMoving).toBe(false);
+  });
 });
