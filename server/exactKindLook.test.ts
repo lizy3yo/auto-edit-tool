@@ -182,12 +182,13 @@ describe("a key thing's look cut for the picture", () => {
         "a plain beige passenger seat and dashboard, seen from the side, quiet and empty"
       )
     ).toBe("a plain beige passenger seat and dashboard, quiet and empty");
-    // Job 395: a place listing what it HAS is the thing itself.
+    // Job 395: a place listing what it HAS is the thing itself — and how it is lit is no look of it
+    // (round 14, `lookWithoutLight`: "softly lit" went with the light).
     expect(
       pictureLook(
         "bright indoor store with wide aisles, pale flooring, and tall open shelves, softly lit"
       )
-    ).toBe("pale flooring, and tall open shelves, softly lit");
+    ).toBe("pale flooring, and tall open shelves");
     // A colour is the thing's own look, and so is a clause too long to be one item of a list.
     expect(
       pictureLook(

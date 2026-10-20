@@ -80,8 +80,10 @@ import {
   sameThingMove,
   SCREEN_ITEM_VIEW,
   SET_ITEM_VIEW,
+  sheetWithoutLight,
   smallSubject,
 } from "./pictureMemory";
+import { holdLineSeasons, seasonHourClause } from "./lineSeason";
 import { safeParseJSON, stripMarkdownFences } from "./jsonRepair";
 import { checkFlags, recordPictureCheck } from "./pictureCheckLog";
 import {
@@ -8085,11 +8087,13 @@ export const MEMORY_SETTING_CLAUSE =
  * another spot — and, when the host is in the shot, that the last reference is the host. When one
  * of them is the picture shown right before it, about something else, it is told that picture lends
  * only the thing's look (`rightBeforeClause`). Every one is told the references lend only the look,
- * never their setting (`MEMORY_SETTING_CLAUSE`).
+ * never their setting (`MEMORY_SETTING_CLAUSE`) — and, when its line sets it in a warm season or at an
+ * hour, which one, in so many words (`seasonHourClause`, job 411 scene 20: the song that "belongs to
+ * spring and summer" drawn from two snowy robin pictures came back in the snow).
  */
 export function memoryClause(scene: StoryboardScene): string {
   const clause = memoryReferenceClause(scene);
-  return clause ? `${clause}${rightBeforeClause(scene)}${MEMORY_SETTING_CLAUSE}` : "";
+  return clause ? `${clause}${rightBeforeClause(scene)}${seasonHourClause(scene)}${MEMORY_SETTING_CLAUSE}` : "";
 }
 
 /** Names in a sentence: "a", "a and b", "a, b and c". */
@@ -12837,7 +12841,9 @@ async function cutShotsOnWords(
       params.recurringPeople = parseRecurringPeople(sheet, { hostName: params.hostName }).filter(
         p => personKey(p.name) !== viewerKey
       );
-      params.continuitySheet = withoutPersonLines(sheet);
+      // A look carries no light, weather or hour (`sheetWithoutLight`, job 412's "wild landscape: an
+      // open dawn-lit wilderness with low golden light"): those are each picture's own words'.
+      params.continuitySheet = sheetWithoutLight(withoutPersonLines(sheet));
       log(
         params.continuitySheet
           ? `props list: ${params.continuitySheet.split("\n").length} recurring thing(s)` +
@@ -12901,7 +12907,7 @@ async function cutShotsOnWords(
       { log }
     );
     const plans = await planShotList(scenes, {
-      sheet: params.continuitySheet || undefined,
+      sheet: sheetWithoutLight(params.continuitySheet) || undefined,
       hostName: params.hostName,
       hostLook: params.hostLook,
       people: params.recurringPeople,
@@ -12973,7 +12979,7 @@ async function cutShotsOnWords(
       if (!ids.size) break;
       scenes.forEach(s => (s.index = ownIndex.get(s)!));
       const again = await planShotList(scenes, {
-        sheet: params.continuitySheet || undefined,
+        sheet: sheetWithoutLight(params.continuitySheet) || undefined,
         hostName: params.hostName,
         hostLook: params.hostLook,
         people: params.recurringPeople,
@@ -17000,13 +17006,17 @@ export async function enhanceBrollPrompts(
   // The whole-video style bible (deriveVisualDirection). Phrased exactly like subjectLine above,
   // and for the same reason: the enhancer's SCRIPT ALIGNMENT rule ("do NOT introduce ...
   // decorative elements not in the narration") is what a shared-world hint would otherwise fight.
-  // It settles what the narration leaves open; it never licenses a new object.
+  // It settles what the narration leaves open; it never licenses a new object — and never a season
+  // or hour the narration or MUST SHOW already names: job 411 scene 20's line about a song that
+  // "belongs to spring and summer" was settled from a home base "in late fall and early winter" and
+  // drawn over "bare trees and patches of brown lawn".
   // Empty when no bible was derived ⇒ the user message is byte-identical to pre-feature.
   const bible = params.visualStyleBible?.trim();
   const directionLine = bible
     ? `Channel visual direction (the video's home base and the places it travels to — for ` +
       `DISAMBIGUATION only): ${bible}. Use it only to settle a detail the narration leaves ` +
-      `open (which place, which season, which of these materials). If the narration or original ` +
+      `open (which place, which season, which of these materials) — a season or time of day the ` +
+      `narration or MUST SHOW names is never changed by it. If the narration or original ` +
       `prompt names or implies a place other than the home base (where a thing is used, sold, ` +
       `or comes from), set the shot IN that place — never as a picture, poster, or sample of it ` +
       `inside the workshop; do NOT introduce any object the narration doesn't state, and do NOT ` +
@@ -17024,7 +17034,10 @@ export async function enhanceBrollPrompts(
   // MEMORY between shots: the props list (how every recurring thing looks) and the three cutaways
   // just before this one, so the same panel is the same panel in every shot and the story moves
   // on instead of starting over. Each scene used to be rewritten alone, seeing only its own line.
-  const sheet = params.continuitySheet?.trim();
+  // Without the light, weather or hour a look was written in (`sheetWithoutLight`): "draw anything on
+  // it exactly like this" drew job 412's wilderness in "golden low light" every time, and job 411's
+  // backyard "late fall to winter light" under a line about spring. A list kept from before is cut here.
+  const sheet = sheetWithoutLight(params.continuitySheet?.trim());
   const propsLine = sheet
     ? `Props list (how recurring things look — draw anything on it exactly like this):\n${sheet}\n`
     : "";
@@ -17991,7 +18004,7 @@ async function runUnifiedPipeline(
   // through is split there, and the film's ranges are re-cut on the same words.
   if (words && words.length > 0 && !(await isMockMode())) {
     const fit = await fitPicturesToLines(scenes, {
-      sheet: params.continuitySheet,
+      sheet: sheetWithoutLight(params.continuitySheet) || undefined,
       keyThings: params.keyThings,
       subject: params.videoSubject,
       maxAt: pictureLimitFor(scenes, masterDurationSec),
@@ -18039,6 +18052,11 @@ async function runUnifiedPipeline(
           `${named.pictures} picture(s) updated, ${named.parts} close-up(s) of one part`
       );
   }
+  // A SEASON OR AN HOUR THE LINE NAMES IS THE PICTURE'S (`holdLineSeasons`, job 411 scene 20: "belongs
+  // to spring and summer" lost its season and was drawn in the home base's winter): after every writer
+  // of descriptions, before the prompt writer, a picture whose own words name none gets its line's.
+  const held = holdLineSeasons(scenes, params.keyThings);
+  if (held > 0) console.log(`[Longform ${jobId}] seasons and hours: ${held} picture(s) given the season or hour their line names`);
   // A LIST OF WHAT SOMEONE HOLDS KEEPS THE ONE HOLDING IT (`keepListHolders`, job 410 scene 6: the
   // third thing she was holding was drawn on an empty seat), after every writer of descriptions and
   // before `markHostBroll`, which keeps a person only while the words show one.
@@ -18524,6 +18542,8 @@ async function runUnifiedPipeline(
     )
     .map(s => s.index);
   if (demotedLate.length > 0) {
+    // A host beat turned picture holds its line's season and hour too (`holdLineSeasons`).
+    holdLineSeasons(scenes.filter(s => demotedLate.includes(s.index)), params.keyThings);
     const reEnhance = await enhanceBrollPrompts(scenes, params, demotedLate);
     if (reEnhance.failedScenes.length) {
       appendJobWarning(jobId, enhanceWarningFor(reEnhance));
@@ -18588,6 +18608,7 @@ async function runUnifiedPipeline(
     .filter(s => hostsBeforeGate.has(s) && !s.hostPresent)
     .map(s => s.index);
   if (gateDemoted.length) {
+    holdLineSeasons(scenes.filter(s => gateDemoted.includes(s.index)), params.keyThings);
     const reEnhance = await enhanceBrollPrompts(scenes, params, gateDemoted);
     if (reEnhance.failedScenes.length) appendJobWarning(jobId, enhanceWarningFor(reEnhance));
     for (const s of scenes) {

@@ -38,6 +38,7 @@ import {
   sexOfLook,
 } from "./hostLook";
 import { hostNameRanges, namesHostBefore } from "./hostIntro";
+import { SEASON_HOUR_RULE } from "./lineSeason";
 import {
   followedPeople,
   hostOwnWords,
@@ -1695,6 +1696,10 @@ export const SHOT_LIST_SYSTEM =
   "shots of a spoken list and a shot of a bare word too (\"the baker\" in a passage about a medieval " +
   "town = a medieval baker in a linen tunic at a brick oven, never a baker of today). A line inside " +
   "it about today is today.\n" +
+  // Job 411 scene 20: "that bright song at first light … belongs to spring and summer" was planned as
+  // "a robin singing on a branch at first light in the backyard" — the season gone, so the picture was
+  // drawn in the home base's winter, the song in the season the next line says it is quiet.
+  `1i. ${SEASON_HOUR_RULE}\n` +
   "2. CHANGE THE PICTURE ONLY WHEN THE CONTEXT CHANGES. A new shot starts only where the words move " +
   "on to a DIFFERENT thing, place or action. While the words stay on the same thing — even across " +
   'several sentences — it is ONE shot: "a pile of old crates the neighbour set out by the curb" ' +
@@ -2058,6 +2063,12 @@ export const CONTINUITY_SYSTEM =
   "materials, the recurring places — and exactly how each looks, so a picture generator draws " +
   "it the same way in every shot. One line each: `name: look` (material, colour, size, finish, " +
   "where it usually sits) — always tidy: never describe anything as cluttered, messy or crowded. " +
+  // Job 412: "wild landscape: an open dawn-lit wilderness with low golden light" put golden light in
+  // every picture of it, and the picture check called each one staged.
+  "A look says what the thing IS, never the light, weather, season or hour it is seen in (no " +
+  "\"dawn-lit\", \"golden light\", \"at night\", \"in winter\", \"under fresh snow\"): those change from " +
+  "picture to picture and each picture's own words say them — only a line that IS the weather (snow, " +
+  "fog) describes it. " +
   "The first line is the HOME setting (the workshop, kitchen, sewing room) " +
   "the video returns to. The SECOND line is the MAIN thing — the one physical thing the whole video " +
   "is about (what is made, used, sold or shown most) — written `MAIN name: look`. " +
@@ -2951,8 +2962,10 @@ A picture of the right thing is still WRONG when it leaves out what the line mak
 WHO is doing WHAT ("my sister watched the whole thing from her porch" over an empty porch — the
 picture is the sister watching from the porch), the STATE the line describes (a gate left hanging
 open, a jar with its lid off, a shirt soaked through, a tent half put up, a coat zipped to the
-chin), or a COUNT the line makes the point of ("one bowl for every guest, plus a spare" over a
-single bowl). Rewrite it with the same thing, and that in it. Never for: a comparison that only says what
+chin), the SEASON or HOUR the line sets it in ("the roses bloom in early summer" over bare frozen beds,
+"at three in the morning" in daylight), or a COUNT the line makes the point of ("one bowl for every guest,
+plus a spare" over a single bowl). Rewrite it with the same thing, and that in it. ${SEASON_HOUR_RULE}
+Never for: a comparison that only says what
 something costs or is like (show the subject); a bare number, price or length of time (show the
 thing it is about); someone the line only sells to, tells, helps or mentions, who does nothing in
 it (show the thing); a warning about a danger (show the safe way, never the danger); something the

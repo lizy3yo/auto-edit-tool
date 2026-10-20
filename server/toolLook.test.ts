@@ -289,9 +289,10 @@ describe("a part is kept when 'where' says how it sits on the thing", () => {
   });
 
   it("a 'where' that says where the thing is still goes, as every stored look did before", () => {
-    // Real stored props-list looks (jobs 337, 300, 395, 274, 375, 370), each cut exactly as before.
+    // Real stored props-list looks (jobs 337, 300, 395, 274, 375, 370), each cut exactly as before —
+    // but for the frost, which is the weather and goes with it since round 14 (`lookWithoutLight`).
     expect(pictureLook("paved slope in front of the garage, dusted with light frost, where furniture waits before pickup")).toBe(
-      "paved slope in front of the garage, dusted with light frost"
+      "paved slope in front of the garage"
     );
     expect(pictureLook("warm wood table in a bright kitchen corner, where knitting talk and lessons happen between people")).toBe(
       "warm wood table"
