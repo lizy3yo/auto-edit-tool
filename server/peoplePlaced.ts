@@ -52,17 +52,33 @@ const SEEN_AS = String.raw`(?:\s+(?:clearly|softly|just|partly|dimly|faintly))?(
  * "behind her head" is a body part, never the room.
  */
 const PERSON = String.raw`(?:them|him|you|her(?=\s*(?:[,.;:!?)]|$|\s+(?:and|as|while|with|in|on|at|where|visible|soft|blurred|out)\b))|(?:the|both)\s+(?:[a-z-]+\s+){0,2}?(?:man|men|woman|women|person|people|pair|couple|two|group))`;
+/**
+ * A room part that is WHERE someone or something is, never where the camera looks: the object of a
+ * place word ("a man sitting in the seat behind her", "the cart rolling down the aisle behind her" —
+ * stored film 410 scene 3 — "on the screen in the seat back in front of her", "leaning against the wall
+ * behind him") or of a deed ("a child kicking the seat in front of him"). Its "behind her" says which
+ * seat, which wall: taken out, the person moves into her own seat, the kick lands on his own seat — and
+ * where people are is what `PEOPLE_PLACED_RULE` tells the writers to say. "with" is no such word: "with
+ * pale wall behind them" sets the room behind them for the camera, like a clause of its own ("…,
+ * narrow aisle visible behind them", job 417 scene 2).
+ */
+const DET = String.raw`(?:a|an|the|their|his|her|its|one|that|this|my|your|our)`;
+const ROOM_IS_WHERE =
+  String.raw`(?<!\b(?:in|into|inside|on|onto|at|from|to|toward|towards|down|up|along|across|through|under|over|by|near|past|of|beside|between|against|around|behind)\s+(?:${DET}\s+)?(?:[a-z-]+\s+){0,3}` +
+  String.raw`|\b(?!(?:with|and|or|as|is|was|has|this|its|his)\b)[a-z]+(?:s|ed|ing)\s+${DET}\s+(?:[a-z-]+\s+){0,3})`;
 /** "…, narrow aisle visible behind them" → "…, narrow aisle visible": the room stays, its place goes. */
 const ROOM_BY_PERSON = new RegExp(
-  String.raw`\b(${ROOM_PART})(${SEEN_AS})\s+(?:(?:right|just|directly|far|close)\s+)?(?:behind|ahead\s+of|in\s+front\s+of)\s+${PERSON}(?![a-z-])`,
+  String.raw`${ROOM_IS_WHERE}\b(${ROOM_PART})(${SEEN_AS})\s+(?:(?:right|just|directly|far|close)\s+)?(?:behind|ahead\s+of|in\s+front\s+of)\s+${PERSON}(?![a-z-])`,
   "gi"
 );
 /**
  * A person GOING somewhere: the place ahead is where they go, and the camera behind them is how one
- * walks into a picture — "walking down the hall, the door ahead of her" keeps its words.
+ * walks into a picture — "walking down the hall, the door ahead of her" keeps its words. Never riding
+ * or driving: whoever rides a bus or a train, or drives, SITS, in a seat that faces one way — job 417
+ * scene 2's very case — so "a passenger riding the bus, the aisle behind her" is placed like any seat.
  */
 const GOING =
-  /\b(?:walk(?:s|ing|ed)?|stroll(?:s|ing|ed)?|hik(?:e|es|ing)|run(?:s|ning)|jog(?:s|ging)|wander(?:s|ing|ed)?|march(?:es|ing)?|climb(?:s|ing)?|head(?:s|ing|ed)\s+(?:out|off|down|up|into|in|toward|towards|for|back|home|away|along)|leav(?:es|ing)|driv(?:es|ing)|rid(?:es|ing)|cycl(?:es|ing)|going|mov(?:es|ing)\s+(?:down|along|through|toward|towards|away))\b/i;
+  /\b(?:walk(?:s|ing|ed)?|stroll(?:s|ing|ed)?|hik(?:e|es|ing)|run(?:s|ning)|jog(?:s|ging)|wander(?:s|ing|ed)?|march(?:es|ing)?|climb(?:s|ing)?|head(?:s|ing|ed)\s+(?:out|off|down|up|into|in|toward|towards|for|back|home|away|along)|leav(?:es|ing)|cycl(?:es|ing)|going|mov(?:es|ing)\s+(?:down|along|through|toward|towards|away))\b/i;
 
 /**
  * A seat a person sits in or on. Never a bench, a row or a stool: "the charred wood sits on the clear
@@ -100,12 +116,16 @@ const DEALING =
   /\b(?:talk(?:s|ing|ed)?|speak(?:s|ing)?|spoke|chat(?:s|ting|ted)?|convers\w*|ask(?:s|ing|ed)?|tell(?:s|ing)|told|listen(?:s|ing|ed)?|greet(?:s|ing|ed)?|explain(?:s|ing|ed)?|(?<!-)hand(?:ed|ing)|hands?\s+(?:over|back|across)|handover|pass(?:es|ing|ed)?\b[^,.;]{0,40}\bto\b|giv(?:e|es|ing)|gave|offer(?:s|ing|ed)?|serv(?:e|es|ing|ed)|exchang\w*|show(?:s|ing|ed)?\b[^,.;]{0,40}\bto\b)\b/i;
 /**
  * The camera behind them, said as a view — never light from behind ("lit from behind", "sunlight
- * from behind") nor a place someone comes out from ("stepping out from behind the counter").
+ * from behind") nor a place someone comes out from ("stepping out from behind the counter"). The whole
+ * view goes, with what it was paired with: "seen from behind or from the side" — the old wording of
+ * the writers' own rule — left "a passenger or from the side, speaking to…", and "seen from behind at an
+ * angle" left two people "talking at an angle".
  */
 const FROM_BEHIND =
-  /,?\s*(?:and\s+)?(?:both\s+|each\s+)?(?<!\b(?:light|lit|lighting|glow|sun|sunlight|daylight|lamp|backlit|coming|falling|streaming|shining|out)\s)(?:(?:seen|viewed|shown|shot|photographed|framed)\s+)?from\s+behind\b(?!\s+(?:the|a|an|her|his|their|its|this|that|my|your|one)\b)/gi;
+  /,?\s*(?:(?:and|or)\s+)?(?:both\s+|each\s+)?(?<!\b(?:light|lit|lighting|glow|sun|sunlight|daylight|lamp|backlit|coming|falling|streaming|shining|out)\s)(?:(?:seen|viewed|shown|shot|photographed|framed)\s+)?from\s+behind\b(?!\s+(?:the|a|an|her|his|their|its|this|that|my|your|one)\b)(?:\s*,?\s*(?:or|and)\s+(?:from\s+|to\s+)?(?:the\s+|one\s+)?sides?\b)?(?:,?\s+(?:and\s+)?(?:slightly\s+|a\s+little\s+|partly\s+)?(?:above|at\s+an\s+angle|over\s+(?:the|one|her|his|their)\s+shoulders?|to\s+(?:the|one)\s+side)\b)?/gi;
+/** "…, their backs to the camera", "with her back to the camera", "…, back to the camera". */
 const BACKS_TO_CAMERA =
-  /,?\s*(?:with\s+)?(?:their|his|her|both)\s+backs?\s+(?:turned\s+)?to\s+(?:the\s+)?(?:camera|lens|viewer)\b/gi;
+  /,?\s*(?:with\s+)?(?:(?:their|his|her|both)\s+|(?<=,\s*))backs?\s+(?:turned\s+)?to\s+(?:the\s+)?(?:camera|lens|viewer)\b/gi;
 
 /** The words tidied where a phrase came out: no double spaces or commas, no comma before a stop. */
 function tidy(text: string, was: string): string {
@@ -123,7 +143,9 @@ function tidy(text: string, was: string): string {
 /**
  * A description of a person with the camera's place taken out (`PEOPLE_PLACED_RULE`):
  * - the room placed by the person — "narrow aisle visible behind them" → "narrow aisle visible",
- *   "the aisle behind her" → "the aisle" — unless they are going somewhere;
+ *   "the aisle behind her" → "the aisle" — unless they are going somewhere, or the room part is where
+ *   someone or something IS ("sitting in the seat behind her", "kicking the seat in front of him",
+ *   `ROOM_IS_WHERE`);
  * - for a person sitting, the room placed by the camera with no person named — "an empty seat row
  *   visible ahead in the cabin" → "an empty seat row visible in the cabin", "Dark windows behind" →
  *   "Dark windows";

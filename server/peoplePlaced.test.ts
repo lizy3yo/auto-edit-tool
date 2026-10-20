@@ -36,7 +36,7 @@ describe("the room is never placed behind or ahead of a person who sits or works
     );
   });
 
-  it("402 #23, 399 #2, 410 #3, 415 #11: the same for a seated person in any wording", () => {
+  it("402 #23, 399 #2, 415 #11: the same for a seated person in any wording", () => {
     // 402 #23 sat a passenger sideways across her seat under "aisle and overhead bins visible behind".
     expect(
       withoutRoomPlacement(
@@ -53,14 +53,6 @@ describe("the room is never placed behind or ahead of a person who sits or works
       )
     ).toBe(
       "Two passengers seated side by side in blue fabric airplane seats in the cabin, row fourteen visible, aisle-side positions, both looking forward, aircraft cabin."
-    );
-    expect(
-      withoutRoomPlacement(
-        "an older woman seen from the side sitting alone in an empty row of three blue seats near the front of the cabin, the beverage cart rolling away down the aisle behind her",
-        false
-      )
-    ).toBe(
-      "an older woman seen from the side sitting alone in an empty row of three blue seats near the front of the cabin, the beverage cart rolling away down the aisle"
     );
     expect(
       withoutRoomPlacement(
@@ -92,6 +84,51 @@ describe("the room is never placed behind or ahead of a person who sits or works
     );
     expect(withoutRoomPlacement("two friends chatting at the kitchen counter, their backs to the camera", true)).toBe(
       "two friends chatting at the kitchen counter"
+    );
+    expect(withoutRoomPlacement("a buyer, back to the camera, talking with the seller", true)).toBe(
+      "a buyer, talking with the seller"
+    );
+  });
+
+  it("the whole view goes, never half of it: 'seen from behind or from the side' leaves no 'or from the side'", () => {
+    // The writers' own old wording; taken out by halves it read "a passenger or from the side, speaking…".
+    expect(withoutRoomPlacement("a passenger, seen from behind or from the side, speaking to a flight attendant", true)).toBe(
+      "a passenger, speaking to a flight attendant"
+    );
+    expect(withoutRoomPlacement("a customer seen from behind or the side handing cash to a clerk", true)).toBe(
+      "a customer handing cash to a clerk"
+    );
+    expect(withoutRoomPlacement("two people talking, each seen from behind or from the side", true)).toBe("two people talking");
+    expect(withoutRoomPlacement("a passenger seen from the side or from behind, talking to a flight attendant", true)).toBe(
+      "a passenger seen from the side, talking to a flight attendant"
+    );
+    // …and nothing it was paired with is left to mean something else ("talking at an angle").
+    expect(withoutRoomPlacement("two coworkers talking, seen from behind at an angle", true)).toBe("two coworkers talking");
+    expect(withoutRoomPlacement("two neighbours talking over a fence, viewed from behind and slightly above", true)).toBe(
+      "two neighbours talking over a fence"
+    );
+    expect(withoutRoomPlacement("two people talking, shot from behind over the shoulder", true)).toBe("two people talking");
+  });
+
+  it("a room part that is WHERE someone or something is keeps its place: a seat, a cart, a kick (410 #3)", () => {
+    for (const t of [
+      // Stored film 410 scene 3: the cart is behind her in the aisle — where it is, not where the camera stands.
+      "an older woman seen from the side sitting alone in an empty row of three blue seats near the front of the cabin, the beverage cart rolling away down the aisle behind her",
+      // A second person's seat: taken out, he would sit in hers.
+      "a man sitting in the seat behind her, leaning forward to talk",
+      "a child seated in the row behind her kicking the seat back",
+      // What a deed is done to: taken out, the kick lands on his own seat.
+      "a passenger kicking the seat in front of him",
+      "a passenger watching a movie on the screen in the seat back in front of her",
+      "a woman kneading dough on the counter in front of her",
+      "a woman leaning against the wall behind her, talking on the phone",
+    ])
+      expect(withoutRoomPlacement(t, true), t).toBe(t);
+  });
+
+  it("riding or driving is sitting: the bus aisle behind a passenger goes like any seat's", () => {
+    expect(withoutRoomPlacement("a passenger riding the bus, seated by the window, the aisle behind her", false)).toBe(
+      "a passenger riding the bus, seated by the window, the aisle"
     );
   });
 

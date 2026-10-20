@@ -10526,7 +10526,8 @@ describe("job 418 #2: the log restorer the line names is in the picture the labe
  * ahead", "a passenger seen from behind … speaking to a flight attendant by the counter"), and those
  * words beat the pose clauses. The writers are told so in one wording (`PEOPLE_PLACED_RULE`) and the
  * words are taken out right before the prompt (`personPlacedWords`). Replayed over the stored
- * storyboards of jobs 100-421: 12 of 1,650 pictures of someone whose face the camera keeps out change.
+ * storyboards of jobs 100-421: 11 of 1,650 pictures of someone whose face the camera keeps out change
+ * (film 410 scene 3's cart "rolling down the aisle behind her" is where the cart is, and keeps it).
  */
 describe("round 16: the room is never placed behind or ahead of a seated or working person (jobs 417 #2/#8, 421 #28)", () => {
   const seats417 = () =>
