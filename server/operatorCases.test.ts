@@ -7711,3 +7711,113 @@ describe("the book cover comes up when the host names the book (jobs 411 and 412
     expect(out.find(s => s.coverHero)?.scriptText).toMatch(/^along with what behaviorists/);
   });
 });
+
+describe("a cut at a sentence break beside a spoken number goes in the real pause (job 413 #35 → #36)", () => {
+  // Gary's verification film at 2:59, the job 406 fix in: the voice says "…working people actually
+  // run." — a 0.81 s pause (179.146-179.958) — "Three hundred seventy pages". The transcriber heard
+  // "run." at 180.09-180.61, over "Three hundred", and "370" at 180.71, so the number could not be
+  // moved back past the word before it and the host came in at 180.54, on "seventy". Next to a number
+  // neither neighbour's time is the transcriber's own: the cut goes in the longest real pause the two
+  // words around the break reach.
+  const parse = (s: string) =>
+    s.split(" ").map(tok => {
+      const [, word, start, end] = /^(.*)@([\d.]+)-([\d.]+)$/.exec(tok)!;
+      return { word, start: Number(start), end: Number(end) };
+    });
+  const words = parse(
+    "working@177.785-178.106 people@178.146-178.426 actually@178.666-179.306 run.@180.087-180.607 370@180.707-181.087 pages,@181.127-181.567 101@182.208-182.808 numbered@182.948-183.268 hustles@183.308-183.689 across@183.749-184.069 13@184.249-184.649 chapters,@184.689-185.189"
+  );
+  const silences = [
+    [174.179, 174.503], [178.356, 178.486], [179.146, 179.958], [181.391, 181.858], [183.944, 184.116],
+    [184.815, 184.941], [184.995, 185.631],
+  ].map(([start, end]) => ({ start, end }));
+  const NUMBER = "Three hundred seventy pages, a hundred and one numbered hustles across thirteen chapters.";
+  const cta = (s: StoryboardScene, from: number, to: number) =>
+    Object.assign(s, { cta: true, ctaIndex: 0, narrationStartSec: from, narrationEndSec: to, audioDuration: to - from });
+
+  it("the cut the aligner places from the scene text: the end of the pause, not 'seventy'", () => {
+    const scenes = [pic(1, "working people actually run.", "the book", { coverHero: true }), host(2, NUMBER)];
+    const shifted = (list: { start: number; end: number }[]) =>
+      list.map(x => ({ ...x, start: Math.max(0, x.start - 177.75), end: x.end - 177.75 }));
+    const ranges = assignSceneRanges(scenes, shifted(words) as any, 185.6 - 177.75, shifted(silences), shifted(silences));
+    expect(ranges[0].endSec + 177.75).toBeCloseTo(179.918, 3);
+  });
+
+  it("the cut the gate makes when the cover finishes its sentence: in the same pause", async () => {
+    const { enforcePlanRules } = await import("./planGate");
+    const scenes = [
+      cta(host(1, "Three businesses in, and you can already see the pattern.", { qrCorner: true, hostProtected: true }), 164.06, 170.599),
+      cta(
+        pic(2, "That pattern fills a digital book called The Garage to Profit Bible, put together under this channel’s name from the honest arithmetic", "the book", { coverHero: true, stillImage: true }),
+        170.599,
+        177.75
+      ),
+      cta(host(3, `working people actually run. ${NUMBER}`, { qrCorner: true, hostProtected: true }), 177.75, 185.6),
+      cta(pic(4, "There’s a QR code on your screen — aim your phone’s camera at it, and the page opens on its own.", "a garage bench", { qrHero: true, qrTail: true, stillImage: true }), 185.6, 199),
+    ];
+    const r = enforcePlanRules(scenes, { faceImageUrl: "https://example.com/host.jpg" } as any, { words, silences });
+    const cover = r.scenes.find(s => s.coverHero)!;
+    const back = r.scenes[r.scenes.indexOf(cover) + 1];
+    expect(cover.scriptText).toMatch(/working people actually run\.$/);
+    expect(back.scriptText).toBe(NUMBER);
+    expect(cover.narrationEndSec!).toBeGreaterThanOrEqual(179.146);
+    expect(cover.narrationEndSec!).toBeLessThanOrEqual(179.958);
+    expect(back.narrationStartSec).toBeCloseTo(cover.narrationEndSec!, 5);
+  });
+
+  it("the opening list's 'A loan,' picture comes on its word, after '…costs $10,000.' and its pause", () => {
+    // "A" was heard at 5.47, inside the 0.75 s pause it really ends (5.37-6.12): the picture came up
+    // 0.65 s before the word.
+    const opening = parse(
+      "business@3.433-3.853 costs@3.913-4.273 $10,000.@4.413-5.173 A@5.473-5.633 loan,@6.353-6.753 a@7.013-7.053 lease,@7.113-7.433"
+    );
+    const pauses = [[4.02113, 4.33237], [5.3655, 6.11894], [6.72125, 6.87012]].map(([start, end]) => ({ start, end }));
+    const scenes = [host(1, "business costs ten thousand dollars."), pic(2, "A loan,", "a loan"), pic(3, "a lease,", "a lease")];
+    const ranges = assignSceneRanges(scenes, opening as any, 7.5, pauses, pauses);
+    expect(ranges[1].startSec).toBeCloseTo(6.11894 - 0.04, 3);
+  });
+
+  it("unchanged: a sentence break with no number at it, and a number inside a sentence, keep their cuts", () => {
+    const flat = parse("downside@190.152-190.732 flat.@190.892-191.213 Tonight@191.813-192.133 covers@192.193-192.493 17@192.713-193.214 under@193.334-193.514");
+    const pauses = [[190.6, 190.857], [191.024, 191.736], [193.384, 193.539]].map(([start, end]) => ({ start, end }));
+    const shifted = <T extends { start: number; end: number }>(list: T[]) =>
+      list.map(x => ({ ...x, start: x.start - 190, end: x.end - 190 }));
+    // "…the downside flat. | Tonight covers": the end of the pause, as the ordinary snap puts it.
+    const atBreak = assignSceneRanges(
+      [host(1, "the downside flat."), pic(2, "Tonight covers seventeen under", "x")],
+      shifted(flat) as any,
+      3.6,
+      shifted(pauses),
+      shifted(pauses)
+    );
+    expect(atBreak[0].endSec + 190).toBeCloseTo(191.696, 3);
+    // "Tonight covers | seventeen under": the voice runs straight on — left where the words put it.
+    const inside = assignSceneRanges(
+      [host(1, "the downside flat. Tonight covers"), pic(2, "seventeen under", "x")],
+      shifted(flat) as any,
+      3.6,
+      shifted(pauses),
+      shifted(pauses)
+    );
+    expect(inside[0].endSec + 190).toBeCloseTo(192.713, 3);
+  });
+
+  it("unchanged: a sentence gap split by a breath keeps its cut right before the number (job 409 at 1:40)", () => {
+    // "…all seven of the thieves." — 1.0 s silence, a 0.17 s breath, 0.55 s silence — "Two thousand
+    // years ago". The picture changes at the end of the second pause, as the film shipped it.
+    const heard = parse(
+      "the@98.414-98.515 thieves.@98.575-98.975 2,000@100.895-101.175 years@101.215-101.455 ago,@101.535-101.835"
+    );
+    const pauses = [[98.4144, 98.5567], [98.6814, 98.9481], [98.9947, 99.9863], [100.161, 100.715]].map(
+      ([start, end]) => ({ start: start - 98, end: end - 98 })
+    );
+    const ranges = assignSceneRanges(
+      [pic(1, "the thieves.", "x"), pic(2, "Two thousand years ago,", "y")],
+      heard.map(x => ({ ...x, start: x.start - 98, end: x.end - 98 })) as any,
+      4,
+      pauses,
+      pauses
+    );
+    expect(ranges[0].endSec + 98).toBeCloseTo(100.675, 3);
+  });
+});

@@ -1298,6 +1298,81 @@ describe("the host comes back after the book cover on the whole number, never in
   });
 });
 
+describe("the host comes back after the book cover in the pause, even with the word before dragged past it (job 413)", () => {
+  // Gary's verification film, 2:59 (#35 → #36): the same line as job 406, the round-11 fix in. This
+  // time the transcriber heard "run." at 180.09-180.61 — over "Three hundred", wholly AFTER the
+  // 0.81 s pause it really ends (179.146-179.958) — and "370" at 180.71. The number could not be
+  // moved back past the word before it, the heard gap held no pause, and the two heard words did not
+  // reach the real one: the cut went in the middle of the heard gap, 180.66, and the host came back
+  // on "seventy".
+  /** The film's own words as heard (the graphics step's transcript of job 413). */
+  const HEARD =
+    "That@170.722-170.922 pattern@170.982-171.322 fills@171.362-171.582 a@171.642-171.682 digital@171.742-172.122 book@172.182-172.403 called@172.483-172.723 the@172.743-172.823 Garage@172.863-173.303 to@173.343-173.423 Profit@173.483-173.883 Bible,@173.923-174.284 put@174.564-174.724 together@174.764-175.104 under@175.184-175.344 this@175.384-175.544 channel's@175.604-175.984 name@176.045-176.285 from@176.345-176.485 the@176.505-176.605 honest@176.725-177.045 arithmetic@177.125-177.705 working@177.785-178.106 people@178.146-178.426 actually@178.666-179.306 run.@180.087-180.607 370@180.707-181.087 pages,@181.127-181.567 101@182.208-182.808 numbered@182.948-183.268 hustles@183.308-183.689 across@183.749-184.069 13@184.249-184.649 chapters,@184.689-185.189 each@185.75-185.91 one@186.03-186.13 printed@186.19-186.53 with@186.59-186.71 its@186.77-186.89 real@187.01-187.251 dollar@187.291-187.611 range@187.651-187.991 and@188.111-188.211 a@188.251-188.271 know-your-limit@188.351-189.031 panel@189.071-189.432 that@189.472-189.592 states@189.652-189.952 the@190.012-190.112 downside@190.152-190.732 flat.@190.892-191.213 Tonight@191.813-192.133 covers@192.193-192.493 17@192.713-193.214 under@193.334-193.514 $500.@193.594-194.494 The@194.995-195.095 book@195.135-195.315 runs@195.355-195.575 the@195.615-195.715 same@195.775-196.015 math@196.075-196.335 on@196.415-196.475 the@196.495-196.595 other@196.676-196.836 84.@196.856-196.916";
+  const words = () =>
+    HEARD.split(" ").map(tok => {
+      const [, word, start, end] = /^(.*)@([\d.]+)-([\d.]+)$/.exec(tok)!;
+      return { word, start: Number(start), end: Number(end) };
+    });
+  /** The job's real pauses (`masterSilences`) over the same stretch. */
+  const silences = [
+    [168.878, 169.313], [169.923, 170.639], [172.25, 172.394], [174.179, 174.503], [178.356, 178.486],
+    [179.146, 179.958], [181.391, 181.858], [183.944, 184.116], [184.815, 184.941], [184.995, 185.631],
+    [189.784, 189.935], [190.6, 190.857], [191.024, 191.736], [193.384, 193.539], [194.317, 194.93],
+    [196.984, 197.119], [197.281, 197.997], [199.452, 200.227],
+  ].map(([start, end]) => ({ start, end }));
+  const beat = (index: number, kind: "H" | "B" | "Q" | "P", from: number, to: number, text: string, cta = true) =>
+    ({
+      index,
+      scriptText: text,
+      narration: text,
+      visualPrompt: `picture ${index}`,
+      narrationStartSec: from,
+      narrationEndSec: to,
+      audioDuration: to - from,
+      audioUrl: `https://example.com/${index}.mp3`,
+      hostPresent: kind === "H",
+      stillImage: kind !== "H",
+      coverHero: kind === "B" ? true : undefined,
+      qrHero: kind === "Q" ? true : undefined,
+      qrTail: kind === "Q" ? true : undefined,
+      qrCorner: kind === "H" && cta ? true : undefined,
+      cta: cta ? true : undefined,
+      ctaIndex: cta ? 0 : undefined,
+      hostProtected: kind === "H" && cta ? true : undefined,
+    }) as StoryboardScene;
+  /** Job 413's scenes 34-37, laid out as job 406's were when the gate let the cover finish its sentence. */
+  const block = () => [
+    beat(1, "P", 156.74, 164.06, "The downside is real: some mowers are just done, and you’ll eat a couple of corpses learning to tell the difference.", false),
+    beat(2, "H", 164.06, 170.599, "Three businesses in, and you can already see the pattern: the money lives in the math, not the hype."),
+    beat(3, "B", 170.599, 174.42, "That pattern fills a digital book called The Garage to Profit Bible,"),
+    beat(
+      4,
+      "H",
+      174.42,
+      197.957,
+      "put together under this channel’s name from the honest arithmetic working people actually run. Three hundred seventy pages, a hundred and one numbered hustles across thirteen chapters, each one printed with its real dollar range and a Know Your Limit panel that states the downside flat. Tonight covers seventeen under five hundred dollars; the book runs the same math on the other eighty-four."
+    ),
+    beat(
+      5,
+      "Q",
+      197.957,
+      219.548,
+      "There’s a QR code on your screen — aim your phone’s camera at it, and the page opens on its own. If it’s gone before you look up, the first line of this video’s description lands in the same place."
+    ),
+  ];
+
+  it("the cover finishes 'run.' and the host comes back in the pause, not on 'seventy'", () => {
+    const r = enforcePlanRules(block(), params, { words: words(), silences });
+    const cover = r.scenes.find(s => s.coverHero)!;
+    const host = r.scenes[r.scenes.indexOf(cover) + 1];
+    expect(cover.scriptText).toMatch(/working people actually run\.$/);
+    expect(host.scriptText).toMatch(/^Three hundred seventy pages,/);
+    expect(cover.narrationEndSec!).toBeGreaterThanOrEqual(179.146);
+    expect(cover.narrationEndSec!).toBeLessThanOrEqual(179.958);
+    expect(host.narrationStartSec).toBeCloseTo(cover.narrationEndSec!, 5);
+  });
+});
+
 describe("the film never ends on a host shot under a second (the audit's last open item)", () => {
   // A goodbye on the host under a second goes to the beat before it: a host take becomes one take
   // with it, anything else plays on to the end. (The audit's 21 production films all had it right
