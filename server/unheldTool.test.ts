@@ -28,12 +28,14 @@ import {
   namedFaultClause,
   namedFaultRedraw,
   NO_FIGURES_SUFFIX,
+  SPLIT_PANEL_PERSON_FREE_DIRECTIVE,
   SPLIT_STRIKE_CLAUSE,
   TOOL_AT_WORK_FIX,
   UNHELD_TOOL_CLAUSE,
   unheldToolClause,
 } from "./longformVideo";
 import { STILL_DEFECT_SYSTEM } from "./overlayTextScan";
+import { PANEL_FIT_RULES } from "./shotList";
 
 const HOST =
   "the channel's host, exactly as in their host photo, seated in a chair talking directly to the camera, hands resting quietly in their lap";
@@ -75,12 +77,17 @@ describe("job 418 scene 25: a tool nobody holds is put down", () => {
   });
 
   it("the clause says where a put-down tool goes, and names no tool the picture maker could add", () => {
-    expect(UNHELD_TOOL_CLAUSE).toMatch(/^Nobody holds anything in this picture, so every tool in it is put down the way a person leaves one/);
+    // The tools no hand holds — never "nobody holds anything": a cutaway may show bare hands at the task.
+    expect(UNHELD_TOOL_CLAUSE).toMatch(/^Every tool in this picture that no hand is holding is put down the way a person leaves one/);
+    expect(UNHELD_TOOL_CLAUSE).not.toMatch(/Nobody holds anything/);
     expect(UNHELD_TOOL_CLAUSE).toMatch(/lying on a surface — flat on the work, a bench, a table or the ground beside the work/);
     expect(UNHELD_TOOL_CLAUSE).toMatch(/resting in its own box, rack, jar or holder or across the rim of its own pot/);
     expect(UNHELD_TOOL_CLAUSE).toMatch(/standing in the work only where a real one stays there by itself, driven in or standing in its own cut/);
-    // A tool the description hangs on a wall still hangs there (job 418's own back wall, scenes 7-9).
-    expect(UNHELD_TOOL_CLAUSE).toMatch(/It hangs only where the description hangs it, from something fixed to a wall, beam or rack/);
+    // A tool the description hangs on a wall still hangs there (job 418's own back wall, scenes 7-9), and
+    // one it leans against a wall still leans there (job 162 scene 145's push saw).
+    expect(UNHELD_TOOL_CLAUSE).toMatch(
+      /It hangs or leans only where the description puts it, hanging from something fixed to a wall, beam or rack or leaning against a wall or post that holds it up/
+    );
     expect(UNHELD_TOOL_CLAUSE).toMatch(/never in mid-air or from something attached to nothing/);
     expect(UNHELD_TOOL_CLAUSE).toMatch(/never left standing, balanced or leaning in its working pose at an angle only a hand could hold/);
     expect(UNHELD_TOOL_CLAUSE).not.toMatch(
@@ -91,7 +98,7 @@ describe("job 418 scene 25: a tool nobody holds is put down", () => {
   it("NO_FIGURES_SUFFIX no longer offers a hook to keep a tool up", () => {
     expect(NO_FIGURES_SUFFIX).not.toMatch(/hangs from a hook/);
     expect(NO_FIGURES_SUFFIX).toMatch(
-      /a tool or object with no hand on it rests on a surface or in its own holder, or hangs where the description hangs it/
+      /a tool or object with no hand on it rests on a surface or in its own holder, or hangs or leans where the description puts it/
     );
     expect(NO_FIGURES_SUFFIX).toMatch(/never hovering in the air, hanging from nothing, propped at an angle only a hand could hold/);
     // Clothing still hangs on a hanger or a hook.
@@ -146,6 +153,48 @@ describe("unheldToolClause — every picture with nobody in it whose words name 
     expect(buildStillPrompt(pic(22, "so every board runs from bark toward heart", "A pale rived oak board lying flat"))).not.toContain(
       UNHELD_TOOL_CLAUSE
     );
+    // A tool the words say is NOT there names none.
+    for (const words of [
+      "a bare workbench swept clean, no tools in the frame",
+      "a finished oak shelf on the wall, without a saw or chisel anywhere near it",
+    ])
+      expect(unheldToolClause({}, words), words).toBe("");
+  });
+
+  // The replay over the stored storyboards: a cutaway drawn with no person in it may still show bare
+  // hands at the task (`NO_FIGURES_SUFFIX`), and 402 pictures carrying the clause named a tool IN those
+  // hands. Told "nobody holds anything in this picture", each would have been told against its own words.
+  it("a picture with bare hands at its tool is told only about the tools no hand holds (jobs 351, 407, 414)", () => {
+    for (const words of [
+      "Hands holding a crochet hook with a loop of yarn, pulling the tail to cinch it tight like a drawstring, against a soft-lit kitchen table",
+      "Bare weathered hands at a woodlot workshop holding a froe against a log bolt braced on a tree stump, splitting oak.",
+      "Bare weathered hands on a workbench, fingers gripping both bent handles of a drawknife, pulling it toward the body across a pale tapered wooden board",
+    ]) {
+      const prompt = buildStillPrompt(pic(1, "a line", words));
+      expect(prompt, words).toContain(UNHELD_TOOL_CLAUSE);
+      expect(prompt, words).toContain(NO_FIGURES_SUFFIX);
+      // Nothing in the prompt says the hands it shows hold nothing.
+      expect(prompt, words).not.toMatch(/Nobody holds anything/i);
+    }
+    expect(UNHELD_TOOL_CLAUSE).toMatch(/that no hand is holding/);
+  });
+
+  it("a tool its description leans against a wall stays leaning there (job 162 scene 145), never in its working pose", () => {
+    const saw =
+      "A Western-style push saw with a metal blade and wooden handle leans upright against the bare concrete wall of a garage workshop.";
+    expect(unheldToolClause({}, saw)).toBe(` ${UNHELD_TOOL_CLAUSE}`);
+    expect(UNHELD_TOOL_CLAUSE).toMatch(/leaning against a wall or post that holds it up/);
+    // Its working pose is still never kept with no hand on it.
+    expect(UNHELD_TOOL_CLAUSE).toMatch(/never left standing, balanced or leaning in its working pose/);
+    expect(NO_FIGURES_SUFFIX).toMatch(/or hangs or leans where the description puts it/);
+  });
+
+  it("the panel writer and the panel pass keep a tool in its own jar, rack or holder, as the render clause does", () => {
+    for (const rules of [SPLIT_PANEL_PERSON_FREE_DIRECTIVE, PANEL_FIT_RULES]) {
+      expect(rules).toMatch(/lies flat on the work, a bench or the ground beside\s+it, sits in its own jar, rack or holder, or\s+stays standing in the work/);
+      expect(rules).not.toMatch(/\b(?:brush(?:es)?|knife|knives|froe|saw)\s+(?:in|on)\s+(?:a|its)\s+(?:jar|rack|block)\b/i);
+    }
+    expect(UNHELD_TOOL_CLAUSE).toMatch(/resting in its own box, rack, jar or holder/);
   });
 });
 
@@ -155,7 +204,9 @@ describe("the check names a tool hung or propped with no hand on it, and the red
     expect(q2).toMatch(/a tool with NO hand on it that hangs in mid-air or from a hook, wire or string fixed to\s+nothing/);
     expect(q2).toMatch(/stands, balances or leans in its working pose at an angle it could not keep by\s+itself/);
     expect(q2).toMatch(/a handle sticking up or out over nothing from a blade that is not deep in the work/);
-    expect(q2).toMatch(/hanging on a wall,\s+peg or rack, or left standing in the work where a real one stays by itself/);
+    expect(q2).toMatch(
+      /hanging on a wall,\s+peg or rack, leaning against a wall that holds it up, or left standing in the work where a real\s+one stays by itself/
+    );
     expect(q2).toMatch(/When unsure, answer false/);
     // Its words carry the fault to the redraw.
     expect(STILL_DEFECT_SYSTEM).toMatch(/"chisel hanging from a hook fixed to\s+nothing"/);
@@ -199,6 +250,12 @@ describe("the check names a tool hung or propped with no hand on it, and the red
     expect(faultRedrawFor({}, { broken: true, what: "froe blade lying flat on top of the bolt, no club" }, first, none, true, false)).toBeUndefined();
     // A line with no tool keeps the rule for lines; no tool, a slice of food or a finger too many, none.
     expect(namedFaultClause("power cord running into the tap", "a kettle on the counter", false)).toContain(CONNECTING_LINES_CLAUSE);
+    // A tool hung up by its own lead is put down AND keeps the rule for lines: before the rule for a hung
+    // tool, this fault was told how leads run, and it still is.
+    const corded = namedFaultClause("drill hanging off the bench edge by its power cord", "a cordless drill on a workbench", false);
+    expect(corded).toBe(
+      `${NAMED_FAULT_START} drill hanging off the bench edge by its power cord. This time draw it the way it really is. ${UNHELD_TOOL_CLAUSE} ${CONNECTING_LINES_CLAUSE}`
+    );
     for (const what of ["cutting board floating above the table", "lemon wedges floating above the plate", "six fingers on the hanging saw"])
       expect(namedFaultClause(what, "", false), what).toBeUndefined();
   });

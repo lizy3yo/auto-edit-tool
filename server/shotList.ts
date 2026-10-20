@@ -4437,7 +4437,8 @@ them. Judge every PANEL by all the rules above, and also:
   the work is at the stage the line says, part-done while it is being done.
   A panel of the result alone, the named tool left out, is WRONG.
 - A TOOL IN A PANEL HAS NOBODY HOLDING IT, so it lies flat on the work, a bench or the ground beside
-  it, or stays standing in the work only where a real one stays by itself (an axe or a wedge driven
+  it, sits in its own jar, rack or holder, or
+  stays standing in the work only where a real one stays by itself (an axe or a wedge driven
   into wood, a saw in its own cut, a spade pushed into soil). A panel that leaves a tool in its
   working pose with no hand on it ("its handle angled up", "poised over the work", "set at its
   working angle"), in mid-air, or hanging from something the line never hangs it on, is WRONG:

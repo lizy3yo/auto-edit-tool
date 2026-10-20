@@ -114,13 +114,16 @@ export const STILL_DEFECT_SYSTEM =
   // into its top end with the handle angled, resting unattended". Named in words the redraw can read
   // (`namedFaultClause`, `UNHELD_POSE`), so it is told how a tool nobody holds is put down. A tool on a
   // wall's peg or rack, in its holder, or left in the work where it really stays is right — job 418's
-  // own back wall "hung an axe, a froe, and a drawknife".
+  // own back wall "hung an axe, a froe, and a drawknife" — and so is one leaning against a wall the way
+  // a person stands it there (job 162 scene 145's push saw "leans upright against the bare concrete
+  // wall"): it keeps that by itself, so "leans" alone is never the fault.
   "- a tool with NO hand on it that hangs in mid-air or from a hook, wire or string fixed to " +
   "nothing, or stands, balances or leans in its working pose at an angle it could not keep by " +
   "itself (a handle sticking up or out over nothing from a blade that is not deep in the work); a " +
   "tool lying on a surface or across the rim of its pot, sitting in its holder, hanging on a wall, " +
-  "peg or rack, or left standing in the work where a real one stays by itself (an axe or a wedge " +
-  "driven into wood, a saw in its own cut, a spade in the soil) is right\n" +
+  "peg or rack, leaning against a wall that holds it up, or left standing in the work where a real " +
+  "one stays by itself (an axe or a wedge driven into wood, a saw in its own cut, a spade in the " +
+  "soil) is right\n" +
   // Job 406 scene 9 passed with a chisel pushed straight at the other hand flat on the board. A
   // kitchen knife is not named: it cuts down beside the guide hand, and one being sharpened has
   // fingers on its flat — the line above already covers fingers right beside an edge.
