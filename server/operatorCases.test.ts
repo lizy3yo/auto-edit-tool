@@ -9921,3 +9921,76 @@ describe("round 15: the natural pose of what a person does; the camera, never th
     expect(namedFaultRedraw(prompt, what, `${s.showSubject} ${s.visualPrompt}`, true)).toContain(NATURAL_POSE_FIX);
   });
 });
+
+// ─── Round 15: a list of steps told of another time carries it (job 418 #19) ───────────────────
+
+describe("job 418 #19: a list of STEPS told of another time is done with that time's tools", () => {
+  // Sawdust Sam's practice film on the round-14 code (78.06-80.36 s): "They cut the log into short
+  // bolts," inside a passage about how the oldest mountain cabins were roofed by hand, drew the host
+  // with a modern orange chainsaw. A list of things in such a passage carries its time and place
+  // (round 13, job 409); a list of STEPS lost it in the finder, so the step's prompt named no time and
+  // no tool. The lines are the film's own; the setting is what the finder answers for that passage.
+  const ROOF = "Number one is the roof, split by hand from white oak or chestnut with a froe, and the direction of the split mattered most.";
+  const RIVING =
+    "They cut the log into short bolts, split each bolt into pie wedges, and rived the boards along those same lines, so every board runs from bark toward heart and stays flat in the weather.";
+  const SHAKES = "They went up rough as shakes, or got shaved thin at one end with a drawknife to make shingles.";
+  const STEPS = ["cut the log into short bolts", "split each bolt into pie wedges", "rived the boards along those same lines"];
+  const WHEN = "the southern Appalachian mountains in the 1800s";
+  const LOOK =
+    "A lean man in his sixties with fair skin, short grey hair, and a trimmed grey beard, wearing an olive button-up shirt over a dark grey t-shirt";
+  const sc = (index: number, scriptText: string, showSubject: string, over: Partial<StoryboardScene> = {}) =>
+    ({ index, narration: scriptText, scriptText, showSubject, visualPrompt: showSubject, ...over }) as StoryboardScene;
+  // Scenes 17-22 as stored after the first cut.
+  const board418 = () => [
+    sc(17, "What faded was the everyday habit, so we will go from that cabin roof down to its fire.", "the host", { hostPresent: true }),
+    sc(18, `${ROOF} They`, "Hands striking the back of an L-shaped froe blade, set across the end of a white oak bolt, with a wooden club, the split opening straight down the grain", {
+      humanPresent: true,
+    }),
+    sc(19, "cut the log into short bolts,", "a white oak log being cut into short bolts in the woodlot", {
+      visualPrompt: "A white oak log being cut into short bolts in a wooded hillside clearing with felled trunks and stumps nearby.",
+      humanPresent: true,
+      listCut: true,
+      listKind: "steps",
+    }),
+    sc(20, "split each bolt into pie wedges,", "Hands driving a froe into the end of a round oak bolt resting on a stump", { humanPresent: true, listCut: true, listKind: "steps" }),
+    sc(21, "and rived the boards along those same lines,", "Hands levering the right-angle handle of a froe to pry a thin pale board free along the grain of an oak wedge", {
+      humanPresent: true,
+      listCut: true,
+      listKind: "steps",
+    }),
+    sc(22, "so every board runs from bark toward heart and stays flat in the weather.", "A pale rived oak board lying flat, straight grain running its full length"),
+  ];
+
+  it("the finder's setting reaches every step, and the chainsaw step's prompt names the time, its tools and ways", async () => {
+    const found = await findSpokenLists(`${ROOF} ${RIVING} ${SHAKES}`, {
+      ask: async () => JSON.stringify({ lists: [{ sentence: 1, kind: "steps", items: STEPS, setting: WHEN }] }),
+    });
+    expect(found.lists).toEqual([{ sentence: 1, kind: "steps", items: STEPS, setting: WHEN }]);
+    const r = applySpokenLists(board418(), found.lists);
+    markHostBroll(r.scenes, { hostLook: LOOK }, "https://x/host.png");
+    const { attachMemory } = await import("./pictureMemory");
+    attachMemory(r.scenes, []);
+    const steps = r.scenes.filter(s => s.listCut);
+    expect(steps.map(s => [s.listKind, s.listSetting, s.brollHostLook])).toEqual(STEPS.map(() => ["steps", WHEN, LOOK]));
+    const chainsaw = steps[0];
+    expect(chainsaw.scriptText).toBe("cut the log into short bolts,");
+    const prompt = buildStillPrompt(chainsaw);
+    expect(prompt).toContain(`this step is set in ${WHEN} and done as it was done there and then: the tools, materials and way of working belong to that time and place`);
+    // The host is drawn as in the photo: never told to dress for 1800 beside "exactly as in the reference photo".
+    expect(prompt).toContain(hostBrollClause(LOOK).slice(0, 60));
+    expect(prompt).not.toMatch(/dressed as people were there and then/);
+  });
+
+  it("clean: a how-to said to the viewer today stays today (Hank's job 326), and a list saved without a setting keeps none", async () => {
+    const howTo =
+      "Square up the scrap with a couple of saw cuts, give it a quick brush, drill the hole about halfway through at a slight angle, oil it, and put a felt dot on the bottom.";
+    const items = ["Square up the scrap with a couple of saw cuts", "give it a quick brush", "drill the hole about halfway through at a slight angle", "oil it", "put a felt dot on the bottom"];
+    for (const setting of [null, "today", "the present day"]) {
+      const found = await findSpokenLists(howTo, { ask: async () => JSON.stringify({ lists: [{ sentence: 0, kind: "steps", items, setting }] }) });
+      expect(found.lists).toEqual([{ sentence: 0, kind: "steps", items }]);
+    }
+    // Every list of steps stored before this fix had its setting dropped: replayed, nothing changes.
+    const r = applySpokenLists(board418(), [{ sentence: 1, kind: "steps", items: STEPS }]);
+    expect(r.scenes.some(s => s.listSetting)).toBe(false);
+  });
+});

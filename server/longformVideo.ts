@@ -7797,19 +7797,39 @@ export function buildStillPrompt(
  * A STEP IS NO SEPARATE THING (round 14, job 413 scenes 31-32): "drain it outside, | store it sealed,"
  * are two things done to one can. Told to draw each so it "could never be taken for the other items",
  * a step is pushed away from the very can the step before showed. A step is told the thing it is done
- * to is the same in every step. Pure.
+ * to is the same in every step.
+ *
+ * A STEP OF ANOTHER TIME IS DONE THE WAY IT WAS DONE THEN (job 418, 78 s): "They cut the log into
+ * short bolts," inside a passage about how the oldest mountain cabins were roofed by hand was drawn
+ * with a modern orange chainsaw — the step's words name no tool, so the picture model took today's.
+ * A step with a setting is told its tools, materials and way of working belong to that time. The
+ * HOST drawn doing it (`brollHostLook`) is "exactly as in the reference photo" (`hostBrollClause`), so
+ * they are never told to be dressed for that time — the clause would contradict the photo the picture
+ * is drawn from; anyone else in the picture still is. That holds for an item of any list. Pure.
  */
 export function listItemClause(scene: StoryboardScene): string {
   const items = scene.listItems;
-  const setting = scene.listSetting?.trim();
-  const where = setting
-    ? ` Like the sentence it is said in, this picture is set in ${setting.replace(/[.\s]+$/, "")}: anyone ` +
-      `in it is dressed as people were there and then, and the tools, buildings and land belong to ` +
-      `that time and place — nothing from another time or place.`
-    : "";
+  const setting = scene.listSetting?.trim().replace(/[.\s]+$/, "");
+  const steps = scene.listKind === "steps";
+  // The host in the picture: at work alone (`markHostBroll`), or drawn beside someone else.
+  const hostAtWork = !!scene.humanPresent && !!scene.brollHostLook && !scene.otherPerson;
+  const hostIn = hostAtWork || !!scene.hostAmongOthers;
+  const dressed = !hostIn
+    ? "anyone in it is dressed as people were there and then, and "
+    : scene.otherPerson
+      ? "anyone in it besides the host is dressed as people were there and then, and "
+      : "";
+  const where = !setting
+    ? ""
+    : steps
+      ? ` Like the sentence it is said in, this step is set in ${setting} and done as it was done there and ` +
+        `then: ${dressed}the tools, materials and way of working belong to that time and place, and so do ` +
+        `the buildings and land — nothing from another time or place.`
+      : ` Like the sentence it is said in, this picture is set in ${setting}: ${dressed}the tools, ` +
+        `buildings and land belong to that time and place — nothing from another time or place.`;
   if (!items?.others.length) return where;
   const others = items.others.map(o => `"${o}"`).join(", ");
-  if (scene.listKind === "steps")
+  if (steps)
     return (
       ` This picture is one step of a sequence said one after another — it shows "${items.own}", and ` +
       `the other steps (${others}) each get their own picture. Whatever the steps are done to is the ` +

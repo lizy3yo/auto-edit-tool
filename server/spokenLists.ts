@@ -67,8 +67,10 @@ export interface SpokenList {
    * (`listSettingOf`): asked in the same call that finds the lists, since it reads the whole script
    * and so knows the passage a sentence sits in even when the sentence names no time itself (job 409:
    * "The farmer complains, the senator complains, …" is said inside a passage about an ancient
-   * writer). Each item's picture is told it (`scene.listSetting`, `listItemClause`). Never on a list
-   * of steps, whose pictures are the host's own hands here and now.
+   * writer). Each item's picture is told it (`scene.listSetting`, `listItemClause`). A list of STEPS
+   * takes one the same way (job 418: "They cut the log into short bolts, split each bolt into pie
+   * wedges, and rived the boards…", told of how the oldest cabins were roofed by hand), and each step
+   * is then done with the tools and ways of that time; steps the viewer does today have none.
    */
   setting?: string;
 }
@@ -701,8 +703,10 @@ video's own here and now — inside a passage of history, a story of long ago, w
 age said or saw, how things are done in another country — that time and place in 3-10 plain words
 ("a medieval market town, about 1300", "a fishing village in Norway in the 1890s"). Read the sentences
 around it: a list counts as inside such a passage even when its own sentence names no time or place
-("the baker grumbles, the miller grumbles, …" told of that town). setting is null when the list is
-about the video's own here and now.
+("the baker grumbles, the miller grumbles, …" told of that town). A sequence of steps gets one the
+same way when it tells how something was done then or there ("they soaked the reeds, dried them in the
+sun, and wove the mats" told of a village of long ago). setting is null when the list is
+about the video's own here and now — steps the viewer is told to do today included.
 
 Answer with JSON only: {"lists":[{"sentence":<number>,"kind":"things"|"steps","items":["…","…"],"setting":null}]} —
 {"lists":[]} when there are none.`;
@@ -764,12 +768,16 @@ export function parseSpokenLists(text: string, sentences: string[]): SpokenList[
     const kept = steps ? joinChoiceSteps(sentences[n], items) : withLastItemCut(items);
     if (!validateSpokenList(sentences[n], kept, steps)) continue;
     // The time and place it is set in, when not the video's own here and now (job 409, `listSettingOf`).
-    // Never on STEPS: each step is drawn as "the host's hands, mid-step" (`applySpokenLists`), steps
-    // are what the viewer does here and now, and a setting there would ask the host's own sleeves to
-    // be dressed for another age beside the clause that draws them in the host's clothes.
-    const setting = steps ? undefined : listSettingOf(raw?.setting);
+    // STEPS TOO (job 418, 78 s): "They cut the log into short bolts, split each bolt into pie wedges,
+    // and rived the boards along those same lines", said inside a passage about how the oldest
+    // mountain cabins were roofed by hand, lost its time here — steps were taken to be what the viewer
+    // does here and now — and its first step was drawn with a modern orange chainsaw. A step told of
+    // another time is done with that time's tools and ways (`listItemClause`); the host drawn doing it
+    // keeps their own look there, so no sleeves are dressed against the host photo. A how-to said to
+    // the viewer today gets no setting from the model, and `listSettingOf` drops one that says "today".
+    const setting = listSettingOf(raw?.setting);
     const where = setting ? { setting } : {};
-    if (steps) out.push({ sentence: n, items: kept, kind: "steps" });
+    if (steps) out.push({ sentence: n, items: kept, kind: "steps", ...where });
     // A parallel series the model ended one member early, at the member said differently ("…, the old
     // complain, and the young are already rehearsing the complaint", job 400), gets it back.
     else out.push({ sentence: n, items: withLastSeriesMember(sentences[n], kept), ...where });
@@ -1481,9 +1489,9 @@ export function applySpokenLists(
       first: G[starts[0]].scene,
       last: G[end - 1].scene,
       kind: list.kind,
-      // A list saved before the setting was asked for has none, and its pictures stay as they were;
-      // a list of steps never has one (the host's own hands, `parseSpokenLists`).
-      setting: list.kind === "steps" ? undefined : listSettingOf(list.setting),
+      // A list saved before the setting was asked for has none, and its pictures stay as they were —
+      // a list of steps saved before job 418's fix too, whose setting was dropped (`parseSpokenLists`).
+      setting: listSettingOf(list.setting),
     });
   }
 
@@ -1679,7 +1687,10 @@ export function applySpokenLists(
     // passage about a writer of ancient times, was drawn from each item's bare words — a farmer in
     // overalls, an old man on a park bench, a young man in a hoodie; only the senator was dressed for
     // the time. The list finder reads the passage (`setting`), and each item's prompt says it
-    // (`listItemClause`). A list with no setting clears any an earlier pass left.
+    // (`listItemClause`). A list with no setting clears any an earlier pass left. EVERY STEP TOO (job
+    // 418, 78 s): "They cut the log into short bolts," inside a passage about how the oldest cabins
+    // were roofed by hand came back as the host with a modern chainsaw; a step told of another time is
+    // done the way it was done then, with that time's tools.
     const asItem = (p: StoryboardScene): StoryboardScene => {
       const q = { ...p, listSetting: r.setting };
       if (r.kind !== "steps") return { ...q, listKind: undefined };
