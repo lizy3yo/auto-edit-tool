@@ -23,6 +23,7 @@ import type { BuildStage, KeyThing, RecurringPerson, StoryboardScene } from "@sh
 import { abbreviationBreakAt, endsOnAbbreviation, splitsInitials } from "@shared/sentenceEnds";
 import { invokeClaude } from "./claude";
 import { NOTHING_CUT_OPEN_RULE } from "./cutOpen";
+import { PEOPLE_PLACED_RULE } from "./peoplePlaced";
 import { safeParseJSON } from "./jsonRepair";
 import {
   BODY_HAND,
@@ -1878,7 +1879,10 @@ export const SHOT_LIST_SYSTEM =
   "is the host, even in a part they played then (a guest, a customer, a patient), though the " +
   "child they once were is a child — and never \"you\" (the viewer's work is " +
   "shown as the host's) unless THE VIEWER is given below — the picture may show THAT person, the " +
-  "same way: from behind or from the side, the face never shown. Write them into show, and set " +
+  // Round 16: told to write the person into show "from behind or from the side" (here and in the line
+  // check), the writers copied the camera into show — job 421 scene 28's "a passenger seen from behind
+  // standing at the galley speaking to a flight attendant" stood two people talking to a wall. 6c.
+  "same way, the face never shown. Write into show what they do and where they are (rule 6c), and set " +
   "other to who they are in 2-6 plain words from the line (\"a woman customer\", \"an older " +
   "neighbour\"). One person only. When that person is one of the PEOPLE WHO COME BACK (listed " +
   "below, when given), other is their name exactly as written there. When THE VIEWER is given " +
@@ -1901,6 +1905,7 @@ export const SHOT_LIST_SYSTEM =
   "attic | or the garage\": no shot puts it in the attic or the garage). A thing named only to be " +
   "ruled out is never the new shot of rules 1c and 1d. A figure of speech that rules out nothing " +
   "you can see (\"don't count on it\", \"you'll never look at it the same way\") is not this rule.\n" +
+  `6c. ${PEOPLE_PLACED_RULE}\n` +
   "7. HOST BEATS are the host talking on camera. If, after the host has said at least 5 words, the " +
   "line goes on to NAME concrete things worth showing, hand over to pictures at the FIRST such " +
   "thing — not a later one: the host never talks past a thing worth showing — at a natural break " +
@@ -3446,9 +3451,10 @@ shows it idle when it is naturally in use that way is WRONG too: rewrite it in u
 no faces, never "or".
 When the picture you write shows SOMEONE ELSE doing something — a customer, a buyer, a neighbour, a
 relative; never the host, never "you" unless THE VIEWER is given (then "you" is that person, and
-other is the viewer's name) — write them into show, seen from behind or from the side, and
+other is the viewer's name) — write them into show by what they do and where they are, and
 set other to who they are in 2-6 plain words from the line ("an older neighbour"). One person only.
 other is null otherwise.
+${PEOPLE_PLACED_RULE}
 
 WHO IS IN THE PICTURE. For every picture that shows a person (or hands), say who: "host" when it is
 the host — their own work, or the viewer the line speaks to ("you") — or a few plain words for
@@ -5428,7 +5434,7 @@ export function lastWordsSec(
  * line keeps its own picture, which is a different view of the same thing. Lists, the host, CTAs,
  * the cover, assets and splits are never in a run. Any failure changes nothing.
  */
-const CONTEXT_SYSTEM = `You are the picture editor of a talking-head video. Between the host's
+export const CONTEXT_SYSTEM = `You are the picture editor of a talking-head video. Between the host's
 on-camera moments the viewer sees one PICTURE at a time while the narrator talks. You get the
 pictures in film order: what is said under each, how long it runs, and what it currently shows.
 
@@ -5468,6 +5474,7 @@ background. Never "or", never a sequence of actions ("painting, then hanging it"
 places. If every
 picture in the group shows the host doing the work, the new picture shows that work too. Keep exact names of kinds (a herringbone path, a dovetail joint).
 ${NOTHING_CUT_OPEN_RULE}
+${PEOPLE_PLACED_RULE}
 
 Answer with JSON only:
 {"groups":[{"ids":[12,13,14],"show":"..."}]}
