@@ -3,7 +3,7 @@
 // every shot it spans, and — only if it fails — fixes it (darker behind the words, a lighter shade
 // of the coloured words, the calmest part of the picture, and last the coloured words in the plain
 // text colour), re-rendering and re-measuring each time (`makeReadable`).
-import type { ResolvedCue } from "../../graphics/src/cueResolve";
+import { shownFrom, type ResolvedCue } from "../../graphics/src/cueResolve";
 import { PLACES, type Place } from "../../graphics/src/components";
 import { MIN_COLOUR, MIN_WHITE, boxBrightness, findSubject, footprint, measureContrast, onSubject, subjectMap, type Contrast } from "../../graphics/src/legibility";
 import { themeFor } from "../../graphics/src/palette";
@@ -17,6 +17,16 @@ export function sampleTimes(cue: ResolvedCue, cuts: number[]): number[] {
   const out: number[] = [];
   for (let i = 1; i < edges.length; i++) if (edges[i] - edges[i - 1] > 0.5) out.push(edges[i] - 0.35);
   return out.slice(-5);
+}
+
+/** The moments of `sampleTimes` at which the graphic's words are on screen (`shownFrom`), for judging
+ * WHERE it goes: a graphic whose start was put on a cut, or on words said before its own, draws nothing
+ * until its first element's word (job 412's MYTH stamp: up at 33.13 s, drawn at 36.07 s), so a picture
+ * it has left by then is not one it covers. The last moment is always kept. */
+export function shownTimes(cue: ResolvedCue, cuts: number[]): number[] {
+  const all = sampleTimes(cue, cuts);
+  const shown = all.filter(t => t >= shownFrom(cue) - 1e-6);
+  return shown.length ? shown : all.slice(-1);
 }
 
 /** The theme's coloured text colours for this cue, exactly as it renders them. Words drawn in the
@@ -54,7 +64,7 @@ export async function subjectOf(film: string, t: number) {
  * by brightness alone.
  */
 export async function calmestPlace(film: string, cue: ResolvedCue, cuts: number[], size: { w: number; h: number }, spots?: Spots): Promise<Place> {
-  const frames = await Promise.all(sampleTimes(cue, cuts).map(t => grabFrame(film, t, false)));
+  const frames = await Promise.all(shownTimes(cue, cuts).map(t => grabFrame(film, t, false)));
   if (!frames.length) return spots?.places[0] ?? PLACES[0];
   const maps = frames.map(f => subjectMap(f, FRAME_W, FRAME_H));
   let best: { place: Place; score: number } | undefined;
@@ -70,13 +80,13 @@ export async function calmestPlace(film: string, cue: ResolvedCue, cuts: number[
 
 /**
  * CLEAR OF THE SUBJECT: the place, of a template's own (`spots`), whose drawing covers least of the
- * picture's subject on every shot the graphic spans (src/spots.ts `clearSpot`), its drawing's size
- * measured off the drawing as designed (`designed`, at the last moment judged — every element is up by
- * then). Asked before any readability fix, of a graphic drawn as designed over b-roll. Undefined when
- * there is nothing to judge (a graphic too short to sample, a drawing with nothing on it).
+ * picture's subject on every shot its words are up over (`shownTimes`, src/spots.ts `clearSpot`), its
+ * drawing's size measured off the drawing as designed (`designed`, at the last moment judged — every
+ * element is up by then). Asked before any readability fix, of a graphic drawn as designed over b-roll.
+ * Undefined when there is nothing to judge (a graphic too short to sample, a drawing with nothing on it).
  */
 export async function clearOfSubject(film: string, designed: string, cue: ResolvedCue, cuts: number[], spots: Spots): Promise<SpotChoice | undefined> {
-  const times = sampleTimes(cue, cuts);
+  const times = shownTimes(cue, cuts);
   if (!times.length) return undefined;
   const drawn = footprint(await grabFrame(designed, times[times.length - 1] - cue.start, true), FRAME_W, FRAME_H);
   if (!drawn) return undefined;

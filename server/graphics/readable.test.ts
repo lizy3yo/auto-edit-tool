@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { ResolvedCue } from "../../graphics/src/cueResolve";
+import type { Place } from "../../graphics/src/components";
 import { MIN_COLOUR, MIN_WHITE } from "../../graphics/src/legibility";
 import { themeFor } from "../../graphics/src/palette";
 
@@ -257,5 +258,55 @@ describe("a graphic with places of its own goes clear of the picture's subject, 
     });
     const made = await placeAndRead(c, false, "gfx-designed.mov", io, []);
     expect([made.r.pass, made.file]).toEqual([true, "gfx-designed.mov"]);
+  });
+});
+
+describe("where a graphic goes is judged only on the pictures its words are up over (round 14 review)", () => {
+  // A label-only MYTH stamp put on "A few people, half awake…" and drawn on "call it revenge" (job 412,
+  // up at 33.13 s, drawn at 36.07 s): had the picture changed between, the shot before its words would
+  // have been judged as one it covers, though nothing of it is drawn there.
+  const stamp = (over: Partial<ResolvedCue> = {}): ResolvedCue => ({
+    id: "revenge-myth",
+    template: "MythStamp",
+    start: 30,
+    end: 35,
+    startFrame: 900,
+    endFrame: 1050,
+    props: { durationSec: 5, at: 2.55, label: "Myth" },
+    sync: [],
+    conformed: { start: true, end: false },
+    ...over,
+  });
+  const cuts = [30, 32, 38];
+
+  it("a shot it has left before its words show is not judged", async () => {
+    const { sampleTimes, shownTimes } = await import("./readable");
+    expect(sampleTimes(stamp({ shownAt: 32.6 }), cuts)).toEqual([31.65, 34.65]);
+    expect(shownTimes(stamp({ shownAt: 32.6 }), cuts)).toEqual([34.65]);
+  });
+
+  it("a graphic whose words show from its start is judged on every shot, as before", async () => {
+    const { shownTimes } = await import("./readable");
+    expect(shownTimes(stamp(), cuts)).toEqual([31.65, 34.65]);
+  });
+
+  it("words drawn after the last moment judged still leave that moment", async () => {
+    const { shownTimes } = await import("./readable");
+    expect(shownTimes(stamp({ shownAt: 34.8 }), cuts)).toEqual([34.65]);
+  });
+
+  it("the subject step reads the film only where its words are up", async () => {
+    const { clearOfSubject } = await import("./readable");
+    const { grabFrame } = await import("./media");
+    const drawing = new Uint8Array(W * H * 4);
+    for (let y = 10; y < 30; y++) for (let x = 140; x < 190; x++) drawing[(y * W + x) * 4 + 3] = 220;
+    frames.set("stamp.mov", drawing);
+    frames.set("cat-film.mp4", new Uint8Array(W * H * 3).fill(90));
+    const spots = { places: [{ h: "right", v: "top" }, { h: "left", v: "top" }] as Place[], box: (p: Place) => (p.h === "right" ? { x0: 140, y0: 10, x1: 190, y1: 30 } : { x0: 10, y0: 10, x1: 60, y1: 30 }) };
+    vi.mocked(grabFrame).mockClear();
+    const choice = await clearOfSubject("cat-film.mp4", "stamp.mov", stamp({ shownAt: 32.6 }), cuts, spots);
+    expect(choice?.moved).toBe(false);
+    const filmTimes = vi.mocked(grabFrame).mock.calls.filter(([f]) => f === "cat-film.mp4").map(([, t]) => t);
+    expect(filmTimes).toEqual([34.65]);
   });
 });
