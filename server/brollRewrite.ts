@@ -19,9 +19,9 @@
  *   2. Nothing looked at the answer. A rewrite that repeats a stock directive, or leaves out the
  *      thing its line needs shown (`showSubject`), is now refused for the scene's own words
  *      (`rewriteFault`, `rewriteFallback`) — free, no second call.
- *   3. A shot written as a moving one that the gate later makes a photo kept its motion wording;
- *      it is now written again (`leftMotionLane`), in the call that already re-writes the host beats
- *      the gate sent to the pictures.
+ *   3. A shot written as a moving one that the gate later makes a photo because nothing in it moves by
+ *      itself kept its motion wording; it is now written again (`leftMotionLane`), in the call that
+ *      already re-writes the host beats the gate sent to the pictures.
  *
  * Pure.
  */
@@ -71,16 +71,27 @@ export function cutawayPromptLane(s: LaneFields): CutawayPromptLane {
 }
 
 /**
- * The prompt was written for a moving thing (`promptLane`) and the shot is now an ordinary photo: the
- * plan gate judged that nothing in it moves by itself, or cut the video share back. Its "motion in
- * progress" wording belongs to a shot it no longer is, so it is written again. Never a host take, a
- * CTA picture or a shot no rewrite was recorded for. Pure.
+ * The prompt was written for a moving thing (`promptLane`) and the video rule now says nothing in the
+ * shot moves by itself: the self-moving judge said no (a door, a drawer), or the words name a person,
+ * hands or a tool biting in. Its "motion in progress" wording describes something that does not
+ * happen, so it is written again. A shot made a photo only to keep the video SHARE down
+ * (`removeMotion`, the length caps) is NOT: its flame or steam still moves by itself, a photo of it
+ * catches that mid-motion, and the plain-photo rewrite's "settled instant" rule would put the kettle
+ * out — the wording it has is the right one, and leaving it costs no call. Never a host take, a CTA
+ * picture or a shot no rewrite was recorded for. Pure.
  */
 export function leftMotionLane(
   s: LaneFields & Pick<StoryboardScene, "promptLane" | "cta">
 ): boolean {
   if (s.hostPresent || s.cta || !s.promptLane || s.promptLane === "still") return false;
-  return cutawayPromptLane(s) === "still";
+  if (cutawayPromptLane(s) !== "still") return false;
+  return (
+    videoKind(s.showSubject ?? s.visualPrompt ?? "", "object", {
+      person: !!s.humanPresent,
+      contact: !!s.toolContact,
+      selfMoving: s.selfMoving,
+    }) === "none"
+  );
 }
 
 // Words that say nothing about WHAT is in a picture: grammar, and how it is framed.
@@ -164,10 +175,10 @@ function longestSharedRun(a: string[], b: string[]): string[] {
 /**
  * Five words in a row from a directive is a phrase lifted from it — but the person-free rule's own
  * stand-in ("a pair of bare hands at the work", "no face, head or body") is what that rule ASKS the
- * writer to write, and on the 23,500 local rewrites it was the only run that long. So a run counts
- * only when two or more of its words say what is in a picture and the scene's own words never say
- * them: the old hands directive's "pressing or adjusting what they work on" (job 413) does; no
- * rewrite of the person-free rule or the moving-thing directive did, so on the 20,500 local rewrites
+ * writer to write, and on the 20,856 stored cutaway rewrites it was the only run that long. So a
+ * run counts only when two or more of its words say what is in a picture and the scene's own words
+ * never say them: the old hands directive's "pressing or adjusting what they work on" (job 413)
+ * does; no rewrite of the person-free rule or the moving-thing directive did, so on those rewrites
  * the two directives still sent refuse none.
  */
 const DIRECTIVE_RUN_WORDS = 5;
@@ -182,7 +193,7 @@ const SUBJECT_MIN_WORDS = 2;
  * rat carrying a pellet away from the scattered pellets" comes back as "mouth open around a tan feed
  * pellet, more scattered pellets nearby" — so only one that has left the subject behind falls under
  * it (job 413 scene 10: "the host pulling a stool up to the garage workbench and opening a notebook"
- * → one word of six, "workbench"). Replayed over the 20,500 stored cutaway rewrites: 42 refused,
+ * → one word of six, "workbench"). Replayed over the 20,856 stored cutaway rewrites: 42 refused,
  * mostly a picture of something else (job 409 scene 28, "the host reading a book at the desk in the
  * study" drawn as a farmer in a field). Pure.
  */

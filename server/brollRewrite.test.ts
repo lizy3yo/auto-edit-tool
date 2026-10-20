@@ -82,10 +82,19 @@ describe("cutawayPromptLane — written for what the video rule will make the sh
 });
 
 describe("leftMotionLane — a shot written for motion that is now a photo is written again", () => {
-  it("the self-moving judge or the video share made a moving shot a photo", () => {
+  it("the self-moving judge found nothing moving by itself, and the gate made the shot a photo", () => {
     expect(
       leftMotionLane(cut({ showSubject: "a sliding door in a quiet room", promptLane: "video", stillImage: true, selfMoving: false }))
     ).toBe(true);
+  });
+
+  it("a thing that still moves, made a photo only for the video share, keeps its in-motion wording (no call)", () => {
+    // `removeMotion` / `capMovingLength` clear `objectMotion` as they make it a photo; the steam still
+    // rises by itself, and the plain-photo rewrite's settled-instant rule would settle it away.
+    const steam = { showSubject: "steam rising from a kettle on the stove", promptLane: "video" as const };
+    expect(leftMotionLane(cut({ ...steam, stillImage: true, objectMotion: undefined, selfMoving: true }))).toBe(false);
+    // Never judged (mock mode, or the judge's batch failed): the planner's call stands.
+    expect(leftMotionLane(cut({ ...steam, stillImage: true, objectMotion: undefined }))).toBe(false);
   });
 
   it("left alone: still moving, still caught mid-motion, written as a photo, never written, a host take, a CTA", () => {

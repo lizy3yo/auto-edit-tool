@@ -379,8 +379,9 @@ export interface StoryboardScene {
   /**
    * What `visualPrompt` was last WRITTEN for by `enhanceBrollPrompts` (`server/brollRewrite.ts`):
    * a clip of something moving by itself, a photo catching it mid-motion, or an ordinary photo.
-   * A shot written for motion that the plan gate later makes an ordinary photo is written again
-   * (`leftMotionLane`). Unset when the prompt is the scene's own words (no rewrite landed).
+   * A shot written for motion in which nothing turns out to move by itself (the plan gate makes it
+   * an ordinary photo) is written again (`leftMotionLane`). Unset when the prompt is the scene's own
+   * words (no rewrite landed).
    */
   promptLane?: "video" | "moving-thing" | "still";
   /**

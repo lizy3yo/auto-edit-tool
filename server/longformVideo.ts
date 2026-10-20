@@ -18745,9 +18745,10 @@ async function runUnifiedPipeline(
     appendJobWarning(jobId, `Plan check ${f.rule} could not be fixed: ${f.detail}`);
   }
   // A host beat the gate sent to the pictures gets the same rewrite every other cutaway got — and so,
-  // in the same call, does a shot written for motion that the gate (or the self-moving judge before
-  // it) made an ordinary photo (`leftMotionLane`): its "in motion" wording describes a shot it no
-  // longer is (job 413 scenes 9-10 kept theirs to the end).
+  // in the same call, does a shot written for motion in which the self-moving judge (or the person
+  // and tool rules) found nothing moving by itself, now an ordinary photo (`leftMotionLane`): its "in
+  // motion" wording describes something that does not happen (job 413 scenes 9-10 kept theirs to the
+  // end). A thing that still moves, made a photo only for the video share, keeps its wording.
   const gateDemoted = scenes
     .filter(s => hostsBeforeGate.has(s) && !s.hostPresent)
     .map(s => s.index);
@@ -18755,7 +18756,8 @@ async function runUnifiedPipeline(
   const reWrite = Array.from(new Set([...gateDemoted, ...nowStill]));
   if (nowStill.length)
     console.log(
-      `[Longform ${jobId}] ${nowStill.length} picture(s) written for motion are now photos — written again`
+      `[Longform ${jobId}] ${nowStill.length} picture(s) written for motion turned out not to ` +
+        `move — written again as photos`
     );
   if (reWrite.length) {
     const reEnhance = await enhanceBrollPrompts(scenes, params, reWrite);

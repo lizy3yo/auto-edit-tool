@@ -7839,5 +7839,14 @@ describe("a cutaway is written for the shot it will be, and an answer that is no
       stillImage: false,
     });
     expect(leftMotionLane(steam)).toBe(false);
+    // Made a photo only to keep the video share down: the steam still rises, the photo catches it, and
+    // the wording stays — no second call, and no "settled instant" rewrite to put the kettle out.
+    const sharedOut = pic(3, "and the kettle is already going.", "steam rising from a kettle on the stove", {
+      promptLane: "video",
+      objectMotion: undefined,
+      stillImage: true,
+      selfMoving: true,
+    });
+    expect(leftMotionLane(sharedOut)).toBe(false);
   });
 });
