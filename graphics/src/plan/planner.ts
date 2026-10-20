@@ -20,7 +20,7 @@
 //
 // Pure apart from the two things it is handed: `ask` (the model call — metered by the app) and
 // `ensureIcon` (makes an emoji's image available).
-import { CARD_HOLD_MAX_SEC, CueError, LINGER_SEC, MIN_ON_SCREEN_SEC, MIN_SHOT_SEC, NEW_LINE_GRACE_SEC, blinkBeside, findPhrase, findVerbatim, holdToCut, indexWords, ownSentenceEnd, parseSpokenNumber, resolveCues, sameWord, tokens, tooShortToRead, withinEdits, type CueSpec, type ResolvedCue, type TokenIndex, type Word } from "../cueResolve";
+import { CARD_HOLD_MAX_SEC, CueError, LINGER_SEC, MIN_ON_SCREEN_SEC, MIN_SHOT_SEC, NEW_LINE_GRACE_SEC, blinkBeside, findPhrase, findVerbatim, holdToCut, indexWords, ownSentenceEnd, parseSpokenNumber, readableFrames, resolveCues, sameWord, tokens, tooShortToRead, withinEdits, type CueSpec, type ResolvedCue, type TokenIndex, type Word } from "../cueResolve";
 import { TEMPLATES, resolveSets, templateById } from "../registry";
 import { FPS, LAYOUT, WIDTH } from "../theme";
 import { DIM_GAP_SEC, MIN_GAP_SEC, checkRules, nameTagRange, type FilmLayout, type LayoutScene } from "./rules";
@@ -2183,7 +2183,7 @@ export async function planGraphics(input: PlanInput): Promise<PlanResult> {
       // onto the next shot instead. (A title was raised above.)
       if (!structural.has(spec.template) && tooShortToRead(mine, FPS)) {
         undo();
-        bad(`on screen ${((mine.endFrame - mine.startFrame) / FPS).toFixed(2)} s — too short to read (at least ${MIN_ON_SCREEN_SEC} s); join it to the next sentence or drop it`);
+        bad(`on screen ${(readableFrames(mine, FPS) / FPS).toFixed(2)} s — too short to read (at least ${MIN_ON_SCREEN_SEC} s); join it to the next sentence or drop it`);
         continue;
       }
       // NO BLINK OF FOOTAGE beside a graphic that hides the picture — QA's own test (`blinkBeside`),

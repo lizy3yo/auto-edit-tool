@@ -7,6 +7,7 @@
 // the voice is re-timed: re-resolve and every element follows its word.
 //
 // Pure: no I/O, no React — unit-tested in cueResolve.test.ts.
+import { MOTION } from "./theme";
 
 export type Word = { text: string; start: number; end: number };
 
@@ -45,6 +46,11 @@ export type ResolvedCue = {
    * frame and put one frame of graphic on the next shot. */
   startFrame: number;
   endFrame: number;
+  /** When its first WORDS are drawn (seconds on the film's clock, on a frame), when that is later
+   * than `start`: a graphic whose elements wait for their words shows nothing before them (a label
+   * that appears on "@a mower blade" 1.2 s into a cue snapped back onto the cut, job 413). Every
+   * reading time is measured from here (`shownFrom`). Unset ⇒ its words show from `start`. */
+  shownAt?: number;
   /** When the last of the graphic's own words is spoken (seconds), if it has any. */
   contentEnd?: number;
   /** Seconds it needs on screen to be read (`readingSec`); the QA measures lingering past it. */
@@ -432,11 +438,60 @@ export const MIN_AFTER_TRIM_SEC = 1.5;
 export const LINGER_SEC = 0.8;
 export const MIN_ON_SCREEN_SEC = 1.5;
 
-/** Up too short to read: under MIN_ON_SCREEN_SEC, with one frame allowed for edges rounded onto the
- * frame grid. The ONE test the planner (a new graphic is refused), the film's end (`endWithFilm`)
- * and QA (a shipped one is reported) all ask, so they cannot disagree. */
-export function tooShortToRead(c: { startFrame: number; endFrame: number }, fps: number): boolean {
-  return c.endFrame - c.startFrame < MIN_ON_SCREEN_SEC * fps - 1 - 1e-6;
+/** Up too short to read: under MIN_ON_SCREEN_SEC from when its first words are drawn (`shownAt`),
+ * with one frame allowed for edges rounded onto the frame grid. The ONE test the planner (a new
+ * graphic is refused), the film's end (`endWithFilm`) and QA (a shipped one is reported) all ask, so
+ * they cannot disagree. It measured from the cue's start, which is not when anything shows: job 413's
+ * "A mower blade" label started on the cut at 70.33 s, appeared on its words at 71.51 s and was gone
+ * at 72.47 s — under a second to read — and job 412's "MYTH" stamp started at 33.13 s and appeared at
+ * 36.12 s, 1.25 s before it left; QA said "Shorter than 1.5 s: 0" on both. */
+export function tooShortToRead(c: { startFrame: number; endFrame: number; shownAt?: number }, fps: number): boolean {
+  return readableFrames(c, fps) < MIN_ON_SCREEN_SEC * fps - 1 - 1e-6;
+}
+
+/** Frames a graphic's words are on screen: from its first drawn words (`shownAt`) to its end. */
+export function readableFrames(c: { startFrame: number; endFrame: number; shownAt?: number }, fps: number): number {
+  const shown = c.shownAt === undefined ? c.startFrame : Math.max(c.startFrame, Math.round(c.shownAt * fps));
+  return c.endFrame - shown;
+}
+
+/** When a graphic's words are first on screen, seconds on the film's clock: `shownAt`, else its start. */
+export const shownFrom = (c: { start: number; shownAt?: number }): number => Math.max(c.start, c.shownAt ?? c.start);
+
+/** A graphic's own LEAD-IN: its plate or scrim easing in just before its first word (the planner's
+ * `startPad` of -0.15 s, a start snapped a frame or two onto a cut). Words drawn within this of its
+ * start are read with its entrance, and reading counts from the start; later than this, the graphic
+ * shows nothing to read until them, and reading counts from them (`shownAt`). The same lead a card is
+ * given before its first word (`CARD_LEAD_SEC`). */
+export const WORDS_LEAD_IN_SEC = 0.3;
+
+/** Top-level fixed text a template draws from its first frame, before any timed element: a kicker
+ * over a number pair or a card, a list's or a chart's title. Every other piece of fixed text belongs
+ * to the element whose `at` it sits with (a label's text, a stamp's word, a value and its label). */
+const DRAWN_FROM_START = ["kicker", "title"];
+
+/**
+ * The frame, counted from a graphic's start, its first WORDS are drawn on: at once for a title
+ * (`structural`), fixed text drawn from the first frame (`DRAWN_FROM_START`) or an element set to show
+ * at once ("at": 0); else the earliest element's resolved `at`, on the frame the templates draw it
+ * (their read-ahead lead, `MOTION.wordLeadSec`, as `appearFrame` in timing.ts). Job 412's label-only
+ * MYTH stamp opened on "A few people," (33.13 s) and its one element waited for "call it revenge"
+ * (36.12 s). Pure.
+ */
+export function firstWordsFrame(props: Record<string, unknown>, fps: number, structural = false): number {
+  if (structural || showsAtStart(props)) return 0;
+  if (DRAWN_FROM_START.some(k => typeof props[k] === "string" && (props[k] as string).trim())) return 0;
+  let first = Infinity;
+  const walk = (v: unknown) => {
+    if (Array.isArray(v)) return v.forEach(walk);
+    if (!v || typeof v !== "object") return;
+    for (const [k, x] of Object.entries(v as Record<string, unknown>)) {
+      if (k === "at" && typeof x === "number" && Number.isFinite(x)) first = Math.min(first, x);
+      else walk(x);
+    }
+  };
+  walk(props);
+  return first === Infinity ? 0 : Math.max(0, Math.round((first - MOTION.wordLeadSec) * fps));
 }
 
 /**
@@ -735,11 +790,12 @@ export function stillUpAfterWords(c: ResolvedCue, fps: number): boolean {
 
 /** Up no longer than its reading time and the pause it may leave in after it — the time its fixed text
  * needs (`readAlongSec`) once it runs into words it does not show (`newClauseAt`): never lingering in
- * QA's eyes, and never stale for a snap forward onto a cut in the resolver's (the same test). */
-function inReadingTime(c: { start: number; end: number; readSec?: number; readAlongSec?: number; newClauseAt?: number }, slack: number): boolean {
+ * QA's eyes, and never stale for a snap forward onto a cut in the resolver's (the same test). Counted
+ * from when its words are first drawn (`shownFrom`), as the reading floor is. */
+function inReadingTime(c: { start: number; end: number; shownAt?: number; readSec?: number; readAlongSec?: number; newClauseAt?: number }, slack: number): boolean {
   const overNew = c.newClauseAt !== undefined && c.end > c.newClauseAt + NEW_LINE_SPILL_SEC + slack;
   const read = (overNew ? c.readAlongSec : undefined) ?? c.readSec ?? 0;
-  return c.end - c.start <= read + PAUSE_REACH_SEC + 0.15 + slack;
+  return c.end - shownFrom(c) <= read + PAUSE_REACH_SEC + 0.15 + slack;
 }
 
 /**
@@ -1003,9 +1059,18 @@ export function resolveCues(specs: CueSpec[], words: Word[], opts: ResolveOption
       }
     }
 
+    // 2e. When its words are first DRAWN: reading is counted from there once they wait past the lead-in
+    // (`WORDS_LEAD_IN_SEC`). A start snapped back onto a cut, or put on words said before the graphic's
+    // own, shows nothing until its first element's word — job 413's "A mower blade" label opened on the
+    // cut at 70.33 s and appeared on "a mower blade" at 71.51 s, so a reading floor counted from the
+    // start ran out 0.7 s after it appeared and it was gone a second later; job 412's MYTH stamp waited
+    // 3 s for "call it revenge".
+    const lead = firstWordsFrame(props, fps, structural.has(spec.template)) / fps;
+    const shown = lead > WORDS_LEAD_IN_SEC + 1e-6 ? Math.round(t0 * fps) / fps + lead : t0;
+
     // What is still to read once a new clause it does not show has begun: its fixed text, and its last
     // element on screen LINGER_SEC (job 401's "81" was readable 0.6 s and read as cut short).
-    const readAlong = Math.max(readAlongSec(spec.props), lastShown + LINGER_SEC - t0);
+    const readAlong = Math.max(readAlongSec(spec.props), lastShown + LINGER_SEC - shown);
 
     // 3. The end.
     let planned: number | undefined;
@@ -1020,7 +1085,7 @@ export function resolveCues(specs: CueSpec[], words: Word[], opts: ResolveOption
     let leftInPause = false;
     if (!structural.has(spec.template) && contentEnd !== undefined) {
       const byWords = contentEnd + LINGER_SEC;
-      rawEnd = Math.max(t0 + readSec, planned === undefined ? byWords : Math.min(planned, byWords));
+      rawEnd = Math.max(shown + readSec, planned === undefined ? byWords : Math.min(planned, byWords));
       // Leave in a pause, not mid-word: an end inside speech moves to the next pause within reach.
       const left = leaveInPause(words, rawEnd);
       rawEnd = left.at;
@@ -1047,7 +1112,7 @@ export function resolveCues(specs: CueSpec[], words: Word[], opts: ResolveOption
       // words — it was 3.7 s, over "your chin" too).
       const clauseAt = ownSentenceEnd(words, ownEnd, Infinity).newClauseAt;
       if (clauseAt !== undefined && clauseAt < (nextSentence?.start ?? Infinity) - 1e-6 && rawEnd > clauseAt + NEW_LINE_SPILL_SEC) {
-        const reading = t0 + readAlong;
+        const reading = shown + readAlong;
         const cap = Math.max(ownEnd + 0.3, clauseAt + NEW_LINE_SPILL_SEC, reading);
         if (cap < rawEnd) {
           // Held there for its fixed text, it leaves as any graphic does: in the next pause within
@@ -1063,7 +1128,7 @@ export function resolveCues(specs: CueSpec[], words: Word[], opts: ResolveOption
       // the next shot (Dale's "Facebook Marketplace" over the Etsy picture that followed, job 397).
       if (windows.has(spec.template)) {
         const after = cuts.find(c => c > lastShown + 0.3 && c < rawEnd - 1e-6);
-        if (after !== undefined && after - t0 >= MIN_ON_SCREEN_SEC) rawEnd = after;
+        if (after !== undefined && after - shown >= MIN_ON_SCREEN_SEC) rawEnd = after;
       }
     } else if (planned !== undefined) {
       rawEnd = planned;
@@ -1086,11 +1151,11 @@ export function resolveCues(specs: CueSpec[], words: Word[], opts: ResolveOption
     // measures from its own words, excuses exactly that stay.
     if (endCut !== undefined && endCut > rawEnd && contentEnd !== undefined && !structural.has(spec.template)) {
       const said = ownSentenceEnd(words, contentEnd, endCut);
-      const stay = { start: t0, end: onFrame(endCut), readSec, readAlongSec: readAlong, newClauseAt: said.newClauseAt };
+      const stay = { start: t0, shownAt: shown, end: onFrame(endCut), readSec, readAlongSec: readAlong, newClauseAt: said.newClauseAt };
       if (endCut - said.sentenceSpoken > MAX_LINGER_SEC || (endCut - said.spoken > MAX_LINGER_SEC && !inReadingTime(stay, 1 / fps + 1e-6))) endCut = undefined;
     }
     if (endCut === undefined) {
-      const spill = cuts.filter(c => c < rawEnd && c > rawEnd - TAIL_SPILL_SEC && c - t0 >= MIN_AFTER_TRIM_SEC && c - (lastShown - (spec.startPad ?? 0)) >= MIN_READ_SEC);
+      const spill = cuts.filter(c => c < rawEnd && c > rawEnd - TAIL_SPILL_SEC && c - shown >= MIN_AFTER_TRIM_SEC && c - (lastShown - (spec.startPad ?? 0)) >= MIN_READ_SEC);
       if (spill.length) endCut = spill[spill.length - 1];
     }
     // 4a. A graphic that must cross a shot change (its last element appears too close before the cut
@@ -1138,6 +1203,7 @@ export function resolveCues(specs: CueSpec[], words: Word[], opts: ResolveOption
       end: round(t1),
       startFrame: Math.round(t0 * fps),
       endFrame: Math.round(t1 * fps),
+      ...(shown > t0 + 1e-6 ? { shownAt: round(shown) } : {}),
       // A graphic that ends ON a cut leaves WITH the picture: a fade there would brighten the old
       // shot for its last frames and read as a flicker right before the cut (job 376, 2:23, 3:01).
       props: {
@@ -1163,7 +1229,7 @@ export function resolveCues(specs: CueSpec[], words: Word[], opts: ResolveOption
     if (next.start - a.end >= HANDOFF_GAP_SEC - 1e-6) continue;
     // A graphic held to a cut leaves WITH the picture; the next one is on a new shot.
     if (a.conformed.end && next.start >= a.end - 1e-6) continue;
-    const floor = Math.max(a.start + (a.readSec ?? MIN_ON_SCREEN_SEC), (a.contentEnd ?? a.start) + HANDOFF_MIN_TAIL_SEC);
+    const floor = Math.max(shownFrom(a) + (a.readSec ?? MIN_ON_SCREEN_SEC), (a.contentEnd ?? a.start) + HANDOFF_MIN_TAIL_SEC);
     const t1 = Math.floor((next.start - HANDOFF_GAP_SEC) * fps + 1e-6) / fps;
     if (t1 < floor - 1e-6 || t1 >= a.end) continue;
     a.end = round(t1);

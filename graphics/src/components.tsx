@@ -10,6 +10,7 @@ import {
   useVideoConfig,
 } from "remotion";
 import { withAlpha } from "./palette";
+import { PLACE_INSET } from "./spots";
 import { THEME, TYPE, type Theme } from "./theme";
 import { drawnTo, fadeIn, pageStarts, splitWords, strikeSweep, wordFrames, type Phrase } from "./timing";
 
@@ -25,7 +26,8 @@ export const useTheme = () => React.useContext(ThemeContext);
 export const shaded = (base: number, shade = 0, max = 0.92): number => base + (max - base) * Math.min(1, Math.max(0, shade));
 
 /** Where a movable text graphic sits: side and band of the frame (title-safe). The composite
- * moves one to the calmest part of the picture when its first place is too bright to read. */
+ * moves one to the calmest part of the picture when its first place is too bright to read, and a
+ * template with places of its own (registry `spots`) to the one clear of the picture's subject. */
 export type Place = { h: "left" | "right"; v: "top" | "middle" | "bottom" };
 export const PLACES: Place[] = [
   { h: "left", v: "middle" },
@@ -39,11 +41,11 @@ export const PLACES: Place[] = [
 /** Absolute position for a block of text at `place`; `align` follows the side. */
 export function placeStyle(place: Place | undefined, height: number): React.CSSProperties {
   const p = place ?? PLACES[0];
-  const top = p.v === "top" ? 150 : p.v === "bottom" ? 1080 - 170 - height : (1080 - height) / 2;
+  const top = p.v === "top" ? PLACE_INSET.top : p.v === "bottom" ? 1080 - PLACE_INSET.bottom - height : (1080 - height) / 2;
   return {
     position: "absolute",
     top,
-    ...(p.h === "left" ? { left: 160 } : { right: 160 }),
+    ...(p.h === "left" ? { left: PLACE_INSET.x } : { right: PLACE_INSET.x }),
     textAlign: p.h === "left" ? "left" : "right",
     display: "flex",
     flexDirection: "column",

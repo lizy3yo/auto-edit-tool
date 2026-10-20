@@ -37,7 +37,7 @@ import { ffmpeg, frameDiffs, levelsOf, narrationOf } from "./media";
 import { driftedStretches, LEVEL_FRAME_SEC, retimeWords, spliceStretch } from "../../graphics/src/plan/wordTiming";
 import { execFfmpeg } from "../ffmpegSpawn";
 import { notAListAsSaid } from "../spokenLists";
-import { calmestPlace, describe, makeReadable, measureCue, subjectOf } from "./readable";
+import { calmestPlace, clearOfSubject, describe, makeReadable, measureCue, placeAndRead, subjectOf } from "./readable";
 import { GRAPHICS_DIR, renderGraphic } from "./render";
 
 /** The model that writes the plan (the lab measured Opus best at following the moments). */
@@ -343,8 +343,17 @@ export async function addGraphics(input: AddGraphicsInput): Promise<GraphicsReco
       }
       let file = await renderCue(c);
       if (def.kind === "overlay" && def.underlay !== "window") {
-        const io = { render: renderCue, measure, calmest: (cue: ResolvedCue, size: { w: number; h: number }) => calmestPlace(input.filmPath, cue, cuts, size) };
-        const made = await makeReadable(c, !!def.movable, file, io, attempts);
+        const io = { render: renderCue, measure, calmest: (cue: ResolvedCue, size: { w: number; h: number }) => calmestPlace(input.filmPath, cue, cuts, size, def.spots) };
+        // A graphic with places of its own, drawn as designed over b-roll (not placed by the layout
+        // below a host's chin or in a host's panel), goes where it is clear of the picture's subject
+        // first (`placeAndRead`): job 413's price pair sat on the phone it priced, job 412's MYTH stamp
+        // on the sleeper's head and across the cat's eye, job 414's chapter plate on its froe.
+        const spots = def.spots && !c.props.low && !c.props.panel ? def.spots : undefined;
+        const made = spots
+          ? await placeAndRead(c, !!def.movable, file, { ...io, clear: (cue, designed) => clearOfSubject(input.filmPath, designed, cue, cuts, spots) }, attempts)
+          : await makeReadable(c, !!def.movable, file, io, attempts);
+        const move = made.steps.find(s => s.startsWith("clear of the picture's subject"));
+        if (move) log(`graphics: ${c.id} ${move}`);
         file = made.file;
         readability.push({ id: c.id, pass: made.r.pass, summary: describe(made.r), steps: made.steps });
         // Text that cannot be read is left out, never shipped.

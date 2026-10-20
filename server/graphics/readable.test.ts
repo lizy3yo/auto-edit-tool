@@ -23,7 +23,8 @@ vi.mock("./media", () => ({
   }),
 }));
 
-const { makeReadable, measureCue, plainInkMayHelp, describe: describeReading } = await import("./readable");
+const { makeReadable, measureCue, placeAndRead, plainInkMayHelp, describe: describeReading } = await import("./readable");
+type PlaceIo = import("./readable").PlaceIo;
 type ReadableIo = import("./readable").ReadableIo;
 type Reading = import("./readable").Reading;
 
@@ -184,5 +185,77 @@ describe("the plain colour is judged as white words", () => {
     const plain = await measureOn(240, { lift: 1, plain: true });
     expect(plain.white!).toBeLessThan(MIN_WHITE);
     expect(plain.pass).toBe(false);
+  });
+});
+
+describe("a graphic with places of its own goes clear of the picture's subject, and still reads (round 14)", () => {
+  // Job 413's price pair (2:02-2:05) sat bottom-left on the phone whose listing it priced; clear of
+  // the subject it goes bottom-right, on the shirt beside the phone.
+  const pair = (): ResolvedCue => ({
+    id: "marketplace-price-range",
+    template: "NumberLabel",
+    start: 121.967,
+    end: 124.867,
+    startFrame: 3659,
+    endFrame: 3746,
+    props: { durationSec: 2.9, kicker: "Listed on Marketplace", a: { label: "From", value: "$25", at: 0.83 }, b: { label: "To", value: "$75", at: 1.35 }, theme },
+    sync: [],
+    conformed: { start: false, end: true },
+  });
+  const choice = (moved: boolean) => ({
+    place: moved ? ({ h: "right", v: "bottom" } as const) : ({ h: "left", v: "bottom" } as const),
+    from: { h: "left", v: "bottom" } as const,
+    moved,
+    scores: [
+      { place: { h: "left", v: "bottom" } as const, on: 0.317 },
+      { place: { h: "right", v: "bottom" } as const, on: 0.113 },
+    ],
+  });
+  const placeIo = (read: (p: Record<string, unknown>) => Reading, clear: PlaceIo["clear"]) => {
+    const { io, drawn } = fakeIo(read);
+    return { io: { ...io, clear } as PlaceIo, drawn };
+  };
+
+  it("moved to the corner clear of the phone, drawn and judged there", async () => {
+    const c = pair();
+    const before = timing(c);
+    const { io, drawn } = placeIo(() => ({ white: 12.4, pass: true, box }), async () => choice(true));
+    const attempts: string[] = [];
+    const made = await placeAndRead(c, false, "gfx-designed.mov", io, attempts);
+    expect(made.r.pass).toBe(true);
+    expect(made.file).toBe("gfx-1.mov");
+    expect(drawn).toEqual([expect.objectContaining({ place: { h: "right", v: "bottom" } })]);
+    expect(c.props.place).toEqual({ h: "right", v: "bottom" });
+    expect(made.steps[0]).toBe("clear of the picture's subject: bottom left → bottom right (on the subject: bottom left 0.32, bottom right 0.11)");
+    expect(attempts).toEqual(["gfx-1.mov"]);
+    expect(timing(c)).toEqual(before); // WHEN it shows never changes
+  });
+
+  it("not readable where it was moved, it goes back where it was designed rather than be left out", async () => {
+    const c = pair();
+    const { io } = placeIo(p => (p.place ? { white: 5.0, pass: false, box } : { white: 9.0, pass: true, box }), async () => choice(true));
+    const made = await placeAndRead(c, false, "gfx-designed.mov", io, []);
+    expect(made.r.pass).toBe(true);
+    expect(made.file).toBe("gfx-designed.mov");
+    expect(c.props.place).toBeUndefined();
+    expect(made.steps).toContain("not readable clear of the subject — back where it was designed:");
+  });
+
+  it("where it is designed is clear: nothing is drawn again (the readability fixes as before)", async () => {
+    const c = pair();
+    const { io, drawn } = placeIo(() => ({ white: 12.4, pass: true, box }), async () => choice(false));
+    const made = await placeAndRead(c, false, "gfx-designed.mov", io, []);
+    expect([made.file, made.steps]).toEqual(["gfx-designed.mov", ["as designed: white 12.4:1"]]);
+    expect(drawn).toEqual([]);
+    expect(c.props.place).toBeUndefined();
+  });
+
+  it("a subject that cannot be judged (a frame that will not read) keeps it as designed", async () => {
+    const c = pair();
+    const { io } = placeIo(() => ({ white: 12.4, pass: true, box }), async () => {
+      throw new Error("no frame");
+    });
+    const made = await placeAndRead(c, false, "gfx-designed.mov", io, []);
+    expect([made.r.pass, made.file]).toEqual([true, "gfx-designed.mov"]);
   });
 });

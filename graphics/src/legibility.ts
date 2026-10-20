@@ -216,3 +216,176 @@ export function findSubject(film: Uint8Array, w: number, h: number): { x: number
 export function overlap(a: { x0: number; y0: number; x1: number; y1: number }, b: { x0: number; y0: number; x1: number; y1: number }): number {
   return Math.max(0, Math.min(a.x1, b.x1) - Math.max(a.x0, b.x0)) * Math.max(0, Math.min(a.y1, b.y1) - Math.max(a.y0, b.y0));
 }
+
+/** The subject map's grid: 16 x 9 cells, as `findSubject`'s. */
+export const SUBJECT_COLS = 16;
+export const SUBJECT_ROWS = 9;
+/** The thumbnail the subject map is worked out on (a power of two, for the FFT). */
+const SALIENCY_N = 64;
+
+/**
+ * WHERE THE PICTURE'S SUBJECT IS, cell by cell (16 x 9, the most subject-like cell 1, nothing 0): the
+ * picture's spectral residual (Hou & Zhang, "Saliency detection: a spectral residual approach", 2007)
+ * — what stands out from the rest of the picture — on a 64 x 64 greyscale thumbnail, softened and
+ * gently weighted to the centre the way pictures are framed. Pure.
+ *
+ * Not `findSubject`'s detail energy: on the round-13 verification films that marked most of the frame
+ * (its box 1080-1920 px wide on every picture checked), and a texture the eye passes over outscored
+ * the subject — the asphalt round a market table (job 413, 1:40) read busier than the table of knives
+ * standing on it. A repeated texture (asphalt, a fleece blanket, pegboard, a planked wall) is what the
+ * spectral residual takes OUT, so a cat's face on a fleece (job 412, 1:44), the sleeper's head beside
+ * it (0:36) and a phone held up to the camera (job 413, 2:04) stand out from what they lie on.
+ */
+export function subjectMap(film: Uint8Array, w: number, h: number): number[] {
+  const N = SALIENCY_N;
+  const re = new Float64Array(N * N);
+  const im = new Float64Array(N * N);
+  for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+    const x0 = Math.floor((x * w) / N), x1 = Math.max(x0 + 1, Math.floor(((x + 1) * w) / N));
+    const y0 = Math.floor((y * h) / N), y1 = Math.max(y0 + 1, Math.floor(((y + 1) * h) / N));
+    let s = 0, n = 0;
+    for (let yy = y0; yy < y1; yy += 2) for (let xx = x0; xx < x1; xx += 2) {
+      const i = (yy * w + xx) * 3;
+      s += 0.299 * film[i] + 0.587 * film[i + 1] + 0.114 * film[i + 2];
+      n++;
+    }
+    re[y * N + x] = n ? s / n : 0;
+  }
+  fft2(re, im, N, false);
+  // The log spectrum less its local average is what is unusual in this picture; its phase keeps where.
+  const amp = new Float64Array(N * N);
+  const phase = new Float64Array(N * N);
+  for (let i = 0; i < N * N; i++) {
+    amp[i] = Math.log(Math.hypot(re[i], im[i]) + 1e-9);
+    phase[i] = Math.atan2(im[i], re[i]);
+  }
+  for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+    let s = 0;
+    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) s += amp[((y + dy + N) % N) * N + ((x + dx + N) % N)];
+    const m = Math.exp(amp[y * N + x] - s / 9);
+    re[y * N + x] = m * Math.cos(phase[y * N + x]);
+    im[y * N + x] = m * Math.sin(phase[y * N + x]);
+  }
+  fft2(re, im, N, true);
+  let sal = new Float64Array(N * N);
+  for (let i = 0; i < N * N; i++) sal[i] = re[i] * re[i] + im[i] * im[i];
+  for (let pass = 0; pass < 3; pass++) {
+    const next = new Float64Array(N * N);
+    for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+      let s = 0, n = 0;
+      for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+        const yy = y + dy, xx = x + dx;
+        if (yy < 0 || xx < 0 || yy >= N || xx >= N) continue;
+        s += sal[yy * N + xx];
+        n++;
+      }
+      next[y * N + x] = s / n;
+    }
+    sal = next;
+  }
+  const cells = new Float64Array(SUBJECT_COLS * SUBJECT_ROWS);
+  const count = new Float64Array(SUBJECT_COLS * SUBJECT_ROWS);
+  for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+    const c = Math.min(SUBJECT_ROWS - 1, Math.floor((y * SUBJECT_ROWS) / N)) * SUBJECT_COLS + Math.min(SUBJECT_COLS - 1, Math.floor((x * SUBJECT_COLS) / N));
+    cells[c] += sal[y * N + x];
+    count[c]++;
+  }
+  for (let i = 0; i < cells.length; i++) {
+    // Frame edges are rarely the subject: the same gentle centre weight as `findSubject`.
+    const cx = ((i % SUBJECT_COLS) + 0.5) / SUBJECT_COLS - 0.5, cy = (((i / SUBJECT_COLS) | 0) + 0.5) / SUBJECT_ROWS - 0.5;
+    cells[i] = (count[i] ? cells[i] / count[i] : 0) * (1 - 0.6 * (cx * cx + cy * cy));
+  }
+  const top = cells.reduce((m, v) => (Number.isFinite(v) && v > m ? v : m), 0);
+  return Array.from(cells, v => (top > 0 && Number.isFinite(v) ? v / top : 0));
+}
+
+/** How much of the picture's subject a box on the frame covers: the subject map's mean under it, each
+ * cell weighted by the area the box covers (0 = clear of it, 1 = on the most subject-like part). */
+export function onSubject(map: number[], box: { x0: number; y0: number; x1: number; y1: number }, w: number, h: number): number {
+  const cw = w / SUBJECT_COLS, ch = h / SUBJECT_ROWS;
+  let sum = 0, area = 0;
+  for (let y = 0; y < SUBJECT_ROWS; y++) for (let x = 0; x < SUBJECT_COLS; x++) {
+    const a = overlap(box, { x0: x * cw, y0: y * ch, x1: (x + 1) * cw, y1: (y + 1) * ch });
+    if (a <= 0) continue;
+    sum += a * (map[y * SUBJECT_COLS + x] ?? 0);
+    area += a;
+  }
+  return area > 0 ? sum / area : 0;
+}
+
+/** The box a graphic's drawing covers on its frame (RGBA, w*h*4): every pixel at least `minAlpha`
+ * opaque — its plate, stamp and letters, not the faint edge of a shadow. Undefined when nothing is. */
+export function footprint(ov: Uint8Array, w: number, h: number, minAlpha = 64): { x0: number; y0: number; x1: number; y1: number } | undefined {
+  let x0 = w, y0 = h, x1 = -1, y1 = -1;
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    if (ov[(y * w + x) * 4 + 3] < minAlpha) continue;
+    if (x < x0) x0 = x;
+    if (x > x1) x1 = x;
+    if (y < y0) y0 = y;
+    if (y > y1) y1 = y;
+  }
+  return x1 < 0 ? undefined : { x0, y0, x1: x1 + 1, y1: y1 + 1 };
+}
+
+/** In-place radix-2 FFT of one row (`re`, `im`, length a power of two); `inverse` scales by 1/n. */
+function fft(re: Float64Array, im: Float64Array, inverse: boolean): void {
+  const n = re.length;
+  for (let i = 1, j = 0; i < n; i++) {
+    let bit = n >> 1;
+    for (; j & bit; bit >>= 1) j ^= bit;
+    j ^= bit;
+    if (i < j) {
+      [re[i], re[j]] = [re[j], re[i]];
+      [im[i], im[j]] = [im[j], im[i]];
+    }
+  }
+  for (let len = 2; len <= n; len <<= 1) {
+    const ang = ((inverse ? 2 : -2) * Math.PI) / len;
+    const wr = Math.cos(ang), wi = Math.sin(ang);
+    for (let i = 0; i < n; i += len) {
+      let cr = 1, ci = 0;
+      for (let k = 0; k < len / 2; k++) {
+        const a = i + k, b = a + len / 2;
+        const vr = re[b] * cr - im[b] * ci, vi = re[b] * ci + im[b] * cr;
+        re[b] = re[a] - vr;
+        im[b] = im[a] - vi;
+        re[a] += vr;
+        im[a] += vi;
+        const nr = cr * wr - ci * wi;
+        ci = cr * wi + ci * wr;
+        cr = nr;
+      }
+    }
+  }
+  if (inverse) for (let i = 0; i < n; i++) {
+    re[i] /= n;
+    im[i] /= n;
+  }
+}
+
+/** In-place 2-D FFT of an N x N grid: every row, then every column. */
+function fft2(re: Float64Array, im: Float64Array, N: number, inverse: boolean): void {
+  const r = new Float64Array(N), q = new Float64Array(N);
+  for (let y = 0; y < N; y++) {
+    for (let x = 0; x < N; x++) {
+      r[x] = re[y * N + x];
+      q[x] = im[y * N + x];
+    }
+    fft(r, q, inverse);
+    for (let x = 0; x < N; x++) {
+      re[y * N + x] = r[x];
+      im[y * N + x] = q[x];
+    }
+  }
+  for (let x = 0; x < N; x++) {
+    for (let y = 0; y < N; y++) {
+      r[y] = re[y * N + x];
+      q[y] = im[y * N + x];
+    }
+    fft(r, q, inverse);
+    for (let y = 0; y < N; y++) {
+      re[y * N + x] = r[y];
+      im[y * N + x] = q[y];
+    }
+  }
+}

@@ -38,6 +38,17 @@ describe("QA reports a graphic up too short to read (Dale's job 397 stored 'pass
     expect(ok.pass).toBe(true);
     expect(ok.lines).toContain("Shorter than 1.5 s: 0");
   });
+
+  it("counted from when its words show: job 413's 'A mower blade' (cue 70.33-72.47 s, shown at 71.47 s) and job 412's MYTH stamp", () => {
+    // Both passed as "Shorter than 1.5 s: 0": the cues were 2.1 s and 4.2 s long, their words up 1.0 s and 1.3 s.
+    const mower = { ...placed("mower-blade-label", "SmallLabel", 2110, 2174), shownAt: 71.467 };
+    const stamp = { ...placed("revenge-myth", "MythStamp", 994, 1121), shownAt: 36.067 };
+    const qa = judge([mower, stamp]);
+    expect(qa.lines).toContain("Shorter than 1.5 s: 2");
+    expect(qa.failures).toEqual(["up too short to read (under 1.5 s): mower-blade-label (1.00 s), revenge-myth (1.30 s)"]);
+    // resolved now, each read for its reading time from its words
+    expect(judge([{ ...mower, endFrame: 2231 }, { ...stamp, endFrame: 1127 }]).lines).toContain("Shorter than 1.5 s: 0");
+  });
 });
 
 describe("QA judges a graphic still up after its words by the resolver's own rules (job 400's '7 thieves', 1:35-1:41)", () => {

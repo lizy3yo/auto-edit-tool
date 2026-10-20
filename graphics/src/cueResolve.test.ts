@@ -22,6 +22,11 @@ import {
   stillUpAfterWords,
   ownSentenceEnd,
   readAlongSec,
+  readableFrames,
+  shownFrom,
+  firstWordsFrame,
+  tooShortToRead,
+  WORDS_LEAD_IN_SEC,
   type CueSpec,
   type ResolvedCue,
   type Word,
@@ -779,5 +784,67 @@ describe("a graphic's own words end where a new clause begins (job 408's '9 thin
     expect([c.start, c.end]).toEqual([80.2, 82.933]); // as the film had it
     expect(c.readAlongSec).toBe(c.readSec);
     expect(stillUpAfterWords(c, FPS)).toBe(false);
+  });
+});
+
+describe("a graphic is read from when its words are drawn, not from its start (round 14: jobs 413 and 412)", () => {
+  const FPS = 30;
+  const sets = resolveSets();
+  // Job 413 (1:10-1:16), as heard, with the film's picture cuts.
+  const shed = heard(
+    "of@69.27-69.33 dull@69.41-69.651 knives,@69.691-70.071 and@70.451-70.551 every@70.631-70.831 shed@70.931-71.252 has@71.292-71.452 a@71.512-71.532 mower@71.612-71.892 blade@71.932-72.172 that's@72.212-72.392 beating@72.512-72.833 the@72.873-72.933 grass@72.973-73.293 instead@73.333-73.613 of@73.633-73.693 cutting@73.793-74.113 it.@74.173-74.254 A@75.074-75.114 guided@75.174-75.514 sharpening@75.594-76.055"
+  );
+  const mower: CueSpec = { id: "mower-blade-label", template: "SmallLabel", start: "every shed has a mower blade", startPad: -0.15, end: "a mower blade", endPad: 0.3, props: { at: "@a mower blade", text: "A mower blade" } };
+  // Job 412 (0:32-0:39).
+  const people = heard(
+    "a@32.154-32.194 cat.@32.254-32.594 A@33.274-33.314 few@33.374-33.554 people,@33.614-33.995 half@34.275-34.495 awake@34.555-34.855 and@34.895-34.995 fully@35.135-35.395 annoyed,@35.455-35.875 call@36.116-36.336 it@36.376-36.436 revenge.@36.516-37.056 Here's@37.736-37.916 the@37.957-38.037 thing@38.077-38.297 though,@38.337-38.557"
+  );
+  const revenge: CueSpec = { id: "revenge-myth", template: "MythStamp", start: "A few people, half awake", startPad: -0.15, end: "call it revenge", endPad: 0.3, props: { at: "@call it revenge", label: "Myth" } };
+
+  it("job 413: the label opens on the cut, shows on 'a mower blade' and is given its reading time from there", () => {
+    const [c] = resolveCues([mower], shed, { cuts: [66.54, 70.33, 74.92, 81.62], fps: FPS, ...sets });
+    expect(c.start).toBe(70.333); // on the cut, as it shipped
+    expect(c.shownAt).toBe(71.467); // its words, drawn a frame and a half before "a" (the read-ahead)
+    expect(readableFrames(c, FPS)).toBeGreaterThanOrEqual(MIN_ON_SCREEN_SEC * FPS);
+    // it leaves in the pause after "…cutting it.", before the next sentence and the next shot
+    expect(c.end).toBe(74.367);
+    expect(c.end).toBeLessThan(74.92);
+    expect(tooShortToRead(c, FPS)).toBe(false);
+    expect(stillUpAfterWords(c, FPS)).toBe(false);
+  });
+
+  it("job 413 as shipped: 0.95 s to read of a 2.1 s cue — too short, though the cue is long enough", () => {
+    const shipped = { startFrame: 2110, endFrame: 2174, shownAt: 71.467 };
+    expect(tooShortToRead(shipped, FPS)).toBe(true);
+    expect(tooShortToRead({ startFrame: 2110, endFrame: 2174 }, FPS)).toBe(false); // measured from the start, it passed
+    expect(readableFrames(shipped, FPS)).toBe(30);
+  });
+
+  it("job 412: the label-only MYTH stamp waits 3 s for 'call it revenge', and is read for 1.5 s from there", () => {
+    const [c] = resolveCues([revenge], people, { cuts: [28.91, 33.12, 40.35], fps: FPS, ...sets });
+    expect(c.start).toBe(33.133);
+    expect(c.shownAt).toBe(36.067);
+    expect(c.end).toBe(37.567); // was 37.367: 1.30 s after it showed
+    expect(c.end).toBeLessThan(people.find(w => w.text === "Here's")!.start); // never into the next sentence
+    expect(tooShortToRead(c, FPS)).toBe(false);
+    expect(tooShortToRead({ startFrame: 994, endFrame: 1121, shownAt: 36.067 }, FPS)).toBe(true); // as shipped
+  });
+
+  it("a graphic whose words come within its lead-in is read from its start, as before", () => {
+    // the planner's -0.15 s start: its first words drawn 0.1 s in
+    const [c] = resolveCues([{ ...mower, start: "a mower blade" }], shed, { cuts: [66.54, 70.33, 74.92], fps: FPS, ...sets });
+    expect(c.shownAt).toBeUndefined();
+    expect(shownFrom(c)).toBe(c.start);
+    expect(readableFrames(c, FPS)).toBe(c.endFrame - c.startFrame);
+  });
+
+  it("when the first words are drawn: at once for a title, a kicker or a list's title; else the first element's word, read ahead", () => {
+    expect(firstWordsFrame({ at: 3.0, label: "Myth" }, FPS)).toBe(Math.round((3.0 - 0.05) * FPS));
+    expect(firstWordsFrame({ text: "A mower blade", at: 1.179 }, FPS)).toBe(34);
+    expect(firstWordsFrame({ kicker: "Listed on Marketplace", a: { at: 0.8 }, b: { at: 1.2 } }, FPS)).toBe(0);
+    expect(firstWordsFrame({ title: "Her crossing", items: [{ at: 0.9 }] }, FPS)).toBe(0);
+    expect(firstWordsFrame({ kicker: "Skill · 1", number: 1, title: "The roof" }, FPS, true)).toBe(0);
+    expect(firstWordsFrame({ phrase: { text: "x", at: 0.65, wordTimes: [0.65] }, at: 2.1, label: "Myth" }, FPS)).toBe(18);
+    expect(WORDS_LEAD_IN_SEC).toBe(0.3);
   });
 });

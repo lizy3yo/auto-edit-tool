@@ -7909,3 +7909,57 @@ describe("a checklist ticks a list the narrator says, and a chapter series is th
     expect(out.cues.map(c => c.props.kicker)).toEqual(["Garage businesses · 1", "Garage businesses · 2"]);
   });
 });
+
+describe("round 14: a graphic is read from when its words show, and sits clear of the picture's subject (jobs 412, 413)", () => {
+  const FPS = 30;
+  const words = (s: string): Word[] =>
+    s.split(" ").map(t => {
+      const [text, range] = t.split("@");
+      const [start, end] = range.split("-").map(Number);
+      return { text, start, end };
+    });
+
+  it("413 (1:11): 'A mower blade' opened on the cut 1.2 s before its words and was read 1.0 s; now it is read 2.9 s, from its words", async () => {
+    const { resolveCues, readableFrames } = await import("../graphics/src/cueResolve");
+    const { resolveSets } = await import("../graphics/src/registry");
+    const heard = words(
+      "and@70.451-70.551 every@70.631-70.831 shed@70.931-71.252 has@71.292-71.452 a@71.512-71.532 mower@71.612-71.892 blade@71.932-72.172 that's@72.212-72.392 beating@72.512-72.833 the@72.873-72.933 grass@72.973-73.293 instead@73.333-73.613 of@73.633-73.693 cutting@73.793-74.113 it.@74.173-74.254 A@75.074-75.114 guided@75.174-75.514"
+    );
+    const spec = { id: "mower-blade-label", template: "SmallLabel", start: "every shed has a mower blade", startPad: -0.15, end: "a mower blade", endPad: 0.3, props: { at: "@a mower blade", text: "A mower blade" } };
+    const [c] = resolveCues([spec], heard, { cuts: [66.54, 70.33, 74.92], fps: FPS, ...resolveSets() });
+    expect([c.start, c.shownAt, c.end]).toEqual([70.333, 71.467, 74.367]);
+    expect(readableFrames(c, FPS) / FPS).toBeCloseTo(2.9, 6);
+    // as it shipped (cue to 72.47 s), QA now reports what it said was fine
+    expect(tooShortToRead({ startFrame: 2110, endFrame: 2174, shownAt: 71.467 }, FPS)).toBe(true);
+  });
+
+  it("412 (0:36): the MYTH stamp that showed for 1.25 s of a 4.2 s cue is read for 1.5 s from 'call it revenge'", async () => {
+    const { resolveCues } = await import("../graphics/src/cueResolve");
+    const { resolveSets } = await import("../graphics/src/registry");
+    const heard = words(
+      "A@33.274-33.314 few@33.374-33.554 people,@33.614-33.995 half@34.275-34.495 awake@34.555-34.855 and@34.895-34.995 fully@35.135-35.395 annoyed,@35.455-35.875 call@36.116-36.336 it@36.376-36.436 revenge.@36.516-37.056 Here's@37.736-37.916 the@37.957-38.037"
+    );
+    const spec = { id: "revenge-myth", template: "MythStamp", start: "A few people, half awake", startPad: -0.15, end: "call it revenge", endPad: 0.3, props: { at: "@call it revenge", label: "Myth" } };
+    const [c] = resolveCues([spec], heard, { cuts: [33.12, 40.35], fps: FPS, ...resolveSets() });
+    expect([c.shownAt, c.end]).toEqual([36.067, 37.567]);
+    expect(tooShortToRead(c, FPS)).toBe(false);
+    expect(tooShortToRead({ ...c, endFrame: 1121 }, FPS)).toBe(true); // its old end, 37.37 s
+  });
+
+  it("the price pair leaves the phone (413, 2:02), the MYTH stamp the sleeper's head (412, 0:36) and the cat's face (412, 1:44); placements that were clear stay", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { clearSpot } = await import("../graphics/src/spots");
+    const { templateById } = await import("../graphics/src/registry");
+    const { maps } = JSON.parse(readFileSync(`${import.meta.dirname}/../graphics/src/__fixtures__/subject-maps.json`, "utf8")) as { maps: Record<string, number[]> };
+    const choose = (template: string, size: { w: number; h: number }, frames: string[]) => {
+      const c = clearSpot(templateById(template).spots!, size, frames.map(f => maps[f]), { w: 1920, h: 1080 });
+      return `${c.from.v} ${c.from.h} → ${c.place.v} ${c.place.h}`;
+    };
+    expect(choose("NumberLabel", { w: 540, h: 220 }, ["phone"])).toBe("bottom left → bottom right");
+    expect(choose("MythStamp", { w: 534, h: 254 }, ["revenge"])).toBe("top right → top left");
+    expect(choose("MythStamp", { w: 728, h: 410 }, ["noct21", "noct22"])).toBe("top right → top left");
+    // the knife table (413, 1:40) and the frosted grass (411, 0:11): clear where they were designed
+    expect(choose("NumberLabel", { w: 540, h: 220 }, ["knives"])).toBe("bottom left → bottom left");
+    expect(choose("MythStamp", { w: 534, h: 254 }, ["robins"])).toBe("top right → top right");
+  });
+});

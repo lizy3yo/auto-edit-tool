@@ -13,6 +13,7 @@ import {
   VersusCard,
 } from "./cards";
 import {
+  CHAPTER_PLATE,
   ChapterLabel,
   DimCaption,
   HostCaption,
@@ -20,6 +21,7 @@ import {
   QuoteCard,
   StepLabels,
   WarningLabel,
+  chapterBox,
 } from "./overlays";
 import {
   ArrowCaption,
@@ -30,6 +32,8 @@ import {
   FactCard,
   IconCallout,
   ListWindow,
+  MYTH_STAMP_BAND,
+  MYTH_STAMP_PLACES,
   MythStamp,
   NumberLabel,
   SmallLabel,
@@ -37,6 +41,7 @@ import {
   TitleOverFootage,
   YesNoCard,
 } from "./more";
+import { CORNERS, numberLabelBox, placeBox, type Spots } from "./spots";
 
 export type Kind = "card" | "overlay";
 
@@ -64,6 +69,13 @@ export type TemplateDef = {
   /** A TITLE, not a caption (a chapter label): keeps its planned length instead of leaving when
    * its words are done. */
   structural?: boolean;
+  /** The places it may be drawn in over b-roll (`props.place`), the designed one first, and the box a
+   * drawing covers in each: the finishing step puts it in the one clear of the picture's subject
+   * (src/spots.ts `clearSpot`). For the graphics that sit at a FIXED spot on the picture and moved, if
+   * at all, only for contrast: job 413's price pair sat on the phone whose listing it priced, job 412's
+   * MYTH stamp on the sleeper's head and across the cat's eye, job 414's chapter plate on the froe
+   * its chapter is about. Over a host take the layout places it (`placementFor`) and this is not read. */
+  spots?: Spots;
   component: React.FC<any>;
   defaultProps: Record<string, unknown> & { durationSec: number };
 };
@@ -160,6 +172,14 @@ export const TEMPLATES: TemplateDef[] = [
     // seam onto the picture).
     panel: true,
     belowChin: true,
+    // Over b-roll: the corner band clear of the picture's subject (job 414's covered its froe).
+    spots: {
+      places: CORNERS,
+      box: place => {
+        const b = chapterBox({ place });
+        return { x0: b.left, y0: b.top, x1: b.left + b.width * b.scale, y1: b.top + CHAPTER_PLATE.h * b.scale };
+      },
+    },
     component: ChapterLabel,
     defaultProps: { durationSec: 5, kicker: "On the label · 1 of 3", number: 1, title: "The type" },
   },
@@ -265,6 +285,8 @@ TEMPLATES.push(
     id: "NumberLabel",
     kind: "overlay",
     on: "broll",
+    // The corner clear of the picture's subject (job 413's sat on the phone it priced).
+    spots: { places: CORNERS, box: numberLabelBox },
     component: NumberLabel,
     defaultProps: { durationSec: 5, kicker: "Time to escape", a: { label: "Then", value: "17 min", at: 0.3 }, b: { label: "Now", value: "3 min", at: 1.6 }, compare: true },
   },
@@ -316,6 +338,9 @@ TEMPLATES.push(
     kind: "overlay",
     on: "broll",
     movable: true,
+    // Top-right as designed, else the place clear of the picture's subject (job 412's stamped the
+    // sleeper's head, and its line crossed the cat's eye after the cut).
+    spots: { places: MYTH_STAMP_PLACES, box: (place, size) => placeBox(place, size, MYTH_STAMP_BAND) },
     component: MythStamp,
     defaultProps: { durationSec: 4, at: 0.6, phrase: { text: "Any alarm will wake you up.", at: 0.2 } },
   },
