@@ -8017,3 +8017,27 @@ describe("round 14: a sentence that moves to another setting ends the topic (job
     expect(settingNote(TURN, "a grey-and-white house cat stretched out on a living room sofa")).toBe("");
   });
 });
+
+describe("round 14: a thing's place is no setting turn (jobs 190 and 192, beside job 412 scene 26)", async () => {
+  const { atWork, contextRuns, parseContextGroups } = await import("./shotList");
+  it("the feed sacks stay one picture though the lead-in names the house the cloth was in", () => {
+    // Both films grouped these two lines under one picture of the feed sacks by the burn barrel. The
+    // lead-in's "in our house" is where the cloth was, inside a sentence the host's line opened — not
+    // where the talk goes — so the setting cut of 412 scene 26 must leave the group whole.
+    const sacks = "feed sacks stacked flat in the yard near the rusted burn barrel";
+    const scenes = [
+      host(0, "Out of 10 plain sewing projects I stitched up from"),
+      pic(1, "cloth that was already sitting in our house, the one that paid me best for my", sacks),
+      pic(2, "time came from a stack of feed sacks my husband set aside for the burn barrel.", sacks),
+    ];
+    expect(
+      parseContextGroups(
+        JSON.stringify({ groups: [{ ids: [1, 2], show: sacks }] }),
+        contextRuns(scenes),
+        i => scenes[i]?.showSubject,
+        i => atWork(scenes[i]),
+        i => scenes[i]?.scriptText
+      )
+    ).toEqual([{ ids: [1, 2], show: sacks }]);
+  });
+});

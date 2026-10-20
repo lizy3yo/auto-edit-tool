@@ -38,7 +38,7 @@ import {
   sexOfLook,
 } from "./hostLook";
 import { hostNameRanges, namesHostBefore } from "./hostIntro";
-import { SETTING_TURN_RULE, settingClash, settingNote } from "./lineSetting";
+import { SETTING_TURN_RULE, settingMove, settingNote } from "./lineSetting";
 import {
   followedPeople,
   hostOwnWords,
@@ -1709,7 +1709,7 @@ export const SHOT_LIST_SYSTEM =
   'of thread, and a pair of shears" = three shots, list: true).\n' +
   // Job 412 scene 26: "…she inherited that schedule… Indoor life softens it, …house cats…" stayed one
   // shot of the wild hunter in the desert — the same idea, so the same shot.
-  `2b. ${SETTING_TURN_RULE} A shot starts there.\n` +
+  `2b. ${SETTING_TURN_RULE} A new shot starts on that sentence's first words.\n` +
   "3. SAME AS BEFORE. When a beat's FIRST shot shows the same thing as the shot before it (the " +
   "previous beat is still on that subject), set same: true — it continues that picture instead of " +
   "starting a new one. Use it whenever the context has not changed.\n" +
@@ -4686,8 +4686,8 @@ export type ContextGroup = { ids: number[]; show: string };
 /**
  * The model's groups, kept only when they are real: 2+ consecutive ids inside ONE run, not
  * overlapping another group, with a picture description, not spanning a comparison
- * (`contrastAcross`), and never past a line that turns to a setting the group's picture is not in
- * (`settingClash`). Anything else is dropped. Pure.
+ * (`contrastAcross`), and never past a line that moves the talk to a setting the group's picture is not
+ * in (`settingMove`). Anything else is dropped. Pure.
  */
 export function parseContextGroups(
   text: string,
@@ -4731,19 +4731,24 @@ export function parseContextGroups(
     // drilling, because the last line's hands had to stay in the group's picture).
     // And a picture of a thing its own line names keeps it when the group's picture leaves it out
     // (`losesNamedThing`, job 413: "Pull up a stool." under the phone call of the line after it).
-    // And a line naming a setting the group's picture is not in keeps its own picture
-    // (`settingClash`, job 412 scenes 23-26: "…she inherited that schedule… Indoor life softens it, …
+    // And a line that moves the talk to a setting the group's picture is not in keeps its own picture
+    // (`settingMove`, job 412 scenes 23-26: "…she inherited that schedule… Indoor life softens it, …
     // house cats…" under the wild hunter in the desert brush, the same idea so the same topic). When a
-    // line before it was in the group, the talk has MOVED to that setting: the group ends there, and
-    // no line after it takes the old setting's picture either, even one naming no setting of its own
-    // — it is still where the talk went.
+    // line before it was in the group, or the line itself started where the group is and turned, the
+    // talk has MOVED to that setting: the group ends there, and no line after it takes the old
+    // setting's picture either, even one naming no setting of its own — it is still where the talk
+    // went. Only where the talk goes: a place a thing is kept in, inside a sentence the line did not
+    // open, never cuts (jobs 190/192: "cloth that was already sitting in our house" in the feed
+    // sacks' one picture).
     const runsOf: number[][] = [[]];
     let held = false;
     let ended = false;
     ids.forEach((id, k) => {
       if (ended) return;
-      if (saidOf && settingClash(saidOf(id), show)) {
-        if (held) ended = true;
+      const opens = id > 0 ? endsSentence(saidOf?.(id - 1)) : /^\W*[A-Z0-9]/.test(saidOf?.(id) ?? "");
+      const move = saidOf && settingMove(saidOf(id), show, opens);
+      if (move) {
+        if (held || move.turn) ended = true;
         else runsOf.push([]);
         return;
       }

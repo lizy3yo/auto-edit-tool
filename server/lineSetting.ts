@@ -15,10 +15,12 @@
  * starts, even when it goes on about the same thing or idea. The planners are told so in one wording
  * (`SETTING_TURN_RULE`), and the code holds the cases its words make plain: a line that NAMES a
  * setting ("indoor life", "house cats", "out in the wild", "centuries ago", "these days") against a
- * picture whose own words are set in the opposite one ("…across the dawn-lit wild landscape").
- * Only words that say WHERE or WHEN count — never a thing whose name holds one ("forest green",
- * "16:9 landscape framing", "a stack of exotic woods", "a houseplant habit"), and never a setting
- * the picture only implies. Pure — unit-tested.
+ * picture whose own words are set in the opposite one ("…across the dawn-lit wild landscape"), at
+ * the start of a sentence, where the TALK moves (`settingTurn`, `settingMove`) — a place named
+ * further into a sentence is often only where one thing in it is kept ("cloth that was already
+ * sitting in our house", jobs 190/192). Only words that say WHERE or WHEN count — never a thing whose
+ * name holds one ("forest green", "16:9 landscape framing", "a stack of exotic woods", "a houseplant
+ * habit"), and never a setting the picture only implies. Pure — unit-tested.
  */
 
 /** The settings a line can turn between, in pairs. */
@@ -218,6 +220,40 @@ export function settingTurn(line: string | undefined, picture: string | undefine
     before += wordCount(sentences[k]);
   }
   return undefined;
+}
+
+export type SettingMove = {
+  /** The setting the talk moves to. */
+  setting: LineSetting;
+  /** A later sentence of the line turns there (`settingTurn`): the line itself starts where it was. */
+  turn: boolean;
+};
+
+/**
+ * Whether a line, as one of a same-topic group's lines, MOVES THE TALK to a setting the group's
+ * picture is not in — the cut `parseContextGroups` makes in code, where the model cannot overrule it,
+ * so only where the talk itself goes, never where one thing in it is kept. Two ways: a later sentence
+ * of the line opens on the other setting (`settingTurn`, job 412 scene 26), or the line itself OPENS a
+ * sentence (`opensSentence`: the line before it ended one) whose opening clause is set there ("Indoors,
+ * they need a sunny window"). A place named inside a sentence the line did not open belongs to a thing
+ * of that sentence: "Out of 10 plain sewing projects I stitched up from | cloth that was already
+ * sitting in our house, the one that paid me best… came from a stack of feed sacks… set aside for the
+ * burn barrel" (jobs 190 and 192) is the feed sacks' one picture all the same — a whole-line clash cut
+ * that two-line group in both films. And "I keep a spray bottle… for flare-ups, and the dog gets shut
+ * in the house" (jobs 113 and 143) names the house only after its opening clause. A sentence that sets
+ * both sides against each other is the sentence's own comparison, never a move. Pure.
+ */
+export function settingMove(
+  line: string | undefined,
+  picture: string | undefined,
+  opensSentence: boolean
+): SettingMove | undefined {
+  const turn = settingTurn(line, picture);
+  if (turn) return { setting: turn.setting, turn: true };
+  if (!opensSentence) return undefined;
+  const first = sentencesOf((line ?? "").trim())[0] ?? "";
+  const setting = settingClash(openingClause(first), picture);
+  return setting && !saidSettings(first).includes(OPPOSITE[setting]) ? { setting, turn: false } : undefined;
 }
 
 /**

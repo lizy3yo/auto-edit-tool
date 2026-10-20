@@ -19,6 +19,7 @@ import {
   SETTING_TURN_RULE,
   saidSettings,
   settingClash,
+  settingMove,
   settingNote,
   settingTurn,
   shownSettings,
@@ -145,6 +146,34 @@ describe("settingTurn: where a line moves away from its picture's setting", () =
     expect(settingTurn("Out it goes. Indoors it fades.", WILD)).toBeUndefined();
   });
 
+  it("settingMove: where the talk goes, never where a thing is kept", () => {
+    // A turn moves the talk whether or not the line opened a sentence.
+    expect(settingMove(L26, WILD, false)).toEqual({ setting: "indoors", turn: true });
+    // A line that opens a sentence set elsewhere.
+    expect(settingMove("Indoor life softens it, but it rarely erases it.", WILD, true)).toEqual({ setting: "indoors", turn: false });
+    // The same words inside a sentence another line opened: a thing's place, or the line check's call.
+    expect(settingMove("Indoor life softens it, but it rarely erases it.", WILD, false)).toBeUndefined();
+    expect(
+      settingMove(
+        "cloth that was already sitting in our house, the one that paid me best for my",
+        "feed sacks stacked flat in the yard near the rusted burn barrel",
+        false
+      )
+    ).toBeUndefined();
+    // Named after the opening clause, and a sentence that holds both sides.
+    expect(
+      settingMove(
+        "I keep a spray bottle of water right next to the torch for flare-ups, and Biscuit gets shut in the house,",
+        "a spray bottle of water sitting beside the propane torch on the driveway",
+        true
+      )
+    ).toBeUndefined();
+    expect(settingMove("Indoors it fades, but out in the wild it stays sharp.", WILD, true)).toBeUndefined();
+    // Set where its picture is, or nothing to move from.
+    expect(settingMove(L24, WILD, true)).toBeUndefined();
+    expect(settingMove(L26, INDOOR_CAT, true)).toBeUndefined();
+  });
+
   it("settingNote tells the line check only where a line turns", () => {
     expect(settingNote(L26, WILD_CLOSE)).toBe(' (its words turn to another setting at "Indoor life softens it": indoors)');
     expect(settingNote(L27, BED)).toBe("");
@@ -202,21 +231,60 @@ describe("the same-topic groups end where the talk moves to another setting (job
     expect(g).toEqual([]);
   });
 
-  it("a first line set elsewhere keeps its own picture and the rest still join", () => {
-    const sacks = "a stack of printed feed sacks piled beside the rusty burn barrel outside";
-    const scenes = [
-      pic(1, "cloth that was already sitting in our house, the one that paid me best", sacks),
-      pic(2, "came from a stack of feed sacks my husband set aside for the burn barrel.", sacks),
-      pic(3, "Every one of them had a print on it.", sacks),
-    ];
-    const g = parseContextGroups(
-      JSON.stringify({ groups: [{ ids: [0, 1, 2], show: sacks }] }),
+  const groupsOf = (scenes: StoryboardScene[], ids: number[], show: string) =>
+    parseContextGroups(
+      JSON.stringify({ groups: [{ ids, show }] }),
       contextRuns(scenes),
-      i => scenes[i].showSubject,
+      i => scenes[i]?.showSubject,
       i => atWork(scenes[i]),
-      i => scenes[i].scriptText
+      i => scenes[i]?.scriptText
     );
-    expect(g).toEqual([{ ids: [1, 2], show: sacks }]);
+
+  it("a place a thing is kept in, inside a sentence the line did not open, never cuts (jobs 190/192)", () => {
+    // The feed sacks' one picture, as both films grouped it: the lead-in names the house the cloth was
+    // in, not where the talk goes. A whole-line clash cut this two-line group to nothing.
+    const sacks = "feed sacks stacked flat in the yard near the rusted burn barrel";
+    const scenes = [
+      host(0, "Out of 10 plain sewing projects I stitched up from"),
+      pic(1, "cloth that was already sitting in our house, the one that paid me best for my", sacks),
+      pic(2, "time came from a stack of feed sacks my husband set aside for the burn barrel.", sacks),
+    ];
+    expect(settingClash(scenes[1].scriptText, sacks)).toBe("indoors");
+    expect(groupsOf(scenes, [1, 2], sacks)).toEqual([{ ids: [1, 2], show: sacks }]);
+    // Jobs 113/143: the dog is shut in the house after the sentence's opening clause, about the spray
+    // bottle beside the torch outside.
+    const torch = "a spray bottle of water sitting beside the propane torch on the driveway";
+    const yard = [
+      pic(100, "and keep that torch pointed away from you and your feet.", torch),
+      pic(101, "I keep a spray bottle of water right next to the torch for flare-ups, and Biscuit gets shut in the house,", torch),
+      pic(102, "since that dog is convinced every board I burn is a barbecue.", torch),
+    ];
+    expect(groupsOf(yard, [0, 1, 2], torch)).toEqual([{ ids: [0, 1, 2], show: torch }]);
+  });
+
+  it("a line that opens a sentence in another setting moves the talk there", () => {
+    // Job 168: the porch basket's lines, then the buyers' nursery — the group ends at the nursery.
+    const porch = "a finished chunky yarn basket standing upright on the porch";
+    const basket = [
+      host(320, "strands cover so much ground with every stitch."),
+      pic(321, "Some folks think a basket ought to be woven from reeds and not crochet,", porch),
+      pic(322, "and I love them for caring, but not one buyer ever asked.", porch),
+      pic(323, "These sell to people who want a nice soft basket for the baby's toys in the nursery,", porch),
+      pic(324, "and they keep coming back for a second one.", porch),
+    ];
+    expect(groupsOf(basket, [1, 2, 3, 4], porch)).toEqual([{ ids: [1, 2], show: porch }]);
+    // As a group's FIRST line it keeps its own picture, and the lines after it still join.
+    const garden = "rows of young tomato seedlings out in the garden in morning light";
+    const seedlings = [
+      host(0, "That is the hard part done."),
+      pic(1, "Indoors, a seedling needs a sunny window and half the water.", garden),
+      pic(2, "Out in the garden they want full sun all day long,", garden),
+      pic(3, "and a good soak every single morning.", garden),
+    ];
+    expect(groupsOf(seedlings, [1, 2, 3], garden)).toEqual([{ ids: [2, 3], show: garden }]);
+    // A first line that TURNS ends the group: the lines after it are where the talk went.
+    const wild = [host(22, "a costume they wear in cartoons."), pic(26, L26, WILD), pic(27, "And that is the rhythm she keeps.", WILD)];
+    expect(groupsOf(wild, [1, 2], WILD)).toEqual([]);
   });
 
   it("lines set where the group's picture is still join", () => {
@@ -254,7 +322,7 @@ describe("the line check judges a picture's setting against its line's (job 412 
     expect(FIT_SYSTEM).toMatch(/A picture marked "its\s+words turn to another setting at …" has such a sentence: split it there/);
     expect(FIT_SYSTEM).not.toMatch(CHANNEL_OBJECTS);
     // The shot list starts a shot there too.
-    expect(SHOT_LIST_SYSTEM).toContain(`2b. ${SETTING_TURN_RULE} A shot starts there.`);
+    expect(SHOT_LIST_SYSTEM).toContain(`2b. ${SETTING_TURN_RULE} A new shot starts on that sentence's first words.`);
     expect(SHOT_LIST_SYSTEM).not.toMatch(CHANNEL_OBJECTS);
   });
 
