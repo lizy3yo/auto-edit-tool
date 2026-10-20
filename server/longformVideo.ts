@@ -294,10 +294,44 @@ export const TOOL_AT_WORK_FIX =
 /** A fault the check names on a tool or a tool's working part. */
 const TOOL_FAULT =
   /\b(?:blades?|(?:drill|router)\s+bits?|saws?|chisels?|gouges?|froes?|wedges?|mauls?|axes?|hatchets?|knife|knives|draw\s?knife|drawknives|spokeshaves?|planes?|drills?|screwdrivers?|hammers?|mallets?|needles?|scissors|shears|cutters?|wrench(?:es)?|pliers|tools?)\b/i;
-/** …a tool that splits wood (`SPLIT_STRIKE_CLAUSE`) — a maul or axe is swung, never struck. */
-const SPLITTING_TOOL = /\b(?:froes?|wedges?|riv(?:e|en|es|ing)|end\s+grain)\b/i;
+/**
+ * The same words naming no tool: a wedge of food, a shoe or a golf club, a door wedge, pine needles.
+ * Taken out before a fault or a picture's words are read for a tool.
+ */
+const NOT_A_TOOL =
+  /\b(?:(?:lemon|lime|orange|apple|cheese|potato|tomato|melon|watermelon|cake|pizza|golf|sand|pitching|lob|gap|door)\s+wedges?|wedges?\s+(?:heels?|sandals?|shoes?|boots?|pillows?|cushions?|salads?|of\s+(?:lemon|lime|orange|apple|cheese|cake|pie|pizza|melon))|(?:pine|fir|spruce|cedar)\s+needles?)\b/gi;
+/**
+ * An AIRCRAFT in the fault or the picture: its "plane" is no tool. The replay over the stored
+ * storyboards found two pictures of passengers in "plane seats" and at a "plane window" (job 410
+ * scenes 2 and 24) that would have been told how a plane shaves wood. No word a workshop uses too:
+ * not "pilot" (a pilot hole), "flying" (chips flying), "flight" (of stairs) or "jet" (jet-black).
+ */
+const AIRCRAFT =
+  /\b(?:air(?:plane|craft|liner|port|line)s?|aeroplanes?|jetliners?|cockpits?|runways?|passengers?|tray\s+tables?|fuselages?|overhead\s+bins?|propellers?|hangars?|planes?\s+(?:seats?|windows?|wings?|tickets?|cabins?|aisles?|rides?|trips?|engines?|crash(?:es)?|landing|lands))\b/i;
+/** A fault's or a picture's words with every tool word that names no tool taken out. */
+const toolWords = (t: string, aircraft: boolean) => {
+  const out = t.replace(NOT_A_TOOL, " ");
+  return aircraft ? out.replace(/\bplanes?\b/gi, " ") : out;
+};
+/**
+ * …a tool that splits wood (`SPLIT_STRIKE_CLAUSE`) — a maul or axe is swung, never struck. Not END GRAIN
+ * on its own: the replay found seven pictures of a wood-burning pen or torch on a tray's end grain
+ * (jobs 110, 131, 146, 161, 171, 175) that would have been told to strike a froe with a club. Nor a
+ * table saw's riving knife.
+ */
+const SPLITTING_TOOL = /\b(?:froes?\b|riv(?:e|en|es|ing)\b(?!\s+kni(?:fe|ves)))/i;
+/** …a wedge, only where something is split (a wedge alone may hold a door or be a slice of cheese). */
+const SPLITTING_WEDGE = /\bwedges?\b/i;
+const SPLIT_CUE = /\b(?:split(?:s|ting)?|mauls?|sledges?(?:hammers?)?|logs?|bolts?|stumps?|firewood|kindling)\b/i;
 /** …a tool that shaves wood by a pull or a push (`SHAVING_STROKE_CLAUSE`). */
 const SHAVING_TOOL = /\b(?:draw\s?knife|drawknives|spokeshaves?|planes?|planing)\b/i;
+/**
+ * A fault in the BODY — a finger, hand or arm too many or too few. A fresh seed clears it (job 352's
+ * note: 7 of 9 broken frames came right on a plain reroll), and naming "six fingers" in the prompt is
+ * the one thing that could put them back, so it keeps its plain reroll even beside a tool.
+ */
+const BODY_COUNT_FAULT =
+  /\b(?:extra|third|too\s+many|too\s+few|six|seven|eight)[\s-]+(?:fingers?|fingered|thumbs?|hands?|handed|arms?|armed|legs?)\b|\b(?:fingers?|thumbs?|hands?|arms?)\s+(?:fused|merged|duplicated)\b/i;
 
 /**
  * The clause the first broken draw of a tool or a line is redrawn with (`faultRedrawFor`'s "named
@@ -305,8 +339,9 @@ const SHAVING_TOOL = /\b(?:draw\s?knife|drawknives|spokeshaves?|planes?|planing)
  * (`CONNECTING_LINES_CLAUSE`) in any picture; on a picture of someone at work, the rule of the tool's
  * own kind, named by the fault or else by the picture's words (`SPLIT_STRIKE_CLAUSE`,
  * `SHAVING_STROKE_CLAUSE`), else `TOOL_AT_WORK_FIX`. Undefined for any other fault, a fault with no
- * words, and a tool in a picture with nobody in it — a tool with no hand on it cannot be put to work,
- * so that frame keeps its plain reroll and then the at-rest draw. Pure.
+ * words, a finger or a hand too many (`BODY_COUNT_FAULT`), and a tool in a picture with nobody in it —
+ * a tool with no hand on it cannot be put to work, so that frame keeps its plain reroll and then the
+ * at-rest draw. Pure.
  */
 export function namedFaultClause(
   what: string | undefined,
@@ -319,16 +354,19 @@ export function namedFaultClause(
     .replace(/\s+/g, " ")
     .trim()
     .replace(/[.;,:\s]+$/, "");
-  if (!fault) return undefined;
+  if (!fault || BODY_COUNT_FAULT.test(fault)) return undefined;
   let rules: string[];
+  // A plane, a wedge or a needle that is no tool (an aircraft, a slice, a pine) names no tool's rule.
+  const aircraft = AIRCRAFT.test(`${fault} ${words}`);
+  const faultTool = toolWords(fault, aircraft);
   if (connectingLinesClause(fault)) rules = [CONNECTING_LINES_CLAUSE];
-  else if (atWork && TOOL_FAULT.test(fault)) {
+  else if (atWork && TOOL_FAULT.test(faultTool)) {
     const kinds = (t: string) => [
-      ...(SPLITTING_TOOL.test(t) ? [SPLIT_STRIKE_CLAUSE] : []),
+      ...(SPLITTING_TOOL.test(t) || (SPLITTING_WEDGE.test(t) && SPLIT_CUE.test(t)) ? [SPLIT_STRIKE_CLAUSE] : []),
       ...(SHAVING_TOOL.test(t) ? [SHAVING_STROKE_CLAUSE] : []),
     ];
-    const own = kinds(fault);
-    const fromWords = kinds(words);
+    const own = kinds(faultTool);
+    const fromWords = kinds(toolWords(words, aircraft));
     rules = own.length ? own : fromWords.length ? fromWords : [TOOL_AT_WORK_FIX];
   } else return undefined;
   return `${NAMED_FAULT_START} ${fault}. This time draw it the way it really is. ${rules.join(" ")}`;
@@ -6233,12 +6271,14 @@ export const SPLIT_STRIKE_CLAUSE =
  * teach plenty of these" drawn with a drawknife laid along the length of the board, the worker at the
  * bench's side — its stroke would run across the board's narrow width; scene 14 repeated the stroke).
  * The tool rules gave a pull tool its grip and set-up, never which way it travels against the work.
- * Part of `TOOL_POSITION_CLAUSE`.
+ * Part of `TOOL_POSITION_CLAUSE`. Which way a PLANE goes is not said: a Western plane is pushed, a
+ * Japanese one pulled, and the stored storyboards hold a Japanese plane — told "pushed away", a
+ * picture of one being pulled would be turned round.
  */
 export const SHAVING_STROKE_CLAUSE =
   "A tool that shaves wood by being pulled or pushed — a drawknife, spokeshave or plane — has its " +
-  "edge lying ACROSS the piece and travels ALONG the piece's length, with the grain (a drawknife " +
-  "pulled toward the user's body, a plane pushed away), never sideways across the piece's narrow " +
+  "edge lying ACROSS the piece and travels ALONG the piece's length, with the grain (a drawknife is " +
+  "pulled toward the user's body), never sideways across the piece's narrow " +
   "width; the piece is held still in a vise, on a shaving horse, against a bench stop or clamped down.";
 
 /**
@@ -6249,15 +6289,22 @@ export const SHAVING_STROKE_CLAUSE =
  * fitting and merged the two lines. Added to any picture whose words name a line that connects things
  * (`connectingLinesClause`), with people in it or not. A line coiled or hung up is left loose: the
  * replay over the stored storyboards found garden hoses coiled on a wall beside a fire extinguisher,
- * which a rule to fit every hose to a part would have plumbed into something.
+ * which a rule to fit every hose to a part would have plumbed into something. Lines MAY meet at a real
+ * fitting: the replay found plumbing pictures — a sink's P-trap with its slip nuts (job 11), "grey PVC
+ * pipework with visible joints and bends" (job 403 scenes 10 and 14) — where a pipe is several pieces
+ * and a branch joins the run at a tee; told "one continuous piece" that never joins another line, the
+ * picture maker could cut the drain apart. What it must never do is turn one line into another of a
+ * different kind, which is what job 413 drew.
  */
 export const CONNECTING_LINES_CLAUSE =
-  "Every cable, wire, cord, hose or pipe that connects things runs as ONE continuous piece from " +
-  "where it really starts to the one part it really serves, and is fitted onto that part: an " +
-  "electrical lead to what it powers or fires, a fuel, water or air line to its own fitting. It never " +
-  "runs into a different part's fitting, never joins, swaps with or turns into another line, and " +
-  "never fades into a surface; two lines that run side by side stay two separate lines. One that is " +
-  "coiled, hung up or lying loose has its own free ends and runs into nothing.";
+  "Every cable, wire, cord, hose or pipe that connects things runs unbroken from where it really " +
+  "starts to the part it really serves (a pipe through its own real joints and bends), and is fitted " +
+  "onto that part: an electrical lead to what it powers or fires, a fuel, water or air line to its " +
+  "own fitting. It never runs into a different part's fitting, never swaps with or turns into a " +
+  "different line (an electrical lead never becomes a fuel or water line), and never fades into a " +
+  "surface; lines meet only where a real fitting joins them, and two lines that run side by side stay " +
+  "two separate lines. One that is coiled, hung up or lying loose has its own free ends and runs into " +
+  "nothing.";
 
 /**
  * Words naming a line that connects one thing to another. A bare "cord" is not one: the replay found it

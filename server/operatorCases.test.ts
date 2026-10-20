@@ -7918,7 +7918,9 @@ describe("a tool works the way it really does, and a line ends at the part it se
   it("414-13 a drawknife lies across the board and strokes along it, the piece held", async () => {
     const { SHAVING_STROKE_CLAUSE } = await import("./longformVideo");
     expect(SHAVING_STROKE_CLAUSE).toMatch(/edge lying ACROSS the piece and travels ALONG the piece's length, with the grain/);
-    expect(SHAVING_STROKE_CLAUSE).toMatch(/a drawknife pulled toward the user's body, a plane pushed away/);
+    expect(SHAVING_STROKE_CLAUSE).toMatch(/a drawknife is pulled toward the user's body/);
+    // Which way a plane goes is never said: a Japanese plane is pulled (job 161 scene 117 holds one).
+    expect(SHAVING_STROKE_CLAUSE).not.toMatch(/pushed away|plane (?:is )?pushed/);
     expect(SHAVING_STROKE_CLAUSE).toMatch(/never sideways across the piece's narrow width/);
     expect(SHAVING_STROKE_CLAUSE).toMatch(/held still in a vise, on a shaving horse, against a bench stop or clamped down/);
     expect(TOOL_POSITION_CLAUSE).toContain(SHAVING_STROKE_CLAUSE);
@@ -7940,8 +7942,15 @@ describe("a tool works the way it really does, and a line ends at the part it se
 
   it("413-29 the spark plug wire runs to the one part it serves — with people in the picture or not", async () => {
     const { CONNECTING_LINES_CLAUSE } = await import("./longformVideo");
-    expect(CONNECTING_LINES_CLAUSE).toMatch(/runs as ONE continuous piece from where it really starts to the one part it really serves/);
-    expect(CONNECTING_LINES_CLAUSE).toMatch(/never runs into a different part's fitting, never joins, swaps with or turns into another line/);
+    expect(CONNECTING_LINES_CLAUSE).toMatch(/runs unbroken from where it really starts to the part it really serves/);
+    expect(CONNECTING_LINES_CLAUSE).toMatch(
+      /never runs into a different part's fitting, never swaps with or turns into a different line \(an electrical lead never becomes a fuel or water line\)/
+    );
+    // A pipe is several pieces and a branch joins its run at a tee (job 11's P-trap, job 403's PVC
+    // pipework "with visible joints and bends"): lines may meet at a real fitting.
+    expect(CONNECTING_LINES_CLAUSE).toMatch(/a pipe through its own real joints and bends/);
+    expect(CONNECTING_LINES_CLAUSE).toMatch(/lines meet only where a real fitting joins them/);
+    expect(CONNECTING_LINES_CLAUSE).not.toMatch(/ONE continuous piece|never joins/);
     expect(CONNECTING_LINES_CLAUSE).toMatch(/two lines that run side by side stay two separate lines/);
     const scenes = [plugWire29()];
     markHostBroll(scenes, { hostLook: WOODWORKER, hostName: "Gary" }, "https://x/host.png");
@@ -7993,7 +8002,9 @@ describe("a tool works the way it really does, and a line ends at the part it se
   it("the still check names a line in the wrong part, a drawknife along the board, and a froe pressed by hand", () => {
     const q2 = STILL_DEFECT_SYSTEM.slice(STILL_DEFECT_SYSTEM.indexOf("QUESTION 2"), STILL_DEFECT_SYSTEM.indexOf("QUESTION 3"));
     expect(q2).toMatch(/a cable, wire, cord, hose or pipe that runs into a part it does not serve or into another part's fitting/);
-    expect(q2).toMatch(/two different lines joined into one/);
+    expect(q2).toMatch(/one line turning into a different one with no fitting between them/);
+    expect(q2).toMatch(/lines meeting at a real fitting \(a pipe tee, a coupler, a plug in its socket\) are right/);
+    expect(q2).not.toMatch(/two different lines joined into one/);
     expect(q2).toMatch(/a drawknife or spokeshave whose blade lies ALONG the length of the piece it is shaving/);
     expect(q2).toMatch(/stroke would run sideways across the piece's narrow width instead of along its length/);
     expect(q2).toMatch(
@@ -8073,6 +8084,71 @@ describe("a tool works the way it really does, and a line ends at the part it se
     // A fault in no tool and no line leaves the prompt as it was.
     expect(namedFaultRedraw(P, "cutting board floating above the table", words17, true)).toBe(P);
     expect(namedFaultRedraw(P, undefined, words17, true)).toBe(P);
+  });
+
+  // The replay over the stored storyboards (the review of this fix): the kind of tool was read off words
+  // that name no such tool, and would have put a froe and a club into pictures with none.
+  it("a tool's kind is read only off a tool of that kind: end grain, a riving knife, a slice, an aircraft", async () => {
+    const { namedFaultClause, SPLIT_STRIKE_CLAUSE, SHAVING_STROKE_CLAUSE, TOOL_AT_WORK_FIX } = await import(
+      "./longformVideo"
+    );
+    // Jobs 131 scene 68 and 171 scene 326: a wood-burning pen and tool on a tray's END GRAIN — no split.
+    for (const words of [
+      "Weathered bare hands grip a wood-burning pen, its metal tip glowing orange, positioned over the pale pine end grain of a clamped tea tray in a garage workshop under flat daylight",
+      "hands using a woodburning tool on the end grain of a wooden tray, close up",
+    ]) {
+      const c = namedFaultClause("woodburning tool tip in the air above the tray", words, true);
+      expect(c, words).toContain(TOOL_AT_WORK_FIX);
+      expect(c, words).not.toContain(SPLIT_STRIKE_CLAUSE);
+      expect(namedFaultClause("tool tip sunk through the end grain", words, true), words).not.toContain(SPLIT_STRIKE_CLAUSE);
+    }
+    // A table saw's riving knife is no riving tool.
+    const saw = namedFaultClause("saw blade passing through the riving knife", "hands feeding a board past a table saw's riving knife", true);
+    expect(saw).toContain(TOOL_AT_WORK_FIX);
+    expect(saw).not.toContain(SPLIT_STRIKE_CLAUSE);
+    // A wedge of food is no splitting wedge, and is no tool at all.
+    expect(namedFaultClause("lemon wedges floating above the plate", "hands squeezing lemon wedges over a plate", true)).toBeUndefined();
+    const knife = namedFaultClause("knife blade passing through the board", "hands cutting a lemon into wedges on a cutting board", true);
+    expect(knife).toContain(TOOL_AT_WORK_FIX);
+    expect(knife).not.toContain(SPLIT_STRIKE_CLAUSE);
+    // …while a wedge splitting a log, and a froe, still get the strike.
+    expect(namedFaultClause("steel wedge resting on top of the log", "hands driving a steel wedge into a log", true)).toContain(SPLIT_STRIKE_CLAUSE);
+    expect(namedFaultClause("wedge lying on top, not in the wood", "splitting a round with a wedge and a sledge", true)).toContain(SPLIT_STRIKE_CLAUSE);
+    expect(namedFaultClause("froe resting on top of the bolt", "", true)).toContain(SPLIT_STRIKE_CLAUSE);
+    // Job 410 scenes 2 and 24: passengers in "plane seats", at a "plane window" — no plane that shaves.
+    const seats = "two older passengers seated side by side in the same row of plane seats, seen from behind";
+    expect(namedFaultClause("plane seat back merging into the window", seats, true)).toBeUndefined();
+    expect(namedFaultClause("plane wing bent through the window", "a plane window view of farmland far below", true)).toBeUndefined();
+    // …while a woodworker's plane still does (job 352 scene 140).
+    const jack =
+      "host's hands pushing a long grey metal jack plane with a wooden rear handle and front knob across a rough oak board face";
+    expect(namedFaultClause("plane lying sideways across the board's width", jack, true)).toContain(SHAVING_STROKE_CLAUSE);
+    expect(namedFaultClause("blade lifted off the board", jack, true)).toContain(SHAVING_STROKE_CLAUSE);
+    // A workshop's own words never read as an aircraft: a pilot hole, chips flying, jet-black handles.
+    expect(
+      namedFaultClause(
+        "plane lying sideways, chips flying",
+        "hands pushing a jet-black hand plane along a board beside a drilled pilot hole",
+        true
+      )
+    ).toContain(SHAVING_STROKE_CLAUSE);
+  });
+
+  it("a finger or a hand too many keeps its plain reroll, even beside a tool: naming it could draw it again", async () => {
+    const { namedFaultClause, faultRedrawFor } = await import("./longformVideo");
+    const words = `${froe17().showSubject} ${froe17().visualPrompt}`;
+    for (const what of [
+      "six fingers on the froe handle",
+      "hand with too many fingers gripping the saw",
+      "extra hand on the drill",
+      "a third arm holding the chisel",
+      "six-fingered hand on the hammer",
+    ]) {
+      expect(namedFaultClause(what, words, true), what).toBeUndefined();
+      expect(faultRedrawFor({}, { broken: true, what }, { broken: 0, writing: 0 }, new Set(), true, true), what).toBeUndefined();
+    }
+    // Two hands pressing a froe down is the very fault of job 414 scene 17, never a body count.
+    expect(namedFaultClause("froe pressed down by two hands, no club", words, true)).toBeDefined();
   });
 
   it("the new rules name no channel's things", async () => {

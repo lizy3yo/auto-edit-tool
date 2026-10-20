@@ -134,11 +134,14 @@ export const STILL_DEFECT_SYSTEM =
   "- a drawknife or spokeshave whose blade lies ALONG the length of the piece it is shaving, so its " +
   "stroke would run sideways across the piece's narrow width instead of along its length\n" +
   // Round 14, job 413 scene 29: the plug lead looping into the carburetor's fuel inlet. A loose cord
-  // or a stripped wire end is real, so only a line ending in the wrong part or merged is named.
+  // or a stripped wire end is real, so only a line ending in the wrong part or merged is named — and
+  // lines meeting at a real fitting are right: a drain's branch joins its run at a tee (job 403's
+  // "PVC pipework with visible joints and bends").
   "- a cable, wire, cord, hose or pipe that runs into a part it does not serve or into another " +
   "part's fitting (an electrical lead plugged into a fuel or water fitting, a hose ending in a power " +
-  "socket), two different lines joined into one, or a line that fades into a surface or into another " +
-  "object\n" +
+  "socket), one line turning into a different one with no fitting between them (an electrical lead " +
+  "that becomes a fuel hose), or a line that fades into a surface or into another object; lines " +
+  "meeting at a real fitting (a pipe tee, a coupler, a plug in its socket) are right\n" +
   "- a phone, tablet or laptop built into, framed by or made of another object (a tablet whose " +
   "frame is a cutting board, a screen set inside a quilt or a shelf)\n" +
   "- a body part that looks CUT OFF: hair still shaped like a head or hairstyle with no head " +
