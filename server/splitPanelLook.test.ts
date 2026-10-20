@@ -259,7 +259,7 @@ describe("the panel is drawn like the b-roll of its thing (withSplitMemory)", ()
     const start = src.indexOf("async function regenerateSplitRight(");
     expect(start).toBeGreaterThan(0);
     const body = src.slice(start, src.indexOf("\n}\n", start));
-    const attach = body.indexOf("attachMemory(scenes, [scene], params.keyThings)");
+    const attach = body.indexOf("attachMemory(scenes, [scene], params.keyThings");
     expect(attach).toBeGreaterThan(0);
     expect(attach).toBeLessThan(body.indexOf("renderSplitRightClip("));
     expect(attach).toBeLessThan(body.indexOf("renderSplitRightMotionClip("));

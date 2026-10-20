@@ -356,6 +356,17 @@ export interface ThingLook {
   look: string;
 }
 
+/**
+ * The written look of a PLACE a picture is set in (`StoryboardScene.placeLooks`): a place key thing or
+ * the props list's home setting, cut to what the place is made of — or, with `in`, a key thing that
+ * stands in that place (the bed in the bedroom), which keeps one look in every picture set there.
+ */
+export interface PlaceLook {
+  name: string;
+  look: string;
+  in?: string;
+}
+
 export interface StoryboardScene {
   index: number;
   /** Short display label for this beat (derived = first words of `scriptText`) */
@@ -651,6 +662,15 @@ export interface StoryboardScene {
    * look, and came back holding a lily card in place of the cream card with a grey ribbon.
    */
   otherThingLooks?: ThingLook[];
+  /**
+   * The written looks of the PLACES this picture is set in, and of the key things its words name that
+   * stand in them with no reference picture showing them (set at render, `memoryFor`): a place never
+   * lends a reference picture — job 411's lawn handed scene 1's yard to four later pictures and its snow
+   * to the Gulf Coast panel — so a place is held to one look in words, and only where the picture's own
+   * words set it in that same place (`placeLookClause`). Job 412's "ankle" list item, drawn from
+   * nothing, came back in another bedroom with other bedding.
+   */
+  placeLooks?: PlaceLook[];
   /**
    * The picture's last check said what it must show is not in it (`missing`), so no later picture is
    * drawn from it (`memorySourcesFor`): stored films had 22 first pictures copied after failing

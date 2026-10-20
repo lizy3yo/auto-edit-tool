@@ -66,6 +66,7 @@ import {
   requiredThingsFor,
   BACKGROUND_VIEW,
   BLUR_PRINT_VIEW,
+  homePlaceOf,
   keyThingLookClause,
   lookToHold,
   memoryAttached,
@@ -74,6 +75,7 @@ import {
   nearCopyPartner,
   panelLook,
   pictureSettled,
+  placeLookClause,
   sameThingMove,
   SCREEN_ITEM_VIEW,
   SET_ITEM_VIEW,
@@ -602,6 +604,7 @@ import type {
   TtsWaitState,
   RecurringPerson,
   MemoryRef,
+  PlaceLook,
   ThingLook,
 } from "../shared/types";
 import {
@@ -7280,12 +7283,15 @@ export function buildStillPrompt(
   // ITS KEY THING'S LOOK, when no earlier picture of it is there to follow (`keyThingLookClause`);
   // a named kind's exact look wins. Not on a content-policy fallback, which no longer shows it.
   const look = !visualOverride ? scrubLegibleWriting(keyThingLookClause(scene)) : "";
+  // WHERE IT IS SET, in words (`placeLookClause`): a place lends no reference picture, so a recurring
+  // place keeps one look this way — job 412's "ankle" list item came back in another bedroom.
+  const place = !visualOverride ? scrubLegibleWriting(placeLookClause(scene)) : "";
   // A PART HIDDEN INSIDE IS SEEN FROM OUTSIDE (`drawnFromOutside`): job 403 drew its trapway sawn open
   // on every picture that named it ("close view of the toilet's internal porcelain S-shaped trapway
   // channel") or was about it ("close-up of the smooth white curved S-shaped porcelain channel").
   const outside = !visualOverride && drawnFromOutside(scene) ? ` ${SEEN_FROM_OUTSIDE_CLAUSE}` : "";
   return withAllowedText(
-    `${lead}${visual}${scrubLegibleWriting(namedLookClause(scene))}${look}${outside}${item}${angleSuffix}${personSuffix}${memory}${app} ${amateurIphoneLook(subject, motion)} ${framing} ${noFigures} ${NO_BOOK_SUFFIX}`,
+    `${lead}${visual}${scrubLegibleWriting(namedLookClause(scene))}${look}${place}${outside}${item}${angleSuffix}${personSuffix}${memory}${app} ${amateurIphoneLook(subject, motion)} ${framing} ${noFigures} ${NO_BOOK_SUFFIX}`,
     scene.pictureText,
     scene.blurPrint
   );
@@ -7745,7 +7751,8 @@ export type MemoryFields = Pick<
  * continues (`memoryRightBefore`, `memoryContinues`); the look kept for a redraw from words
  * (`memoryWordsLook`); the other key things none of the references shows (`memoryNotShown`); and the
  * written looks of the other key things its own words name, kept for a redraw from words
- * (`otherThingLooks`). Pure.
+ * (`otherThingLooks`). Also the looks of where it is set (`placeLooks`), with or without references:
+ * no place lends a reference picture, so no redraw that changes the references changes them. Pure.
  */
 export function memoryFields(
   memory: {
@@ -7758,9 +7765,10 @@ export function memoryFields(
     notShown?: string[];
     refs?: MemoryRef[];
     otherLooks?: ThingLook[];
+    placeLooks?: PlaceLook[];
   },
   view: string | undefined
-): MemoryFields {
+): MemoryFields & Pick<StoryboardScene, "placeLooks"> {
   const has = memory.urls.length > 0;
   const before =
     has && memory.before != null && memory.before >= 0 && memory.before < memory.urls.length
@@ -7778,6 +7786,7 @@ export function memoryFields(
     memoryContinues: before != null && memory.continues ? true : undefined,
     memoryWordsLook: has && memory.own ? memory.wordsLook : undefined,
     otherThingLooks: has && memory.otherLooks?.length ? memory.otherLooks : undefined,
+    placeLooks: memory.placeLooks?.length ? memory.placeLooks : undefined,
   };
 }
 
@@ -14342,14 +14351,19 @@ async function compositeSceneSplit(
  * named kind's exact look the pictures of that thing carry (`panelNamedLook`): the named-things step
  * reads only full-frame pictures, and job 400's scroll panel at scene 27 was a blank parchment on two
  * rollers between pictures of one tied papyrus roll. Everything is looked up on the HOST scene — the
- * panel's own scene object is a copy. Exported for testing.
+ * panel's own scene object is a copy. A panel of no key thing still wears the look of where it is set
+ * (`placeLooks`), like any picture set there — and never one its scene carried from before. Exported
+ * for testing.
  */
 export async function withSplitMemory(
   host: StoryboardScene,
   right: StoryboardScene,
   timeoutMs?: number
 ): Promise<StoryboardScene> {
-  if (!host.keyThing) return right;
+  if (!host.keyThing) {
+    const { placeLooks } = await memoryFor(host, timeoutMs);
+    return placeLooks?.length || right.placeLooks ? { ...right, placeLooks } : right;
+  }
   // The panel's soft print decides its remembered close-up (`BLUR_PRINT_VIEW`), so it is marked
   // before the view is (`blurUnsaidPrint` reads the panel's own words on a split).
   blurUnsaidPrint(host);
@@ -16056,7 +16070,7 @@ async function resumeRenderingScenes(
 
   // Re-poll the remaining renders across both provider lanes concurrently (was a sequential
   // for-loop), so a backlog of slow host (HeyGen) resumes no longer blocks b-roll resumes.
-  attachMemory(scenes, toResume, params.keyThings);
+  attachMemory(scenes, toResume, params.keyThings, homePlaceOf(params.continuitySheet));
   await dispatchScenesByProvider(
     toResume,
     lipsync,
@@ -18708,7 +18722,7 @@ async function runUnifiedPipeline(
     // Two provider lanes run concurrently: host (HeyGen) at heygenConcurrency, b-roll (69Labs)
     // at sixtynineVideoConcurrency. Feeds both providers to capacity instead of one shared pool
     // where host scenes blocking on HeyGen starve idle 69Labs capacity.
-    attachMemory(scenes, scenes, params.keyThings);
+    attachMemory(scenes, scenes, params.keyThings, homePlaceOf(params.continuitySheet));
     await dispatchScenesByProvider(
       scenes,
       lipsync,
@@ -20574,7 +20588,7 @@ async function renderSceneClipInPlace(
   revoice?: () => Promise<void>
 ): Promise<void> {
   // A regenerated picture of a key thing is still drawn from its earlier pictures.
-  attachMemory(scenes, [scene], params.keyThings);
+  attachMemory(scenes, [scene], params.keyThings, homePlaceOf(params.continuitySheet));
   // What this beat shows now. On an operator regenerate it is TAKE 1: put back if the new
   // render does not come through (so a failed or refused regenerate leaves the film as it was
   // instead of turning a good host shot to b-roll), and kept beside the new take if it does
@@ -20751,7 +20765,7 @@ async function regenerateSplitRight(
   // off what the last pass over THIS board found. Every path here starts from a storyboard read back
   // from the database, new objects no pass has seen, so without this the operator's panel was drawn
   // from its own words alone; a full-frame regenerate has always done the same (`renderSceneClipInPlace`).
-  attachMemory(scenes, [scene], params.keyThings);
+  attachMemory(scenes, [scene], params.keyThings, homePlaceOf(params.continuitySheet));
 
   if (!scene.hostClipUrls?.length) {
     const existing = scene.clipUrls?.length
@@ -23771,7 +23785,7 @@ async function retryFailedScenesLocked(
     // sequential for-loop that submitted only one scene's chunks at a time and blocked ~25min
     // on its polls before touching the next scene), mirroring resumeRenderingScenes. Host
     // scenes now fan out up to ENV.heygenConcurrency instead of one-at-a-time.
-    attachMemory(scenes, renderable, params.keyThings);
+    attachMemory(scenes, renderable, params.keyThings, homePlaceOf(params.continuitySheet));
     await dispatchScenesByProvider(
       renderable,
       lipsync,

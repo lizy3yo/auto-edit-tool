@@ -15,6 +15,8 @@ import {
   memorySourcesFor,
   memoryViewFor,
   ownKeyThing,
+  pictureLook,
+  placeLook,
   requiredThingsFor,
   SCREEN_ITEM_VIEW,
   shotFraming,
@@ -4991,8 +4993,11 @@ describe("a memory picture takes only the thing from its references, never their
     attachMemory(b, [b[4]]);
     pictureSettled(b[3]);
     const s15 = { ...b[4], ...memoryFields(await memoryFor(b[4], 0), MEMORY_VIEWS[0]) } as StoryboardScene;
-    expect(memoryClause(s15)).toMatch(/show this exact robin and gulf coast yard./);
-    expect(memoryClause(s15)).not.toContain("drawn as this picture's own words describe");
+    // Round 14: a PLACE is never "this exact" one of the references, even where one stands in it — job
+    // 411's robin references stood on the northern lawn, and "the SAME robin and lawn" copied the yard.
+    // 15 is drawn from 14 for the robin; the yard is its own words'.
+    expect(memoryClause(s15)).toMatch(/show this exact robin\. Draw the SAME robin — /);
+    expect(memoryClause(s15)).toContain("The gulf coast yard is drawn as this picture's own words describe it.");
   });
 });
 
@@ -6289,7 +6294,10 @@ describe("every key thing its words name keeps its look when a picture is drawn 
     ];
     attachMemory(r, [r[1]], robin);
     const s14 = { ...r[1], ...memoryFields(await memoryFor(r[1], 0), memoryView(r[1])) } as StoryboardScene;
-    expect(s14.otherThingLooks?.map(t => t.name)).toEqual(["gulf coast yard"]);
+    // Round 14: the yard is a PLACE — its look is where the picture is set (`placeLooks`), cut to what
+    // the yard is made of; it is no longer lent as another thing's look.
+    expect(s14.otherThingLooks).toBeUndefined();
+    expect(s14.placeLooks).toEqual([{ name: "gulf coast yard", look: "a flat grassy yard" }]);
     expect(promptAfterMemoryChange(s14, buildStillPrompt(s14), memoryToWords(s14))).not.toContain("frost");
     // The toilet's panel names no bin; the toilet's first picture has one beside it. Nothing about the
     // bin is added — what is in a picture is up to its own words.
@@ -6827,8 +6835,13 @@ describe("Werner's job 408 scene 23: a props look by its parts reaches the first
     expect(keyThingLookFor(auger, things)).toBe(
       "a closet auger, a J-bent steel tube, a black rubber sleeve, a crank handle joined to the top of the tube"
     );
+    // A "where" naming a place still goes in the place cut.
+    expect(pictureLook(things[1].look)).toBe("paved slope in front of the garage, dusted with light frost");
+    // Round 14: a driveway is a PLACE — its look is no own-thing look but where a picture is set
+    // (`placeLook`), the frost and what happens there left to each picture's own words.
     const drive = pic(5, "It waits by the road.", "a paved driveway", { keyThing: "driveway" });
-    expect(keyThingLookFor(drive, things)).toBe("paved slope in front of the garage, dusted with light frost");
+    expect(keyThingLookFor(drive, things)).toBeUndefined();
+    expect(placeLook(things[1].look)).toBe("paved slope in front of the garage");
   });
 });
 
@@ -7637,5 +7650,121 @@ describe("a dimming caption is a glance, and two never come back to back (round 
     const out = await planGraphics({ words: said, cuts, film, ask: asking([[fine, deeper]]).ask, ensureIcon: async () => true });
     expect(out.rounds[0].problems).toEqual([]);
     expect(out.cues.map(c => c.id)).toEqual(["toilet-is-fine", "stick-deeper"]);
+  });
+});
+
+describe("a place lends no picture; a place set again keeps one written look (round 14, jobs 411 and 412)", () => {
+  // 411: "lawn" (the northern backyard's) was a key thing, so every picture naming a lawn was drawn
+  // from the first empty-yard picture — one yard framing five times in two minutes — and the Gulf Coast
+  // panel was drawn from that snowy lawn. 412: the "ankle" list item, drawn from nothing, came back in
+  // another bedroom. Rows as stored; the full cases are in placeMemory.test.ts.
+  const LAWN = "a wide stretch of short green-to-brown grass covering the backyard";
+  const robinThings: KeyThing[] = [
+    { name: "robin", look: "an American robin, a reddish-orange breast, a dark gray-brown back, a white lower belly, a white eye ring", main: true },
+    { name: "kitchen window", look: "a rectangular window with white wooden frame, clear glass panes, looking out over the lawn" },
+    { name: "lawn", look: LAWN },
+  ];
+  const yard = (): StoryboardScene[] =>
+    [
+      { index: 2, showSubject: "an empty frosty backyard lawn at dawn under a pale sky", keyThing: "lawn", pictureUrl: "https://r2/411/still-src-2.png" },
+      {
+        index: 5,
+        showSubject: "an American robin standing on a patchy green-to-brown lawn in early spring with the last snow melting",
+        keyThing: "robin",
+        otherKeyThings: ["lawn"],
+        pictureUrl: "https://r2/411/still-src-5.png",
+      },
+      { index: 7, showSubject: "the kitchen window with the backyard lawn visible beyond it", keyThing: "kitchen window", otherKeyThings: ["lawn"] },
+      { index: 12, showSubject: "a robin standing on a snow-covered lawn in the backyard", keyThing: "robin", otherKeyThings: ["lawn"] },
+      {
+        index: 16,
+        showSubject: "a flock of American robins on a sunny green lawn under palm trees",
+        hostPresent: true,
+        splitVisual: "Several American robins scattered across a green lawn in a Gulf Coast yard under palmetto trees on a sunny winter day",
+        keyThing: "robin",
+        otherKeyThings: ["lawn"],
+      },
+      { index: 18, showSubject: "the empty backyard lawn in late November light", keyThing: "lawn" },
+    ].map(s => ({ narration: "n", scriptText: "n", visualPrompt: s.showSubject, ...s }) as StoryboardScene);
+  const HOME_411 = "backyard: a suburban yard with a mowed lawn, holly bushes with red berries along the border, a porch light fixture, storm windows on the house, late fall to winter light";
+
+  it("411: no picture is drawn from the first yard picture — the robin is still drawn from its own", async () => {
+    const { attachMemory, homePlaceOf, memorySourcesFor } = await import("./pictureMemory");
+    const b = yard();
+    attachMemory(b, b, robinThings, homePlaceOf(HOME_411));
+    const from = (i: number) => memorySourcesFor(b, b.find(s => s.index === i)!).map(s => s.index);
+    expect(from(7)).toEqual([]);
+    expect(from(18)).toEqual([]);
+    expect(from(12)).toEqual([5]);
+  });
+
+  it("411 scene 16: the Gulf Coast panel is the robin's pictures and its own words — no northern lawn, no 'SAME lawn'", async () => {
+    const { attachMemory, homePlaceOf } = await import("./pictureMemory");
+    const { buildSplitRightScene, buildStillPrompt, memoryClause, withSplitMemory } = await import("./longformVideo");
+    const b = yard();
+    const host = b.find(s => s.index === 16)!;
+    attachMemory(b, [host], robinThings, homePlaceOf(HOME_411));
+    const panel = await withSplitMemory(host, buildSplitRightScene(host), 0);
+    expect(panel.memoryRefUrls).toEqual(["https://r2/411/still-src-5.png"]);
+    expect(memoryClause(panel)).not.toMatch(/robin and lawn/);
+    expect(memoryClause(panel)).toContain("The lawn is drawn as this picture's own words describe it.");
+    expect(buildStillPrompt(panel, false, undefined, undefined, true)).not.toContain(LAWN);
+  });
+
+  it("411 scene 12: set in the backyard, it carries the lawn's and the backyard's look, without the home line's season", async () => {
+    const { attachMemory, homePlaceOf, memoryFor, memoryView } = await import("./pictureMemory");
+    const { buildStillPrompt, memoryFields } = await import("./longformVideo");
+    const b = yard();
+    const s12 = b.find(s => s.index === 12)!;
+    attachMemory(b, [s12], robinThings, homePlaceOf(HOME_411));
+    const s = { ...s12, ...memoryFields(await memoryFor(s12, 0), memoryView(s12)) } as StoryboardScene;
+    const prompt = buildStillPrompt(s);
+    expect(prompt).toContain(`the lawn: ${LAWN}; the backyard: a suburban yard with a mowed lawn, holly bushes`);
+    expect(prompt).not.toContain("winter light");
+  });
+
+  it("412 scene 4: the 'ankle' list item is in the video's bedroom, on its bed; scene 3, drawn from a picture of the bed, keeps that reference", async () => {
+    const { attachMemory, homePlaceOf, memoryFor, memoryView } = await import("./pictureMemory");
+    const { buildStillPrompt, memoryFields } = await import("./longformVideo");
+    const things: KeyThing[] = [
+      { name: "cat", look: "a domestic shorthair cat, soft grey-and-white coat, medium build, a long tail held low, pale green eyes", main: true },
+      { name: "bed", look: "a low wooden-framed bed with white rumpled sheets and a dark grey blanket pushed to one side, positioned centrally in the bedroom" },
+    ];
+    const HOME_412 = "bedroom: a quiet bedroom at pre-dawn hours, soft dim blue-grey light, an unmade bed as the central feature, calm and tidy surroundings";
+    const b = [
+      {
+        index: 2,
+        showSubject: "cat paws stepping silently onto the foot of the bed",
+        visualPrompt: "A grey-and-white cat's small white-tipped paws land silently on the foot of a low wooden bed with white rumpled sheets in a quiet bedroom at pre-dawn, soft dim blue-grey light.",
+        keyThing: "cat paws",
+        otherKeyThings: ["bed"],
+        pictureUrl: "https://r2/412/still-src-2.png",
+      },
+      {
+        index: 3,
+        showSubject: "cat walking across sleeping owner's legs in bed",
+        visualPrompt: "A grey-and-white domestic shorthair cat walks slowly across the length of a bed with white rumpled sheets and dark grey blanket, moving over the legs and lower body in a quiet bedroom at pre-dawn.",
+        keyThing: "cat",
+        otherKeyThings: ["bed"],
+      },
+      {
+        index: 4,
+        scriptText: "ankle,",
+        listCut: true,
+        showSubject: "cat stepping along owner's body from ankle toward ribs in bed",
+        visualPrompt: "Close-up of a grey-and-white cat's small white-tipped paws stepping deliberately along fabric-covered legs and lower torso toward the ribs, moving across a bed in a quiet bedroom at pre-dawn.",
+        keyThing: "cat",
+        otherKeyThings: ["bed"],
+      },
+    ].map(s => ({ narration: "n", scriptText: "n", ...s }) as StoryboardScene);
+    attachMemory(b, b.slice(1), things, homePlaceOf(HOME_412));
+    const ankle = { ...b[2], ...memoryFields(await memoryFor(b[2], 0), memoryView(b[2])) } as StoryboardScene;
+    expect(ankle.memoryRefUrls).toBeUndefined();
+    expect(buildStillPrompt(ankle)).toContain(
+      "the bedroom: a quiet bedroom, an unmade bed as the central feature, calm and tidy surroundings; the bed in the bedroom: a low wooden-framed bed with white rumpled sheets and a dark grey blanket."
+    );
+    const s3 = { ...b[1], ...memoryFields(await memoryFor(b[1], 0), memoryView(b[1])) } as StoryboardScene;
+    expect(s3.memoryRefUrls).toEqual(["https://r2/412/still-src-2.png"]);
+    expect(s3.placeLooks?.map(p => p.name)).toEqual(["bedroom"]);
   });
 });
