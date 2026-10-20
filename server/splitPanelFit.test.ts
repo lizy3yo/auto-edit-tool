@@ -499,10 +499,17 @@ describe("a panel is about its whole line, and keeps the tool its line names (jo
   });
 
   it("a panel that names the tool, one about another sentence, or one on the host's body is left alone", () => {
-    // Job 407 scene 18: the same line, a panel that kept the drawknife.
-    const KEPT =
-      "A pale oak board held flat on a work surface, one end shaved thin by drawknife strokes, wood curls resting on the board and ground nearby.";
+    // A panel that has the drawknife, however it is spelt.
+    const KEPT = "a pale board on a stump, one end tapered, a drawknife lying across it";
     expect(withLineTool(KEPT, LINE_22)).toBe(KEPT);
+    expect(withLineTool("a pale board, one end tapered, a draw knife lying across it", LINE_22)).toBe(
+      "a pale board, one end tapered, a draw knife lying across it"
+    );
+    // The same kind of tool written another way: a hand saw for a handsaw, a paintbrush for a paint brush.
+    const SAWN = "a pine board with a slot, a hand saw lying beside it";
+    expect(withLineTool(SAWN, "Cut the slot with a handsaw.")).toBe(SAWN);
+    const TRIM = "freshly painted white window trim, a paintbrush resting on the open can";
+    expect(withLineTool(TRIM, "Paint the trim with a paint brush.")).toBe(TRIM);
     // Jobs 118 and 122: the chisel is the first sentence's, the panel is the second's cleat.
     const CLEAT =
       "Wooden shelf back edge showing a slim wooden cleat fastened with screws, clamped horizontally on a workbench under even indoor daylight.";
@@ -520,6 +527,48 @@ describe("a panel is about its whole line, and keeps the tool its line names (jo
     expect(
       withLineTool("Finished rag quilt squares laid flat, their exposed seams standing proud", "where you can get at it with your scissors.")
     ).toBe("Finished rag quilt squares laid flat, their exposed seams standing proud, a pair of scissors resting on the work, unattended.");
+  });
+
+  it("a tool word that only names its marks puts no tool in the picture (job 407 scene 19, the same line)", () => {
+    // Job 407's panel asked for "drawknife strokes", and the film hung the drawknife on the wall
+    // behind a bare board: the strokes are not the tool.
+    const STROKES =
+      "A pale oak board held flat on a work surface, one end shaved thin by drawknife strokes, wood curls resting on the board and ground nearby.";
+    expect(withLineTool(STROKES, LINE_22)).toBe(
+      "A pale oak board held flat on a work surface, one end shaved thin by drawknife strokes, wood curls resting on the board and ground nearby, a drawknife resting on the work, unattended."
+    );
+    expect(withLineTool("a pine board with a slot, fresh saw marks along its edge", "Cut the slot with a handsaw.")).toBe(
+      "a pine board with a slot, fresh saw marks along its edge, a handsaw resting on the work, unattended."
+    );
+    // A sawhorse is no saw.
+    expect(withLineTool("a pine board cut in two on sawhorses", "Cut the board with a saw.")).toBe(
+      "a pine board cut in two on sawhorses, a saw resting on the work, unattended."
+    );
+  });
+
+  it("a tool said in the plural or as a sheet reads as English; a tool said as a figure of speech is none", () => {
+    expect(withLineTool("a pine box with clean corners", "Pare the corners with the chisels, then oil it.")).toBe(
+      "a pine box with clean corners, chisels resting on the work, unattended."
+    );
+    expect(withLineTool("a pine box with softened edges", "Smooth the edges with some sandpaper.")).toBe(
+      "a pine box with softened edges, a sheet of sandpaper resting on the work, unattended."
+    );
+    for (const idiom of [
+      "Some buyers come with an axe to grind, and they will leave a bad review.",
+      "Go over every listing with a fine-tooth comb.",
+      "He painted the whole market with a broad brush.",
+      "They tar every seller with the same brush.",
+    ]) {
+      expect(lineTool(idiom), idiom).toBeUndefined();
+      expect(withLineTool("a booth at a weekend market", idiom), idiom).toBe("a booth at a weekend market");
+    }
+  });
+
+  it("a place name's full stop is no sentence end", () => {
+    expect(leadIntoNext("We drove all the way across three counties to St. Louis to buy")).toBeUndefined();
+    expect(leadIntoNext("The whole lot came from the old hardware store run by Mr. Jenkins down the road")).toBeUndefined();
+    // A real sentence end is still found.
+    expect(leadIntoNext("We drove all the way across three counties to the market. And there it")).toEqual({ words: "And there it" });
   });
 
   it("keepPanelTools changes only the panels asked for, never a CTA panel", () => {

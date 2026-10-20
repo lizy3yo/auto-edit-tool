@@ -3850,6 +3850,9 @@ export function oneThingPanels(
 
 // ─── Does each split panel show what its line is about? ─────────────────────────────────
 
+/** A full stop that belongs to a short title or name, not to a sentence end ("Mr.", "St.", "e.g."). */
+const ABBREVIATION_END = /(?:\b(?:Mr|Mrs|Ms|Dr|St|Mt|Ft|Jr|Sr|Prof|Rev|No|vs)|\b[A-Za-z]\.[A-Za-z])\.["'”’)\]]*$/;
+
 /**
  * THE LINE'S LAST WORDS LEAD INTO THE NEXT ONE (2026-10-20, job 414 scene 4). A split panel sits
  * beside its host take for the whole line, and a host take may stop mid-sentence where the shot list
@@ -3873,9 +3876,10 @@ export function leadIntoNext(
 ): { words: string; sec?: number } | undefined {
   const text = (line ?? "").replace(/\s+/g, " ").trim();
   if (!text || /[.!?,;:—–-]["'”’)\]]*$/.test(text)) return undefined;
-  // The LAST sentence end followed by more words (greedy).
+  // The LAST sentence end followed by more words (greedy). A title's or a place name's full stop
+  // ends no sentence: "…drove all the way to St. Louis to buy" is one sentence, cut mid-clause.
   const m = /^(.*[.!?]["'”’)\]]*)\s+(\S.*)$/.exec(text);
-  if (!m) return undefined;
+  if (!m || ABBREVIATION_END.test(m[1])) return undefined;
   const words = m[2].trim();
   const all = text.split(" ").length;
   const n = words.split(" ").length;
@@ -3899,6 +3903,12 @@ const DONE_WITH_TOOL = new RegExp(
 );
 /** A clause that rules the tool out ("not with a chisel", "you don't need a…"). */
 const RULED_OUT = /\b(?:not|never|no|without|instead\s+of|rather\s+than|don['’]t|doesn['’]t|didn['’]t|won['’]t|can['’]t|isn['’]t|aren['’]t)\b[^,.;:!?]*$/i;
+/**
+ * A tool said as a figure of speech, which no picture should hold: "buyers who come with an axe to
+ * grind", "go over every listing with a fine-tooth comb", "painted everyone with a broad brush".
+ */
+const TOOL_IDIOM =
+  /^(?:with|using)\s+\S+\s+(?:axe\s+to\s+grind|fine[-\s]?tooth(?:ed)?\s+comb|(?:broad|same|wide)\s+brush)\b/i;
 /** Tools only ever said in the plural, which a picture names as "a pair of …". */
 const PAIR_TOOL = /^(?:scissors|shears|clippers|pruners|secateurs|pliers|tweezers)$/i;
 
@@ -3907,6 +3917,35 @@ const toolStem = (w: string) => {
   const t = w.toLowerCase().replace(/\bdraw\s+kni/g, "drawkni").replace(/knives\b/g, "knife");
   return /(?:ch|sh)es$/.test(t) ? t.slice(0, -2) : /[^s]s$/.test(t) ? t.slice(0, -1) : t;
 };
+/** The word that names the tool, as one word ("a sharp draw knife" → "drawknife"). */
+const toolWord = (tool: string) =>
+  tool.toLowerCase().replace(/\bdraw\s+kni/g, "drawkni").split(/\s+/).pop() ?? "";
+/** The kind of tool a stem names: a handsaw, a pull saw and a saw are one kind, as are a paintbrush and a brush. */
+const toolKind = (stem: string) =>
+  stem
+    .replace(/^(?:hand|coping|hack|bow|pull|rip|crosscut|jig|band|circular|chain)(?=saw$)/, "")
+    .replace(/^(?:paint|wire)(?=brush$)/, "");
+/**
+ * A tool word that only says how the work was marked: "shaved thin by drawknife strokes", "fresh saw
+ * marks", "hewn logs showing axe marks" put no tool in the picture.
+ */
+const TOOL_TRACE = /^(?:marks?|strokes?|cuts?|kerfs?|scratch(?:es)?|grooves?|dust|shavings?|chips?|tracks?|scars?)$/;
+
+/**
+ * Do the panel's words put a tool of this kind in the picture? Its own word, the same kind spelt
+ * another way ("hand saw", "paintbrush"), never a tool word that only names the marks it left.
+ */
+function namesTool(panel: string, head: string): boolean {
+  const kind = toolKind(head);
+  const words = panel.toLowerCase().replace(/\bdraw\s+kni/g, "drawkni").split(/[^a-z]+/).filter(Boolean);
+  return words.some((w, k) => {
+    if (TOOL_TRACE.test(words[k + 1] ?? "")) return false;
+    if (toolKind(toolStem(w)) === kind) return true;
+    // "hand saw" / "paint brush" written as two words.
+    const next = words[k + 1];
+    return !!next && !TOOL_TRACE.test(words[k + 2] ?? "") && toolKind(toolStem(w + next)) === kind;
+  });
+}
 
 /**
  * The hand tool the line says its job is done WITH ("got shaved thin at one end with a drawknife"),
@@ -3923,9 +3962,9 @@ function findLineTool(line: string | undefined, forbids?: string): { tool: strin
   const text = (line ?? "").replace(/\s+/g, " ");
   DONE_WITH_TOOL.lastIndex = 0;
   for (let m = DONE_WITH_TOOL.exec(text); m; m = DONE_WITH_TOOL.exec(text)) {
-    if (RULED_OUT.test(text.slice(0, m.index))) continue;
+    if (RULED_OUT.test(text.slice(0, m.index)) || TOOL_IDIOM.test(text.slice(m.index))) continue;
     const tool = m[1].toLowerCase().trim();
-    const head = toolStem(tool.split(/\s+/).pop() ?? "");
+    const head = toolStem(toolWord(tool));
     if (forbids && forbids.toLowerCase().split(/[^a-z]+/).some(w => toolStem(w) === head)) continue;
     return { tool, at: m.index };
   }
@@ -3974,10 +4013,13 @@ function panelOnToolSentence(panel: string, line: string, at: number): boolean {
  * wrote the panel: the tool the line says the job is done with (`lineTool`), when the panel's words do
  * not name it, is added resting on the work, unattended — never held, so no hand is asked for. Only
  * when the panel is about the sentence the tool is said in (`panelOnToolSentence`); never a panel
- * drawn on the host's own body (hair, skin, nails), and never twice. Replayed over the 1,638 local
- * split panels: 17 lines name such a tool, 10 panels had left it out and get it (this one, and a
- * jigsaw, a pull saw and scissors on panels of the work they did), and the cleat panels of jobs 118
- * and 122, whose chisel is in the other sentence, do not. Pure.
+ * drawn on the host's own body (hair, skin, nails), and never twice. A tool word that only names its
+ * marks ("shaved thin by drawknife strokes", job 407 scene 19, whose film hung the drawknife on the
+ * wall behind a bare board) is not the tool, and a tool said as a figure of speech ("with an axe to
+ * grind") is none. Replayed over the 1,638 local split panels: 17 lines name such a tool, 11 panels
+ * had left it out and get it (this one, 407's, and a jigsaw, a pull saw and scissors on panels of the
+ * work they did), and the cleat panels of jobs 118 and 122, whose chisel is in the other sentence, do
+ * not. Pure.
  */
 export function withLineTool(panel: string, line: string | undefined, forbids?: string): string {
   const text = panel.trim();
@@ -3985,17 +4027,18 @@ export function withLineTool(panel: string, line: string | undefined, forbids?: 
   const found = findLineTool(line, forbids);
   if (!found || !panelOnToolSentence(text, line ?? "", found.at)) return panel;
   const { tool } = found;
-  const head = toolStem(tool.split(/\s+/).pop() ?? "");
-  const named = text
-    .toLowerCase()
-    .replace(/\bdraw\s+kni/g, "drawkni")
-    .split(/[^a-z]+/)
-    .some(w => w && toolStem(w) === head);
-  if (named) return panel;
+  const last = toolWord(tool);
+  if (namesTool(text, toolStem(last))) return panel;
   const bare = tool.replace(/^pair\s+of\s+/, "");
-  const what = PAIR_TOOL.test(bare.split(/\s+/).pop() ?? "")
+  // A pair for a tool only said in the plural, a sheet of sandpaper, no article for a plural
+  // ("…with the chisels" → "chisels resting on the work", never "a chisels").
+  const what = PAIR_TOOL.test(last)
     ? `a pair of ${bare}`
-    : `${/^[aeiou]/.test(tool) ? "an" : "a"} ${tool}`;
+    : last === "sandpaper"
+      ? `a sheet of ${bare}`
+      : toolStem(last) !== last
+        ? bare
+        : `${/^[aeiou]/.test(bare) ? "an" : "a"} ${bare}`;
   return `${text.replace(/[\s.,;:]+$/, "")}, ${what} resting on the work, unattended.`;
 }
 

@@ -8200,13 +8200,23 @@ describe("a split panel is built from its line, and keeps the tool its line name
     expect(leadIntoNext("The Japanese look people paid me for wasn't the precision work. It was the fire,")).toBeUndefined();
   });
 
-  it("414 scene 22: the panel keeps the drawknife, resting on the work; a panel that kept it, or is about another sentence, is left alone", async () => {
+  it("414 scene 22: the panel keeps the drawknife, resting on the work; a panel that has it, or is about another sentence, is left alone", async () => {
     const { withLineTool } = await import("./shotList");
     expect(withLineTool(SHINGLE_22, LINE_22)).toBe(`${SHINGLE_22}, a drawknife resting on the work, unattended.`);
-    // Job 407 scene 18, the same line: the drawknife was already there.
-    const KEPT =
-      "A pale oak board held flat on a work surface, one end shaved thin by drawknife strokes, wood curls resting on the board and ground nearby.";
+    // A panel that has the drawknife is left alone.
+    const KEPT = "a pale board on a stump, one end tapered, a drawknife lying across it";
     expect(withLineTool(KEPT, LINE_22)).toBe(KEPT);
+    // Job 407 scene 19, the same line: "shaved thin by drawknife strokes" names the marks, not the tool —
+    // that film hung the drawknife on the wall behind a bare board — so the tool is added there too.
+    const STROKES =
+      "A pale oak board held flat on a work surface, one end shaved thin by drawknife strokes, wood curls resting on the board and ground nearby.";
+    expect(withLineTool(STROKES, LINE_22)).toBe(
+      `${STROKES.replace(/\.$/, "")}, a drawknife resting on the work, unattended.`
+    );
+    // A tool said as a figure of speech puts nothing in the picture.
+    expect(withLineTool("a booth at a weekend market", "Some buyers come with an axe to grind.")).toBe(
+      "a booth at a weekend market"
+    );
     // Job 118 scene 61: the chisel belongs to the sentence before the cleat the panel shows.
     const CLEAT =
       "Wooden shelf back edge showing a slim wooden cleat fastened with screws, clamped horizontally on a workbench under even indoor daylight.";
