@@ -8159,3 +8159,50 @@ describe("a tool works the way it really does, and a line ends at the part it se
       expect(clause).not.toMatch(/spark plug|carburet|mower|engine|oak|chestnut|bolt|shingle|roof|cabin|folk school|Foxfire/i);
   });
 });
+
+/**
+ * NOTHING THE LINE DOES NOT NAME (2026-10-20, the review of job 414, an old-cabin film): the back wall
+ * with the axe, froe and drawknife a line reveals at 21 s ("But on the back wall hung an axe, a froe,
+ * and a drawknife") filled the pictures from 2.6 s on, and "you will come up nearly empty-handed" was
+ * drawn as a cabin crowded with goods.
+ */
+describe("job 414: what a later line reveals is not shown early; a search that finds nothing finds nothing", () => {
+  const lines = [
+    "Go through an old mountain cabin looking for anything",
+    "a store sold, and you will come up nearly empty-handed.",
+    "A log restorer in Grayson County, Virginia, let me try it.",
+    "The roof was split oak, the walls were hewn poplar, and the door hung on wooden pins with a string for a lock. But on the back wall hung",
+    "an axe,",
+    "a froe,",
+    "and a drawknife,",
+    "and the steel in those three was the one thing that homestead could not grow.",
+  ];
+  const tools = {
+    name: "steel tools",
+    look: "an axe, a froe, and a drawknife hanging together on the cabin's back interior wall",
+  };
+
+  it("before the reveal the tools are taken out of the picture; under 'those three' they stay", async () => {
+    const { notYetSaid, ownWordsOf, withoutAddedKeyThings } = await import("./brollRewrite");
+    const scene2 = { scriptText: lines[1], showSubject: "the old log cabin interior, looking for store-bought goods" };
+    const before = withoutAddedKeyThings(
+      "Interior of a historic log cabin in Grayson County, Virginia, with hewn poplar walls. The back wall shows an axe, a froe, and a drawknife hanging together. Scattered salvage and old objects rest on surfaces around the cabin's dim interior.",
+      ownWordsOf(scene2, scene2.showSubject),
+      notYetSaid(lines, 1, [tools])
+    );
+    expect(before.text).not.toMatch(/axe|froe|drawknife/);
+    expect(before.text).toMatch(/^Interior of a historic log cabin/);
+    const scene8 = { scriptText: lines[7], showSubject: "a closer view of the steel tools hanging on the cabin wall" };
+    const group =
+      "The axe, froe, and drawknife hanging together on the cabin's back interior wall, all three steel tools visible in one view against the dark hewn poplar.";
+    expect(notYetSaid(lines, 7, [tools])).toEqual([]);
+    expect(withoutAddedKeyThings(group, ownWordsOf(scene8, scene8.showSubject), [tools]).text).toBe(group);
+  });
+
+  it("the empty-handed search is a line about nothing being there; a line naming a bare surface is not", async () => {
+    const { saysNothingThere } = await import("./brollRewrite");
+    expect(saysNothingThere(lines[1])).toBe(true);
+    expect(saysNothingThere(lines[3])).toBe(false);
+    expect(saysNothingThere("Keep the stack off bare concrete,")).toBe(false);
+  });
+});

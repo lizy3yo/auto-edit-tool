@@ -268,3 +268,354 @@ export function rewriteFallback(scene: Pick<StoryboardScene, "showSubject">, see
   if (own && !leavesOutSubject(own, subject)) return own;
   return subject || own;
 }
+
+// ─── A key thing the line does not name ──────────────────────────────────────────────────
+
+/*
+ * NOTHING THE LINE DOES NOT NAME (2026-10-20, job 414 scenes 2-8, an old-cabin film whose reveal at
+ * 21 s is "But on the back wall hung an axe, a froe, and a drawknife"). The back wall with those three
+ * tools filled seven pictures in a row from 2.6 s and gave the reveal away. Neither scene 2's subject
+ * ("the old log cabin interior, looking for store-bought goods") nor scene 3's ("a log restorer
+ * working at the cabin's log wall") names a tool; the prompt writer put them in — "The back wall shows
+ * an axe, a froe, and a drawknife hanging together", "The back wall with the three hung steel tools is
+ * visible behind" — from the props list (where they are the MAIN thing), the stretch line (which
+ * covers the coming reveal) and "continue from the previous shots", all of which outweighed its own
+ * "no future events". Scene 4's split panel came back the same way from a seed of the cabin seen from
+ * outside. The writer's prompt now says so; this is the check on its answer, free, no call: a key
+ * thing a later line reveals (`notYetSaid`), or under a line saying nothing is there any key thing,
+ * that the rewrite shows and the scene's own words (what it was asked to rewrite, its subject, its
+ * line, the shot list's tag) do not name is taken out — the sentence about it, or the part of a
+ * sentence it sits in beside the subject — and when that leaves too little, the scene keeps its own
+ * words.
+ */
+
+/** Grammar, size and amount words: they say nothing about WHICH thing a key thing is. */
+const NOT_A_NAME = new Set(
+  (
+    "the and for with from its his her their our your small little big large tiny huge few many " +
+    "some main old new one two three four five six"
+  ).split(" ")
+);
+
+/**
+ * The stems of every word of a key thing's name that says which thing it is: "steel tools" → steel,
+ * tool; "chisel set" → chisel, set (so "fresh chisel marks" is not the set). Pure.
+ */
+function nameStems(name: string): string[] {
+  return Array.from(
+    new Set(
+      tokens(name.replace(/^MAIN\b/i, ""))
+        .filter(w => w.length >= 3 && !NOT_A_NAME.has(w))
+        .map(stem)
+    )
+  );
+}
+
+/** Every word of `text`, stemmed — grammar words too, so a name is looked up as written. */
+function allStems(text: string | undefined): Set<string> {
+  return new Set(tokens(text).map(stem));
+}
+
+// A word that ends a list item's noun phrase: a preposition, a joining word, a word of placing.
+const ITEM_END =
+  /^(?:on|in|at|by|of|to|for|from|with|into|onto|over|under|above|below|beside|near|against|along|across|behind|inside|outside|around|atop|hung|set|laid|that|which|where|while|all|together)$/;
+
+/**
+ * The things a key thing's look opens by listing, by their head words: "an axe, a froe, and a
+ * drawknife hanging together on the cabin's back interior wall" → axe, froe, drawknife. A group key
+ * thing ("steel tools") is written by its items far more often than by its name. Every item but the
+ * last is a bare "a/an …" phrase, the last comes after "and"/"or" and may run on ("hanging
+ * together…"). None for a single thing's look: its parts ("a heavy steel axe with a wide flat blade
+ * and a short curved wooden handle") or its features one after another ("an American robin, a
+ * reddish-orange breast, a dark gray-brown back…", job 411) are no list of things. Pure.
+ */
+export function listedItems(look: string | undefined): string[] {
+  const chunks = (look ?? "")
+    .toLowerCase()
+    .replace(/['’]s\b/g, "")
+    .split(/\s*[,;]\s*|\s+(?=(?:and|or)\s+an?\s)/);
+  const heads: string[] = [];
+  let closed = false;
+  for (const chunk of chunks) {
+    const joined = /^\s*(?:and|or)\s+/.test(chunk);
+    const words = chunk.trim().replace(/^(?:and|or)\s+/, "").match(/[a-z][a-z-]*/g) ?? [];
+    if (words[0] !== "a" && words[0] !== "an") break;
+    const phrase: string[] = [];
+    let ranOn = false;
+    for (const w of words.slice(1)) {
+      if (ITEM_END.test(w) || /ing$/.test(w)) {
+        ranOn = true;
+        break;
+      }
+      phrase.push(w);
+    }
+    if (!phrase.length || phrase.length > 4) break;
+    heads.push(stem(phrase[phrase.length - 1]));
+    closed = joined;
+    if (ranOn || joined) break;
+  }
+  return heads.length >= 2 && closed ? Array.from(new Set(heads)) : [];
+}
+
+/** A key thing as it can be named: its name's words and the items its look lists. */
+interface ThingWords {
+  name: string;
+  stems: string[];
+  items: string[];
+}
+
+const thingWords = (t: { name: string; look?: string }): ThingWords => ({
+  name: t.name,
+  stems: nameStems(t.name),
+  items: listedItems(t.look),
+});
+
+/** Words (their stems) that name the thing for sure: every word of its name, or two of its listed items. */
+function namesForSure(stems: Set<string>, t: ThingWords): boolean {
+  if (t.stems.length && t.stems.every(w => stems.has(w))) return true;
+  return t.items.filter(w => stems.has(w)).length >= 2;
+}
+
+/**
+ * `stems` holds `word` in any form, read loosely: the word itself, or a longer form of one of four
+ * letters or more ("snowy" for "snow", "woodworking" for "wood").
+ */
+function holdsLoosely(stems: Set<string>, word: string): boolean {
+  if (stems.has(word)) return true;
+  if (word.length < 4) return false;
+  for (const s of Array.from(stems)) if (s.startsWith(word)) return true;
+  return false;
+}
+
+/**
+ * The scene's own words name the thing, read loosely — kept when unsure: one word of its name in
+ * any form ("a log restorer" names "green poplar log", "a snowy park" names "snow"), or every listed
+ * item the rewrite named. One item alone does not name a group: scene 4's seed had "axe marks", and
+ * its panel came back with all three tools.
+ */
+function ownWordsName(own: Set<string>, t: ThingWords, rewrite: Set<string>): boolean {
+  if (t.stems.some(w => holdsLoosely(own, w))) return true;
+  const named = t.items.filter(w => rewrite.has(w));
+  return named.length > 0 && named.every(w => holdsLoosely(own, w));
+}
+
+// Where a thing SITS rather than a thing shown: "on the workbench", "in the hearth". A picture of a
+// can on the bench is the can's; the bench is only its place.
+const SURFACE_PREP = /^(?:on|onto|in|into|inside|atop|across|at)$/;
+const DETERMINER = /^(?:the|its|his|her|their|our|your|this|that|these|those|my)$/;
+
+/** A sentence's parts, between commas, semicolons and dashes. */
+const PART_BREAK = /(\s*[,;]\s*|\s*[—–]\s*|\s+-\s+)/;
+
+/**
+ * Whether `sentence` names the thing only as the place something sits: every time its name comes,
+ * right after "on", "in", "at"… in the same part of the sentence, with at most four describing words
+ * between ("on the old scarred workbench") — and never by two of its items. "…into alignment, oil
+ * lamp glowing softly" is the lamp shown, not a place. Pure.
+ */
+function onlyAsPlace(sentence: string, t: ThingWords): boolean {
+  if (!t.stems.length) return false;
+  if (t.items.filter(w => allStems(sentence).has(w)).length >= 2) return false;
+  let found = false;
+  for (const part of sentence.split(PART_BREAK)) {
+    const words = tokens(part);
+    const stems = words.map(stem);
+    for (let k = 0; k < stems.length; k++) {
+      // The first word of each mention of the name.
+      if (!t.stems.includes(stems[k]) || (k > 0 && t.stems.includes(stems[k - 1]))) continue;
+      found = true;
+      let place = false;
+      for (let j = k - 1; j >= Math.max(0, k - 5); j--) {
+        if (SURFACE_PREP.test(words[j])) {
+          place = true;
+          break;
+        }
+        if (ITEM_END.test(words[j]) || (STOP.has(words[j]) && !DETERMINER.test(words[j]))) break;
+      }
+      if (!place) return false;
+    }
+  }
+  return found;
+}
+
+/**
+ * The key things `rewrite` shows that its scene's own words (`own`: the seed it was asked to rewrite,
+ * its subject, its line, its tag) do not name, by name. Pure.
+ */
+export function addedKeyThings(
+  rewrite: string,
+  own: string,
+  things: readonly { name: string; look?: string }[] | undefined
+): string[] {
+  if (!things?.length) return [];
+  const said = allStems(rewrite);
+  const mine = allStems(own);
+  return things
+    .map(thingWords)
+    .filter(t => namesForSure(said, t) && !ownWordsName(mine, t, said))
+    .map(t => t.name);
+}
+
+/** A rewrite's sentences (a semicolon ends one too), each with its own closing mark. */
+function sentencesOf(text: string): string[] {
+  return (text.match(/[^.!?;]+(?:[.!?;]+["')\]]*|$)/g) ?? []).map(s => s.trim()).filter(Boolean);
+}
+
+/**
+ * A part of a sentence speaks of the thing: its whole name, the last word of its name ("lamp" of
+ * "oil lamp", "tools" of "steel tools"), or one of the items its look lists. Pure.
+ */
+function speaksOf(part: string, t: ThingWords): boolean {
+  const stems = allStems(part);
+  if (namesForSure(stems, t)) return true;
+  const head = t.stems[t.stems.length - 1];
+  return (!!head && stems.has(head)) || t.items.some(w => stems.has(w));
+}
+
+/**
+ * `sentence` without its parts (between commas, semicolons and dashes) that speak of `shown`, or
+ * undefined when its first part does — the sentence is then about the thing, and goes whole ("The
+ * back wall shows an axe, a froe, and a drawknife hanging together."). A thing in a later part is
+ * only beside the subject: "…on the work table in the sewing room, under soft daylight from the oil
+ * lamp, positioned slightly angled…" loses only the lamp. Pure.
+ */
+function withoutParts(sentence: string, shown: ThingWords[]): string | undefined {
+  const pieces = sentence.split(PART_BREAK);
+  const parts = pieces.filter((_, k) => k % 2 === 0);
+  const joins = pieces.filter((_, k) => k % 2 === 1);
+  const about = (part: string) => shown.some(t => speaksOf(part, t));
+  if (about(parts[0])) return undefined;
+  let out = parts[0];
+  parts.slice(1).forEach((part, k) => {
+    if (!about(part)) out += joins[k] + part;
+  });
+  const end = /[.!?]["')\]]*$/.exec(sentence.trim())?.[0];
+  out = out.trim();
+  return end && !out.endsWith(end) ? out.replace(/[\s,;:—–-]+$/, "") + end : out;
+}
+
+/** Below this share of its words, what is left of a rewrite is no longer the rewrite: own words instead. */
+const MIN_KEPT_SHARE = 0.4;
+
+/**
+ * `rewrite` with every key thing its scene's own words do not name taken out (`addedKeyThings`;
+ * a thing named only as where something sits stays): a sentence about it goes whole, a thing beside
+ * the subject goes with its part of the sentence (`withoutParts`). `text` is the rewrite as it may be
+ * adopted — the same string when nothing was taken out — or undefined when what is left is under
+ * `MIN_KEPT_SHARE` of it or says none of the scene's own words (the added thing was the picture):
+ * the scene then keeps its own words. `added` names what was taken out or refused, and `left` is
+ * what was left either way. Pure.
+ */
+export function withoutAddedKeyThings(
+  rewrite: string,
+  own: string,
+  things: readonly { name: string; look?: string }[] | undefined
+): { text?: string; added: string[]; left?: string } {
+  const found = addedKeyThings(rewrite, own, things);
+  if (!found.length) return { text: rewrite, added: [] };
+  const words = (things ?? []).filter(t => found.includes(t.name)).map(thingWords);
+  const added = new Set<string>();
+  const kept: string[] = [];
+  for (const sentence of sentencesOf(rewrite)) {
+    const stems = allStems(sentence);
+    const shown = words.filter(t => namesForSure(stems, t) && !onlyAsPlace(sentence, t));
+    shown.forEach(t => added.add(t.name));
+    const left = shown.length ? withoutParts(sentence, shown) : sentence;
+    if (left) kept.push(left);
+  }
+  if (!added.size) return { text: rewrite, added: [] };
+  const text = kept.join(" ").trim();
+  const mine = new Set(pictureStems(own));
+  const share = tokens(text).length / Math.max(1, tokens(rewrite).length);
+  if (!text || share < MIN_KEPT_SHARE || !pictureStems(text).some(w => mine.has(w)))
+    return { added: Array.from(added), left: text };
+  return { text, added: Array.from(added), left: text };
+}
+
+/** The words a cutaway's rewrite answers to: what it was asked to rewrite, its subject, its line, its tags. */
+export function ownWordsOf(
+  scene: Partial<Pick<StoryboardScene, "showSubject" | "scriptText" | "narration" | "keyThing" | "partOf">>,
+  seed: string | undefined
+): string {
+  return [seed, scene.showSubject, scene.scriptText ?? scene.narration, scene.keyThing, scene.partOf]
+    .filter(Boolean)
+    .join("\n");
+}
+
+/** A line names the thing at all: one word of its name, or one of the items its look lists. */
+function lineNames(line: string | undefined, t: ThingWords): boolean {
+  const stems = allStems(line);
+  return [...t.stems, ...t.items].some(w => holdsLoosely(stems, w));
+}
+
+/**
+ * The key things the narration has NOT YET SAID at picture `i` — not in its own line, not in any
+ * line before it — and says in a later one: what a later line reveals. Job 414's axe, froe and
+ * drawknife, first said at 21 s, are not yet said under every picture before it; a thing no line
+ * ever says (a workbench the props list gave the setting) reveals nothing, and neither does one an
+ * earlier line already said. Only these are taken out of a rewrite in code (`withoutAddedKeyThings`):
+ * replayed over the 227 local films that have a props list, holding every rewrite to every key
+ * thing its line does not name would have changed one rewrite in five — mostly a workbench or a
+ * finished piece in the background of a picture about something said before — which the prompt
+ * writer is told instead; held to these, 471 of 15,593 cutaway rewrites (3%) and 46 of 1,334 panels
+ * change, 78 and 15 of them back to their own words. Pure.
+ */
+export function notYetSaid<T extends { name: string; look?: string }>(
+  lines: readonly (string | undefined)[],
+  i: number,
+  things: readonly T[] | undefined
+): T[] {
+  return notYetSaidAt(lines, things)(i);
+}
+
+/** `notYetSaid` for every picture of one film, each thing's first line found once. Pure. */
+export function notYetSaidAt<T extends { name: string; look?: string }>(
+  lines: readonly (string | undefined)[],
+  things: readonly T[] | undefined
+): (i: number) => T[] {
+  const first = (things ?? []).map(thing => {
+    const t = thingWords(thing);
+    return lines.findIndex(line => lineNames(line, t));
+  });
+  return i => (things ?? []).filter((_, k) => first[k] > i);
+}
+
+// ─── A line about nothing being there ────────────────────────────────────────────────────
+
+/** What is said to be empty is said so plainly: the word ends the clause, or a place or time follows. */
+const EMPTY_ENDS = String.raw`(?=\s*(?:[.,;:!?]|$)|\s+(?:in|on|at|for|all|again|now|most|come|by|when|until|except|of|and|but|after|before|from)\b)`;
+
+/**
+ * A line saying a place is EMPTY or a search finds (nearly) NOTHING: "you will come up nearly
+ * empty-handed" (job 414 scene 2), "why does the yard feel so empty come November?" (job 411 scene
+ * 18), "the grass sits empty in the mornings" (job 404), "it tells them when the house is empty",
+ * "I found nothing there". "Empty" or "bare" before a thing is only how it looks ("keep the stack
+ * off bare concrete"), and "nothing" that goes on ("nothing in there that can unravel on you",
+ * "nothing there is going anywhere", "there is nothing like…") is a figure of speech: over the 25,571
+ * local storyboard lines these read 13 lines, all of them a place or search said to be empty.
+ */
+const SAYS_EMPTY = [
+  /\bempty[- ]handed\b/i,
+  /\b(?:come|comes|came|coming|turn|turns|turned|end|ends|ended|wind|winds|wound)\s+up\s+(?:(?:nearly|almost|mostly|completely|totally|just about|pretty much)\s+)?(?:empty|with nothing)\b/i,
+  new RegExp(
+    String.raw`(?:\b(?:is|are|was|were|be|been|being|stands?|stood|sits?|sat|stays?|stayed|remains?|remained|lies?|lay|looks?|looked|feels?|felt|seems?|seemed|goes|went|gone|left|leaves?)|'s|'re)\s+` +
+      String.raw`(?:(?:so|very|usually|often|mostly|always|still|just|completely|totally|entirely|almost|nearly|simply|quite|again|strangely|oddly)\s+)*(?:empty|bare|vacant|deserted)` +
+      EMPTY_ENDS,
+    "i"
+  ),
+  /\b(?:find|finds|found|turn up|turns up|turned up)\s+(?:(?:almost|next to|virtually|practically|absolutely)\s+)?nothing(?=\s*(?:[.,;:!?]|$)|\s+(?:there|here|at all|inside)\b)/i,
+  /\b(?:nothing|none)\s+(?:there|here|left)(?=\s*(?:[.,;:!?]|$))/i,
+];
+
+/**
+ * NOTHING THERE (2026-10-20, job 414 scene 2): under "a store sold, and you will come up nearly
+ * empty-handed" the cabin was crowded with crocks, a tin pail, bowls, chests and a barrel, and read
+ * as well stocked — the stretch line's "scattered salvage" and the props list filled a picture of
+ * nothing. When a line says a place is empty or a search finds (nearly) nothing, the prompt writer is
+ * told to show it bare and is not handed the stretch line, and every key thing the scene's own words
+ * do not name is taken out of the rewrite. Pure.
+ */
+export function saysNothingThere(line: string | undefined): boolean {
+  const t = (line ?? "").replace(/[’‘]/g, "'");
+  return !!t.trim() && SAYS_EMPTY.some(r => r.test(t));
+}

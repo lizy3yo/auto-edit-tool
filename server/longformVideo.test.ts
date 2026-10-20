@@ -125,6 +125,8 @@ import {
   amateurIphoneLook,
   EDIT_VIDEO_BROLL_ENHANCER_SYSTEM,
   STILL_BROLL_ENHANCER_SYSTEM,
+  NOTHING_THERE_RULE,
+  NOTHING_UNNAMED_RULE,
   buildStillPrompt,
   assembleScenePromptPreview,
   normalizeKeyframeToLandscape,
@@ -2653,6 +2655,138 @@ describe("enhanceBrollPrompts — written for the shot it will be, refused when 
     expect(sent).not.toContain(OBJECT_MOTION_DIRECTIVE);
     expect(sent).toContain("Type: still\n");
     expect(scenes[0].promptLane).toBe("still");
+  });
+});
+
+// NOTHING THE LINE DOES NOT NAME (2026-10-20, job 414 scenes 2-8): the back wall with the axe, froe
+// and drawknife a line reveals at 21 s was in every picture from 2.6 s — the prompt writer took them
+// from the props list and the stretch line — and the empty-handed search was drawn crowded with
+// goods. The answers here are the real rewrites the writer gave.
+describe("enhanceBrollPrompts — nothing its line does not name, nothing in a place said to be empty", () => {
+  const SHEET_414 =
+    "HOME the log cabin: a historic cabin in Grayson County, Virginia, split-oak roof, hewn poplar walls, door hung on wooden pins with a string lock\n" +
+    "MAIN steel tools: an axe, a froe, and a drawknife hanging together on the cabin's back interior wall\n" +
+    "broadaxe: a heavy steel axe with a wide flat blade and a short curved wooden handle\n" +
+    "hearth: a stone fireplace set into the cabin's interior wall, dark soot-stained opening";
+  const BEAT_414 =
+    "The abandoned cabin interior with scattered salvage and the back wall revealing three hung tools—axe, froe, drawknife—that survived because the steel could not be grown.";
+  const PANEL_SEED =
+    "an old log cabin seen from outside, its walls made of hewn logs with scalloped axe marks and pale chinking, a roof of split oak boards, and a plank door hung on wooden pins with a latch string hanging out";
+  const ANSWERS = [
+    "Interior of a historic log cabin in Grayson County, Virginia, with hewn poplar walls. The back wall shows an axe, a froe, and a drawknife hanging together. Scattered salvage and old objects rest on surfaces around the cabin's dim interior.",
+    "Close view of bare weathered hands working on a hewn poplar log wall inside the cabin, fingers pressing and adjusting with a tool. The back wall with the three hung steel tools is visible behind. Nothing above the forearms shown.",
+    "An axe hanging on the cabin's back interior wall, its wide flat steel blade and short curved wooden handle clearly visible against the dark wood.",
+  ];
+  const PANEL_ANSWER =
+    "A back wall inside an abandoned log cabin, hewn poplar logs showing axe marks, with an axe, froe, and drawknife hung on the wall above a worn wooden shelf.";
+  const sc = (extra: Partial<StoryboardScene>): StoryboardScene => ({
+    index: 0,
+    narration: "n",
+    visualPrompt: "vp",
+    hostPresent: false,
+    visualBeat: BEAT_414,
+    ...extra,
+  });
+  const film = () => [
+    sc({
+      index: 1,
+      hostPresent: true,
+      scriptText: "Go through an old mountain cabin looking for anything",
+      visualPrompt: "the host talking",
+    }),
+    sc({
+      index: 2,
+      scriptText: "a store sold, and you will come up nearly empty-handed.",
+      showSubject: "the old log cabin interior, looking for store-bought goods",
+      visualPrompt: "the old log cabin interior, looking for store-bought goods",
+    }),
+    sc({
+      index: 3,
+      scriptText: "A log restorer in Grayson County, Virginia, let me try it.",
+      showSubject: "a log restorer working at the cabin's log wall, seen from behind",
+      visualPrompt: "a log restorer working at the cabin's log wall, seen from behind",
+      humanPresent: true,
+    }),
+    sc({
+      index: 4,
+      hostPresent: true,
+      scriptText:
+        "The roof was split oak, the walls were hewn poplar, and the door hung on wooden pins with a string for a lock. But on the back wall hung",
+      showSubject: PANEL_SEED,
+      visualPrompt: "the host talking",
+      splitVisual: PANEL_SEED,
+    }),
+    sc({
+      index: 5,
+      scriptText: "an axe,",
+      showSubject: "an axe (for the steel tools)",
+      visualPrompt: "an axe (for the steel tools)",
+      keyThing: "steel tools",
+      listCut: true,
+    }),
+  ];
+  const params = {
+    ...baseParams,
+    continuitySheet: SHEET_414,
+    keyThings: [
+      {
+        name: "steel tools",
+        look: "an axe, a froe, and a drawknife hanging together on the cabin's back interior wall",
+        main: true as const,
+      },
+      { name: "broadaxe", look: "a heavy steel axe with a wide flat blade and a short curved wooden handle" },
+      { name: "hearth", look: "a stone fireplace set into the cabin's interior wall, dark soot-stained opening" },
+    ],
+  };
+
+  afterEach(() => {
+    mockInvoke.mockReset();
+  });
+
+  it("job 414: the tools come out of scenes 2-3, the panel goes back to its own cabin, the list's axe stays — no extra call", async () => {
+    mockInvoke.mockImplementation(async ({ userMessage }: any) =>
+      userMessage.includes("=== SHOT")
+        ? ({ text: JSON.stringify(ANSWERS.map((prompt, k) => ({ shot: k + 1, prompt }))) } as any)
+        : ({ text: PANEL_ANSWER } as any)
+    );
+    const scenes = film();
+    await enhanceBrollPrompts(scenes, params);
+    // One call for the three cutaways, one for the panel: checking the answers costs nothing.
+    expect(mockInvoke).toHaveBeenCalledTimes(2);
+    expect(scenes[1].visualPrompt).toBe(
+      "Interior of a historic log cabin in Grayson County, Virginia, with hewn poplar walls. Scattered salvage and old objects rest on surfaces around the cabin's dim interior."
+    );
+    expect(scenes[2].visualPrompt).toBe(
+      "Close view of bare weathered hands working on a hewn poplar log wall inside the cabin, fingers pressing and adjusting with a tool. Nothing above the forearms shown."
+    );
+    expect(scenes[3].splitVisual).toBe(PANEL_SEED);
+    expect(scenes[4].visualPrompt).toBe(ANSWERS[2]);
+  });
+
+  it("the writer is told: the props list and the stretch line are not things to add, and an empty-handed search gets no stretch line", async () => {
+    mockInvoke.mockImplementation(async ({ userMessage }: any) =>
+      userMessage.includes("=== SHOT")
+        ? ({ text: JSON.stringify(ANSWERS.map((prompt, k) => ({ shot: k + 1, prompt }))) } as any)
+        : ({ text: PANEL_ANSWER } as any)
+    );
+    await enhanceBrollPrompts(film(), params);
+    const group = mockInvoke.mock.calls.find(c => (c[0].userMessage as string).includes("=== SHOT"))![0];
+    const sent = group.userMessage as string;
+    expect(group.systemPrompt).toContain(NOTHING_UNNAMED_RULE);
+    expect(group.systemPrompt).toContain(NOTHING_THERE_RULE);
+    expect(group.systemPrompt).not.toMatch(/Continue from the previous shots: the same objects/);
+    expect(sent).toContain("never add one its line does not name");
+    const [shot1, shot2] = sent.split("=== SHOT").slice(1);
+    expect(shot1).toContain("NOTHING THERE");
+    expect(shot1).not.toContain("This stretch of the video");
+    expect(shot2).toContain("LATER ones too");
+    expect(shot2).toContain(BEAT_414);
+    expect(shot2).not.toContain("NOTHING THERE");
+  });
+
+  it("the rules name no channel's things", () => {
+    for (const rule of [NOTHING_UNNAMED_RULE, NOTHING_THERE_RULE])
+      expect(rule).not.toMatch(/axe|froe|drawknife|cabin|tool|robin|holly|crock/i);
   });
 });
 

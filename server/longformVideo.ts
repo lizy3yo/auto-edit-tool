@@ -27,7 +27,16 @@ import nodePath from "node:path";
 import sharp from "sharp";
 import { invokeClaude } from "./claude";
 import { invokeGemini } from "./gemini";
-import { cutawayPromptLane, leftMotionLane, rewriteFallback, rewriteFault } from "./brollRewrite";
+import {
+  cutawayPromptLane,
+  leftMotionLane,
+  notYetSaidAt,
+  ownWordsOf,
+  rewriteFallback,
+  rewriteFault,
+  saysNothingThere,
+  withoutAddedKeyThings,
+} from "./brollRewrite";
 import {
   applyShotPlan,
   deriveContinuitySheet,
@@ -5561,6 +5570,33 @@ export const RULED_OUT_RULE =
   "you can see (\"don't count on it\") is not this rule.";
 
 /**
+ * What the prompt writer is handed beside a line is not the line (2026-10-20, job 414 scenes 2-8).
+ * The props list, the stretch line and the shots before cover other lines — the stretch line LATER
+ * ones too — and the writer took them as things to show: the back wall with the axe, froe and
+ * drawknife a line reveals at 21 s was in every picture from 2.6 s, under lines that name no tool.
+ * "Anything on the PROPS LIST looks exactly as listed. Continue from the previous shots: the same
+ * objects…" read as "put them in", and outweighed "no future events". This replaces it; the code
+ * takes out what still gets through when a later line reveals it (`withoutAddedKeyThings`).
+ */
+export const NOTHING_UNNAMED_RULE =
+  "ONLY WHAT THIS LINE NAMES: a thing on the PROPS LIST looks exactly as listed WHEN the shot shows " +
+  "it — the list is how things look, never a reason to put one in. Continue from the previous " +
+  "shots — the story further along, a different framing — but a thing they showed comes back only " +
+  "when this line or its MUST SHOW is about it. The stretch line and the props list cover other " +
+  "lines too, some still to come: never put in a thing they name that this line and its MUST SHOW " +
+  "do not, not even in the background — a thing a later line reveals, shown early, gives the " +
+  "reveal away.";
+
+/**
+ * A line about nothing being there is a picture of the empty place (2026-10-20, job 414 scene 2:
+ * "you will come up nearly empty-handed" over a cabin crowded with crocks, a pail, bowls and chests).
+ */
+export const NOTHING_THERE_RULE =
+  "NOTHING THERE: when the line says a place is empty or bare, or that a search comes up (nearly) " +
+  "empty, show that place bare — empty shelves, an empty room or yard, a bare table — with nothing " +
+  "put in to fill it, unless the line itself goes on to put something there.";
+
+/**
  * Composition rule for every generated b-roll frame. The setting clause used to ask for "natural
  * everyday clutter", and the model filled the frame edges with branded shop-vacs, tool chests and
  * bins while the subject sat small in the middle — an openwork lattice then showed that clutter
@@ -5987,8 +6023,9 @@ export const STILL_BROLL_ENHANCER_SYSTEM =
   "thing, named plainly first in your prompt and framed CLOSE — taking up much of the frame, the " +
   "first thing the eye lands on, though casually framed like a real phone photo rather than dead " +
   "centre, with the place only a background — never a " +
-  "different object, a wider scene it gets lost in, or a symbol of it. Anything on the PROPS LIST looks exactly as listed. Continue from " +
-  "the previous shots: the same objects, the story further along, a different framing.\n" +
+  "different object, a wider scene it gets lost in, or a symbol of it.\n" +
+  `- ${NOTHING_UNNAMED_RULE}\n` +
+  `- ${NOTHING_THERE_RULE}\n` +
   "- PLACE: set the shot where the narration puts it. When the line is about where a thing is " +
   "used, sold, or comes from (a Japanese home with sliding doors, a market stall, a customer's " +
   'living room, outdoors) — or compares the subject to where it is FOUND ("the kind of ' +
@@ -17389,17 +17426,35 @@ export async function enhanceBrollPrompts(
   // The scene's slice of the video's arc. Cutaways and splitVisual get it; CTA cutaways never do
   // — their narration is a sales pitch that CTA_BROLL_ENHANCER_SYSTEM exists to ignore, so a beat
   // derived from it would reintroduce exactly what that lane suppresses.
+  //
+  // The stretch covers LATER lines too (job 414: "the back wall revealing three hung tools—axe, froe,
+  // drawknife" was every picture's beat from 2.6 s, the reveal itself at 21 s), so it is labelled as
+  // such, and a line saying nothing is there never gets it: its "scattered salvage" filled scene 2's
+  // empty-handed search with crocks and chests (`saysNothingThere`).
+  const lineOf = (scene: StoryboardScene) => scene.scriptText ?? scene.narration;
   const beatLineFor = (scene: StoryboardScene): string => {
     const beat = scene.visualBeat?.trim();
-    return beat ? `This stretch of the video shows: ${beat}\n` : "";
+    if (!beat || saysNothingThere(lineOf(scene))) return "";
+    return (
+      `This stretch of the video (this line and the ones around it, LATER ones too — for ` +
+      `DISAMBIGUATION only, never a list of things to show) shows: ${beat}\n`
+    );
   };
+  const nothingThereFor = (scene: StoryboardScene): string =>
+    saysNothingThere(lineOf(scene))
+      ? `NOTHING THERE: this line says a place is empty or a search comes up (nearly) empty — show ` +
+        `that place bare, with nothing put in to fill it, unless the line itself goes on to put ` +
+        `something there.\n`
+      : "";
 
   // MEMORY between shots: the props list (how every recurring thing looks) and the three cutaways
   // just before this one, so the same panel is the same panel in every shot and the story moves
   // on instead of starting over. Each scene used to be rewritten alone, seeing only its own line.
+  // Both are how things LOOK and where the story is, never things to add (`NOTHING_UNNAMED_RULE`).
   const sheet = params.continuitySheet?.trim();
   const propsLine = sheet
-    ? `Props list (how recurring things look — draw anything on it exactly like this):\n${sheet}\n`
+    ? `Props list (how recurring things look — when a shot shows one, draw it exactly like this; ` +
+      `never add one its line does not name):\n${sheet}\n`
     : "";
   const previousShotsFor = (i: number): string => {
     const prev: string[] = [];
@@ -17411,9 +17466,17 @@ export async function enhanceBrollPrompts(
         prev.unshift(`"${truncateWords(p.scriptText ?? "", 10)}" → ${pic}`);
     }
     return prev.length
-      ? `Shots just before this one (continue from them; do not repeat their framing):\n${prev.join("\n")}\n`
+      ? `Shots just before this one (the story so far — do not repeat their framing; a thing from ` +
+          `them comes back only when this line is about it):\n${prev.join("\n")}\n`
       : "";
   };
+
+  // NOTHING THE LINE DOES NOT NAME, checked on the answer (`withoutAddedKeyThings`, no call): a key
+  // thing a later line reveals (`notYetSaid` — job 414's three tools before 21 s), or under a line
+  // saying nothing is there any key thing its own words do not name, is taken out of the rewrite.
+  const notYetSaidAtPicture = notYetSaidAt(scenes.map(lineOf), params.keyThings);
+  const thingsToKeepOut = (scene: StoryboardScene, i: number) =>
+    saysNothingThere(lineOf(scene)) ? params.keyThings ?? [] : notYetSaidAtPicture(i);
   // SAY IT, SHOW IT: the shot list names the thing this picture exists to show.
   const mustShowFor = (scene: StoryboardScene): string =>
     scene.showSubject
@@ -17443,22 +17506,34 @@ export async function enhanceBrollPrompts(
   // A REWRITE THAT IS NOT ITS PICTURE IS REFUSED for the scene's own words — no second call. Job 413
   // scenes 9-10 both came back as the hands directive they were given, reworded, and nothing looked:
   // one rewrite repeating a stock directive, one naming one word of its six-word subject.
-  const adoptRewrite = (scene: StoryboardScene, enhanced: string): void => {
+  const adoptRewrite = (scene: StoryboardScene, i: number, answer: string): void => {
     const lane = cutawayPromptLane(scene);
     const seed = seedOf(scene);
-    const fault = rewriteFault(enhanced, scene, seed, CUTAWAY_STOCK_DIRECTIVES);
-    if (!fault) {
+    const kept = withoutAddedKeyThings(answer, ownWordsOf(scene, seed), thingsToKeepOut(scene, i));
+    const enhanced = kept.text;
+    if (kept.added.length)
+      console.warn(
+        `[enhanceBrollPrompts] scene ${scene.index}: the rewrite shows ${kept.added.join(", ")}, ` +
+          `which its line does not name — ` +
+          (enhanced === undefined ? "kept the scene's own words" : "taken out")
+      );
+    const fault =
+      enhanced === undefined
+        ? "added"
+        : rewriteFault(enhanced, scene, seed, CUTAWAY_STOCK_DIRECTIVES);
+    if (!fault && enhanced !== undefined) {
       scene.visualPrompt = enhanced;
       scene.promptLane = lane;
       return;
     }
-    console.warn(
-      `[enhanceBrollPrompts] scene ${scene.index}: the rewrite ` +
-        (fault === "directive"
-          ? "repeats a stock directive"
-          : "leaves out what its line needs shown") +
-        ` — kept the scene's own words`
-    );
+    if (fault !== "added")
+      console.warn(
+        `[enhanceBrollPrompts] scene ${scene.index}: the rewrite ` +
+          (fault === "directive"
+            ? "repeats a stock directive"
+            : "leaves out what its line needs shown") +
+          ` — kept the scene's own words`
+      );
     scene.visualPrompt = rewriteFallback(scene, seed);
     scene.promptLane = undefined;
   };
@@ -17514,6 +17589,7 @@ export async function enhanceBrollPrompts(
         directionLine +
         propsLine +
         beatLineFor(scene) +
+        nothingThereFor(scene) +
         previousShotsFor(i) +
         mustShowFor(scene) +
         lane.type +
@@ -17543,7 +17619,7 @@ export async function enhanceBrollPrompts(
           subject
         );
       } else if (enhanced) {
-        adoptRewrite(scene, enhanced);
+        adoptRewrite(scene, i, enhanced);
       }
     } catch (err) {
       failure = err ?? new Error("unknown error");
@@ -17581,6 +17657,7 @@ export async function enhanceBrollPrompts(
         `=== SHOT ${k + 1} ===\n` +
         lane.directive +
         beatLineFor(scene) +
+        nothingThereFor(scene) +
         previousShotsFor(i) +
         mustShowFor(scene) +
         lane.type +
@@ -17614,7 +17691,7 @@ export async function enhanceBrollPrompts(
           typeof entry?.prompt === "string" ? entry.prompt : ""
         );
         if (!enhanced) return void left.push(item);
-        adoptRewrite(item.scene, enhanced);
+        adoptRewrite(item.scene, item.i, enhanced);
         guardCutawayBook(item.scene, item.i);
       });
       return left;
@@ -17651,6 +17728,26 @@ export async function enhanceBrollPrompts(
     const err = await enhanceCutaway(item);
     if (err) noteFailure(item.scene.index, err);
   }
+
+  // THE PANEL'S REWRITE, HELD TO ITS LINE THE SAME WAY (job 414 scene 4): seeded with the cabin seen
+  // from outside, it came back as the inside back wall with the axe, froe and drawknife — under a
+  // line whose last words lead into that reveal — and was drawn as a near-copy of scene 2. A panel
+  // whose rewrite was about a thing not yet said goes back to its own seed; a seed with a person in
+  // it (a panel shows nobody) keeps what is left of the rewrite instead, or the rewrite as it was.
+  const keepPanelToItsLine = (scene: StoryboardScene, i: number, answer: string): string => {
+    const seed = splitSeedOf(scene);
+    const own = ownWordsOf({ showSubject: scene.showSubject, scriptText: lineOf(scene) }, seed);
+    const kept = withoutAddedKeyThings(answer, own, thingsToKeepOut(scene, i));
+    if (!kept.added.length) return answer;
+    console.warn(
+      `[enhanceBrollPrompts] splitVisual ${scene.index}: the rewrite shows ` +
+        `${kept.added.join(", ")}, which its line does not name — ` +
+        (kept.text !== undefined ? "taken out" : "kept the panel's own words")
+    );
+    if (kept.text !== undefined) return kept.text;
+    if (seed?.trim() && !namesSomeone(seed)) return seed;
+    return kept.left || answer;
+  };
 
   // Split-screen cutaways live on HOST scenes (scene.splitVisual, rendered in the right half),
   // which the cutaway pass above skips on `!hostPresent` — so this was the one b-roll lane no
@@ -17695,6 +17792,7 @@ export async function enhanceBrollPrompts(
             subjectLine +
             directionLine +
             beatLineFor(scene) +
+            nothingThereFor(scene) +
             `Scene narration: "${scene.scriptText ?? scene.narration}"\n` +
             `Original prompt: ${splitSeedOf(scene)}\n\n` +
             `Enhanced prompt:`,
@@ -17712,7 +17810,7 @@ export async function enhanceBrollPrompts(
           subject
         );
       } else if (enhanced) {
-        scene.splitVisual = enhanced;
+        scene.splitVisual = keepPanelToItsLine(scene, i, enhanced);
       }
       return null;
     } catch (err) {
