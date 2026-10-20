@@ -1574,7 +1574,7 @@ describe("print the line never says is drawn soft, never asked for (the audit's 
     const screen =
       "a phone screen showing Facebook Marketplace: a white screen with a soft blue top bar, a two-column grid of item photos with soft grey bars below them, and a small logo that cannot be read";
     expect(brollDepictsBook(screen)).toBe(false);
-    // A split panel is swapped for ANY book (`guardPitchVisuals`) — this one is no book, so it stays.
+    // A split panel loses a book its line never speaks of (`guardPitchVisuals`) — this one is no book, so it stays.
     const split = host(7, "and Facebook Marketplace", { splitVisual: screen });
     expect(guardPitchVisuals([split])).toEqual([]);
     expect(split.splitVisual).toBe(screen);
@@ -9602,5 +9602,200 @@ describe("round 14: a graphic is read from when its words show, and sits clear o
     // the knife table (413, 1:40) and the frosted grass (411, 0:11): clear where they were designed
     expect(choose("NumberLabel", { w: 540, h: 220 }, ["knives"])).toBe("bottom left → bottom left");
     expect(choose("MythStamp", { w: 534, h: 254 }, ["robins"])).toBe("top right → top right");
+  });
+});
+
+describe("round 15: a split panel keeps the book its line is about, and is never its neighbour's picture again (job 416)", () => {
+  // Walter Wren's robins film: scene 15's panel under "the one printed in the field guides" was the
+  // field guide's page until the last guard, which swapped ANY book in a panel for the nearest
+  // cutaway's prompt — scene 14's Gulf Coast palms, word for word, so the coast ran twice back to
+  // back for 18 s and nothing showed the guide or the name. The panel now follows the cutaway's rule.
+  const COAST =
+    "A flat coastal landscape with scattered palm trees, short green grass, and a wide pale sky; several American robins scattered across the grass in winter.";
+  const GUIDE =
+    "an open bird field guide resting on a kitchen table, its page showing a painted illustration of an American robin, a brick-orange breast, a dark gray-brown back, a blackish head with broken white eye ring, a yellow bill";
+  const LINE =
+    "The funny part is that the robin’s own scientific name, the one printed in the field guides, ends in the word migratorius,";
+  const BIRDER = ["The Backyard Birder"];
+  const SUBJECT = "Robins DON'T All Fly South: 7 Things You";
+  const film = (panel: string, extra: Partial<StoryboardScene> = {}): StoryboardScene[] => [
+    {
+      index: 14,
+      scriptText:
+        "And if you live along the Gulf Coast or down in Florida, winter can be when you see the most robins all year, since that’s where a lot of those northern birds end up.",
+      narration: "And if you live along the Gulf Coast",
+      stillImage: true,
+      keyThing: "robin",
+      visualPrompt: COAST,
+    } as StoryboardScene,
+    {
+      index: 15,
+      hostPresent: true,
+      scriptText: LINE,
+      narration: "The funny part is that the robin’s own",
+      showSubject:
+        "A close-up of an open field guide page with a small robin illustration and blurred soft grey lines of print. One word in the entry is clearly legible.",
+      keyThing: "robin",
+      visualPrompt: "the channel's host, seated in a chair talking directly to the camera",
+      splitVisual: panel,
+      splitVisualSeed: GUIDE,
+      ...extra,
+    } as StoryboardScene,
+  ];
+
+  it("scene 15: the field guide's page stays beside 'the one printed in the field guides' — no Gulf Coast twice", () => {
+    const scenes = film(GUIDE);
+    expect(guardPitchVisuals(scenes, SUBJECT, BIRDER)).toEqual([]);
+    expect(scenes[1].splitVisual).toBe(GUIDE);
+  });
+
+  it("the video's own book is still taken out of a panel outside the pitch — from the panel's own words", () => {
+    const scenes = film(
+      "A robin on a snow-patched fence post, a copy of The Backyard Birder on the windowsill behind it"
+    );
+    expect(guardPitchVisuals(scenes, SUBJECT, BIRDER)).toEqual([15]);
+    expect(scenes[1].splitVisual).toBe("A robin on a snow-patched fence post");
+  });
+
+  it("a book its line never speaks of goes, and with nothing else in the panel it is the panel's own seed — never scene 14's coast", () => {
+    const LAWN = "robin on bare winter lawn, wider view of yard"; // scene 12's real seed
+    const scenes = film("a worn bird book open on a kitchen table", {
+      scriptText: "Across most of the lower forty-eight, you can find robins all winter long.",
+      showSubject: LAWN,
+      splitVisualSeed: LAWN,
+    });
+    expect(guardPitchVisuals(scenes, SUBJECT, BIRDER)).toEqual([15]);
+    expect(scenes[1].splitVisual).toBe(LAWN);
+    expect(guardPitchVisuals(scenes, SUBJECT, BIRDER)).toEqual([]);
+  });
+
+  it("a pitch panel still loses any book for on-topic b-roll, even under scene 24's 'thirty birds over nine chapters'", () => {
+    const scenes = film(GUIDE, {
+      cta: true,
+      qrCorner: true,
+      scriptText:
+        "It covers more than thirty birds over nine chapters, and every bird’s profile runs the same six parts, from how to identify it, to a surprising fact, to the common mistake to avoid.",
+    });
+    expect(guardPitchVisuals(scenes, SUBJECT, BIRDER)).toEqual([15]);
+    expect(brollDepictsBook(scenes[1].splitVisual!)).toBe(false);
+    expect(scenes[1].splitVisual).toBe(COAST); // the CTA lane's on-topic b-roll, as before
+  });
+});
+
+describe("a season or an hour the picture's OWN words name is held like its line's (round 15, job 416 scene 20)", () => {
+  // 416-20: "It's a male letting the neighborhood know this patch is his and he's looking for a mate."
+  // names no season; the shot list carried "at dawn in spring" into what the picture must show, but the
+  // "THIS PICTURE IS IN SPRING" sentence was said only for a LINE's season, so the robin's one reference
+  // (a thawing, snow-patched March lawn) lent its snow and its flat daylight — between a leafy spring
+  // branch (scene 19, the same reference under a line naming spring) and the winter-quiet robin. The
+  // full cases are in lineSeason.test.ts.
+  const SONG = "Start with the singing. That bright song at first light, the one birders have long remembered as cheer up, cheerily, belongs to spring and summer.";
+  const MALE = "It’s a male letting the neighborhood know this patch is his and he’s looking for a mate.";
+  const QUIET =
+    "Once nesting season is over, that job is done, and through the winter a robin hardly sings at all. Mostly you’ll hear a low, soft clucking, a bit like somebody tutting under their breath, and that’s easy to miss with the storm windows shut.";
+  const robin = (index: number, line: string, show: string) =>
+    ({ index, narration: line, scriptText: line, showSubject: show, visualPrompt: show, keyThing: "robin" }) as StoryboardScene;
+
+  it("416-20 is told spring and dawn beside its snowy reference; 19 reads as before; 21's winter is never said", async () => {
+    const { holdLineSeasons } = await import("./lineSeason");
+    const { buildStillPrompt, MEMORY_SETTING_CLAUSE, memoryClause } = await import("./longformVideo");
+    const { MEMORY_VIEWS } = await import("./pictureMemory");
+    const b = [
+      robin(19, SONG, "a male American robin singing on a leafy tree branch at first light in spring, chest puffed"),
+      robin(20, MALE, "a male American robin singing from the top of a wooden fence post at dawn in spring, chest puffed out"),
+      robin(21, QUIET, "an American robin with beak slightly open on a snow-patched backyard lawn, a house with closed white storm windows behind it"),
+    ];
+    // Every picture's words already hold its season: nothing is added to them.
+    expect(holdLineSeasons(b)).toBe(0);
+    const refs = { memoryView: MEMORY_VIEWS[3], memoryRefUrls: ["https://r2/416/still-src-5.png"] };
+    const male = memoryClause({ ...b[1], ...refs });
+    expect(male).toContain(
+      "THIS PICTURE IS IN SPRING (no snow, frost or ice on anything), AT DAWN (the first low light of the day), AS ITS OWN WORDS SAY"
+    );
+    expect(male.endsWith(MEMORY_SETTING_CLAUSE)).toBe(true);
+    expect(memoryClause({ ...b[0], ...refs })).toContain("THIS PICTURE IS IN SPRING (no snow, frost or ice on anything), AT FIRST LIGHT");
+    expect(buildStillPrompt({ ...b[2], ...refs })).not.toContain("THIS PICTURE IS");
+  });
+
+  it("a season the line only waits or plans for is not taken from the picture's words (jobs 411-3, 158-97)", async () => {
+    const { seasonHourClause } = await import("./lineSeason");
+    const { MEMORY_VIEWS } = await import("./pictureMemory");
+    const refs = { memoryView: MEMORY_VIEWS[1], memoryRefUrls: ["https://r2/411/still-src-2.png"] };
+    const until = robin(3, "and nobody sees another robin until spring.", "an empty backyard lawn in spring");
+    expect(seasonHourClause({ ...until, ...refs })).toBe("");
+    const porch = robin(97, "or a neighbor two doors down expecting in the spring.", "the neighbor's front porch in spring");
+    expect(seasonHourClause({ ...porch, ...refs })).toBe("");
+  });
+
+  it("a season said of the light is the picture's too (job 332 scene 14, drawn from two references)", async () => {
+    const { seasonHourClause } = await import("./lineSeason");
+    const { MEMORY_VIEWS } = await import("./pictureMemory");
+    const grid = {
+      index: 14,
+      scriptText: "I figured 2 hours. It took 6. It sells for $90 to $130, but once you take out the lumber, that's about $14 for every hour I stood at the bench.",
+      showSubject:
+        "A foot-square pale pine grid with equal square openings, standing upright on a folding table draped in plain dark cloth outdoors under pale early-spring light.",
+      keyThing: "kumiko lattice panel",
+      memoryView: MEMORY_VIEWS[2],
+      memoryRefUrls: ["https://r2/332/still-src-3.png", "https://r2/332/still-src-9.png"],
+    } as StoryboardScene;
+    expect(seasonHourClause(grid)).toContain("THIS PICTURE IS IN EARLY SPRING (no snow, frost or ice on anything), AS ITS OWN WORDS SAY");
+    // The coil beside the light is never a season.
+    expect(seasonHourClause({ ...grid, showSubject: "the tension of the spring in the morning light" })).toBe("");
+  });
+});
+
+describe("round 15: a picture that says a thing is NOT there is never its memory (job 416 scenes 2, 5, 13, 16)", () => {
+  // Walter Wren's robins film: the same yard from the same camera spot four times. Scene 2, the EMPTY
+  // lawn under "nobody sees another robin until spring" ("no robins visible"), was filed with the robin
+  // beside it, and with no earlier picture about the robin it was the robin's memory — scene 5 was drawn
+  // from it, and every later robin picture from scene 5. Its first check had also held it to a robin.
+  const show = "empty backyard lawn at quiet morning, no robins visible";
+  const robin = (index: number, words: string, over: Partial<StoryboardScene> = {}) =>
+    ({
+      index,
+      narration: "n",
+      showSubject: words,
+      visualPrompt: words,
+      keyThing: "robin",
+      pictureUrl: `u${index}`,
+      ...over,
+    }) as StoryboardScene;
+  const board = () => [
+    robin(2, show, { keyThing: "backyard lawn", otherKeyThings: ["robin"] }),
+    robin(5, "an American robin on a thawing, snow-patched backyard lawn in early March", { otherKeyThings: ["backyard lawn"] }),
+    robin(7, "a robin perched in the backyard, close view, alert"),
+    robin(13, "an American robin on a snow-patched backyard lawn in January", { otherKeyThings: ["backyard lawn"] }),
+  ];
+
+  it("416-5 is the robin's first picture (drawn from its written look), and the later ones follow IT, not the empty lawn", () => {
+    const b = board();
+    expect(memorySourcesFor(b, b[1])).toEqual([]);
+    expect(memoryViewFor(b, b[1])).toBeUndefined();
+    expect(memorySourcesFor(b, b[2])).toEqual([b[1]]);
+    expect(memorySourcesFor(b, b[3])).toEqual([b[1], b[2]]);
+  });
+
+  it("416-2 is checked for the lawn alone, and a planner's filing under the robin gives way", () => {
+    const b = board();
+    expect(requiredThingsFor(b[0])).toEqual(["backyard lawn"]);
+    expect(ownKeyThing({ ...b[0], keyThing: "robin" })).toBeUndefined();
+  });
+
+  it("a robin said plainly beside the lawn still lends it — only 'not there' does not", () => {
+    const b = board();
+    Object.assign(b[0], { showSubject: "a quiet backyard lawn at morning, one robin by the fence", visualPrompt: undefined });
+    expect(memorySourcesFor(b, b[1])).toEqual([b[0]]);
+  });
+
+  it("a negated DOING keeps its thing: the lawn no robins are working is still the lawn, the light a robin won't touch is there", async () => {
+    const { keyThingsIn } = await import("./shotList");
+    const things: KeyThing[] = ["robin", "backyard lawn", "porch light"].map(name => ({ name, look: "" }));
+    expect(keyThingsIn("the backyard lawn at dawn, no robins working the backyard lawn yet", things).map(t => t.name)).toEqual([
+      "backyard lawn",
+    ]);
+    const b = board();
+    const shy = { ...b[2], showSubject: "a robin by the back door that won't touch the porch light", otherKeyThings: ["porch light"] };
+    expect(requiredThingsFor(shy)).toEqual(["robin", "porch light"]);
   });
 });

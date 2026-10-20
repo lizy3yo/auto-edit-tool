@@ -12,7 +12,9 @@
  * line check are told so (`SEASON_HOUR_RULE`), and whatever they wrote, a picture whose own words name
  * none gets the line's (`holdLineSeasons`) — so the prompt writer is never left to fill it from the
  * home base — and a picture drawn from references is told its season and hour in so many words
- * (`seasonHourClause`), so no reference lends its snow or its daylight against them.
+ * (`seasonHourClause`), so no reference lends its snow or its daylight against them. That sentence
+ * holds a warm season or an hour the picture's OWN words name as well (round 15, job 416 scene 20: "at
+ * dawn in spring" under a line naming neither came back in its reference's snow and flat daylight).
  * Only what the line says the picture's moment IS: never a season it is getting ready for ("before
  * winter", "stock up for winter"), a season ruled out ("never in summer"), two that contrast ("sings in
  * summer, clucks in winter"), a name ("Winter Park"), a thing named after one ("a winter coat",
@@ -98,12 +100,37 @@ const clauseBefore = (text: string, at: number) => {
 };
 
 /**
- * The season line `text` sets what it shows in, or undefined: the first one it names, with its
- * "early" / "late" / "mid" ("late winter"), when every season it names agrees — two that contrast, or
- * "all year", hold none. Pure.
+ * The outdoor scene, or the light or time of day, a season word stands before in a picture's OWN
+ * words, which are a noun phrase and say the season as a describing word: "above a green summer lawn"
+ * (job 411 scene 21's own words), "a spring garden", "fall leaves on the path" — and "outdoors under
+ * pale early-spring light" (job 332 scenes 14 and 26, each drawn from two references, whose spring
+ * went unsaid when only an outdoor scene counted), "on a spring morning", "summer daylight". Read
+ * only there (`pictureSeason`) — in a spoken line a season before a noun is read as a thing named
+ * after it, and round 14's lines stay as they were.
  */
-export function lineSeason(text: string | undefined): HeldSeason | undefined {
-  if (!text?.trim() || ALL_YEAR.test(text)) return undefined;
+const SEASON_SCENERY = new Set(
+  (
+    "lawn lawns garden gardens yard yards backyard meadow meadows field fields pasture pastures grass " +
+    "leaves foliage greenery trees woods forest orchard landscape countryside rain shower showers storm " +
+    "storms breeze bloom blooms blossom blossoms flowers " +
+    "light daylight sunlight sunshine sun sky skies air weather morning mornings afternoon afternoons " +
+    "evening evenings day days night nights"
+  ).split(" ")
+);
+
+/**
+ * The season `text` sets what it shows in (`held`), or none: the first one it names, with its "early"
+ * / "late" / "mid" ("late winter"), when every season it names agrees — two that contrast, or "all
+ * year", hold none. With `scenery`, a season said as a describing word before an outdoor scene, its
+ * light or its time of day ("a green summer lawn", "pale spring light") counts too — for a picture's
+ * own words. `notNow` is every season it names as ANOTHER time than its moment — one it gets ready
+ * for, waits for or sets the moment against ("expecting in the spring", "ready for spring", "since
+ * spring", "unlike summer"). A season only ruled out ("never mow it short in summer") is not in it:
+ * that is still the moment, with an act ruled out. Pure.
+ */
+function readSeasons(text: string | undefined, scenery: boolean): { held?: HeldSeason; notNow: Set<Season> } {
+  const notNow = new Set<Season>();
+  if (!text?.trim() || ALL_YEAR.test(text)) return { notNow };
   const found: HeldSeason[] = [];
   for (const m of Array.from(text.matchAll(SEASON_WORD))) {
     const at = m.index!;
@@ -114,21 +141,42 @@ export function lineSeason(text: string | undefined): HeldSeason | undefined {
     const after = text.slice(at + m[0].length);
     // A thing named after a season ("a winter coat", "summer squash", "spring steel").
     const next = /^\s+([a-z'’-]+)/i.exec(after)?.[1]?.toLowerCase().replace(/['’]/g, "");
-    if (!m[2] && next && !/^[,.;:!?—)]/.test(after) && !STILL_A_TIME.has(next)) continue;
+    const described = scenery && !!next && SEASON_SCENERY.has(next);
+    if (!m[2] && next && !/^[,.;:!?—)]/.test(after) && !STILL_A_TIME.has(next) && !described) continue;
+    const season = seasonOf(word);
+    const tumble = /^fall$/i.test(word) && TUMBLE.test(sentenceAt(text, at));
+    // Read before the frame: "until spring", "ready for spring" need none to be the season waited for.
+    if (NOT_ITS_SEASON.test(before)) {
+      if (!tumble) notNow.add(season);
+      continue;
+    }
     const ambiguous = /^(?:spring|fall)$/i.test(word) && !m[2];
-    if (ambiguous && !SEASON_FRAME_BEFORE.test(before) && !SEASON_FRAME_AFTER.test(after)) continue;
-    if (/^fall$/i.test(word) && TUMBLE.test(sentenceAt(text, at))) continue;
-    if (NOT_ITS_SEASON.test(before)) continue;
+    if (ambiguous && !described && !SEASON_FRAME_BEFORE.test(before) && !SEASON_FRAME_AFTER.test(after)) continue;
+    if (tumble) continue;
     if (RULED_OUT.test(clauseBefore(text, at))) continue;
     const q = QUALIFIER.exec(before)?.[1]?.toLowerCase();
-    const season = seasonOf(word);
     found.push({ season, said: q ? `${q} ${season}` : season });
   }
-  if (!found.length) return undefined;
+  if (!found.length) return { notNow };
   const kinds = new Set(found.map(f => f.season));
   // Two that contrast are no one season: summer against winter, spring against autumn.
-  if ((kinds.has("summer") && kinds.has("winter")) || (kinds.has("spring") && kinds.has("autumn"))) return undefined;
-  return found[0];
+  if ((kinds.has("summer") && kinds.has("winter")) || (kinds.has("spring") && kinds.has("autumn"))) return { notNow };
+  return { held: found[0], notNow };
+}
+
+/** The season a spoken line sets what it shows in (`readSeasons`). Pure. */
+export function lineSeason(text: string | undefined): HeldSeason | undefined {
+  return readSeasons(text, false).held;
+}
+
+/**
+ * The season a picture's OWN words (`showSubject`, `visualPrompt`) set it in: every exclusion a line
+ * has — a fall that is a tumble, "of the spring" the coil, a season only planned for, a name — and a
+ * season said as a describing word before an outdoor scene, its light or its time of day too ("a green
+ * summer lawn", "under pale early-spring light", "a spring morning"). Pure.
+ */
+export function pictureSeason(words: string | undefined): HeldSeason | undefined {
+  return readSeasons(words, true).held;
 }
 
 const SMALL_HOURS = "(?:one|two|three|four|1|2|3|4)(?::\\d\\d)?\\s*(?:o['’]clock\\s+)?(?:in the morning|a\\.?\\s?m\\b\\.?)";
@@ -258,29 +306,90 @@ const AT_HOUR: Record<Hour, string> = {
   dusk: "the last low light of the day",
 };
 
+/** Where the season or hour a picture is told was said: its line, or its own words. */
+type SaidBy = "line" | "own";
+
+/**
+ * The season a picture drawn from references is in, and who said it. What it must show
+ * (`showSubject`) comes first — the shot list or the line check chose it, and the check holds the
+ * picture to it — then its line, then the prompt writer's rewrite (`visualPrompt`), which never
+ * outranks the line: round 14's prompt writer filled a season the line had left it from the channel's
+ * winter home base. Only a WARM season is said, and never on a picture whose own words hold snow,
+ * frost, winter or autumn, nor one about a key thing named with that season word (a "latch spring" —
+ * `holdLineSeasons` keeps it out the same way). Nor is a season the LINE names as another time than
+ * its moment (`readSeasons`' `notNow`) taken back from the picture's words: a writer copies it from the
+ * line, as job 158 scene 97's prompt drew a "spring yard beyond" for "a neighbor two doors down
+ * expecting in the spring" — the blanket is handed over now. Undefined otherwise. Pure.
+ */
+function seasonToSay(
+  line: string | undefined,
+  own: string,
+  prompt: string,
+  thingWords: Set<string>
+): { said: string; by: SaidBy } | undefined {
+  const byOwn = pictureSeason(own);
+  const { held: byLine, notNow } = readSeasons(line, false);
+  const byPrompt = byOwn || byLine ? undefined : pictureSeason(prompt);
+  const held = byOwn ?? byLine ?? byPrompt;
+  if (!held || (held.season !== "spring" && held.season !== "summer") || thingWords.has(held.season)) return undefined;
+  if (held !== byLine && byLine?.season !== held.season && notNow.has(held.season)) return undefined;
+  if (COLD_SIGNS.test(own) || (byPrompt && COLD_SIGNS.test(prompt))) return undefined;
+  return { said: held.said, by: byPrompt || (byOwn && byLine?.season !== byOwn.season) ? "own" : "line" };
+}
+
+/**
+ * The hour a picture drawn from references is at, and who said it — in the same order as its season
+ * (`seasonToSay`), each read strictly (`lineHour`: "at dawn", "at night" — never "dark walnut" or an
+ * "evening gown"). Undefined when the words it must show (and the rewrite, when the hour is the
+ * rewrite's) set it at another hour; dawn and dusk are the same low light. Pure.
+ */
+function hourToSay(line: string | undefined, own: string, prompt: string): { held: HeldHour; by: SaidBy } | undefined {
+  const byOwn = lineHour(own);
+  const byLine = lineHour(line);
+  const byPrompt = byOwn || byLine ? undefined : lineHour(prompt);
+  const held = byOwn ?? byLine ?? byPrompt;
+  if (!held) return undefined;
+  const signs = new Set([...Array.from(hoursIn(own)), ...(byPrompt ? Array.from(hoursIn(prompt)) : [])]);
+  const others = Array.from(signs).filter(h => h !== held.hour);
+  const twilight = held.hour !== "night" && others.every(h => h === "dawn" || h === "dusk");
+  if (others.length && !twilight) return undefined;
+  return { held, by: byPrompt || (byOwn && byLine?.hour !== byOwn.hour) ? "own" : "line" };
+}
+
 /**
  * The season and hour a picture drawn from references is in, said in so many words (`memoryClause`,
- * right before `MEMORY_SETTING_CLAUSE`), when its line holds one (`lineSeason`, `lineHour`) and what it
- * must show (`showSubject`) sets it in no other. `MEMORY_SETTING_CLAUSE` gives the season to the picture's own words, and job 411
- * scene 20's named none, so its snowy references lent their snow to a song that "belongs to spring and
- * summer": " THIS PICTURE IS IN SPRING (no snow, frost or ice on anything), AS ITS LINE SAYS — whatever
- * season, weather or light a reference image shows." Only a WARM season is said: a cold one is in the
- * picture's own words already (`holdLineSeasons`), and asking for winter's look would put snow back on
- * a mild Gulf Coast lawn "in winter" (job 411 scene 16). Empty when the line holds neither. Pure.
+ * right before `MEMORY_SETTING_CLAUSE`). `MEMORY_SETTING_CLAUSE` gives the season to the picture's own
+ * words, and job 411 scene 20's named none, so its snowy references lent their snow to a song that
+ * "belongs to spring and summer": " THIS PICTURE IS IN SPRING (no snow, frost or ice on anything), AS
+ * ITS LINE SAYS — whatever season, weather or light a reference image shows." The picture's OWN words
+ * are held the same way (round 15, job 416 scene 20): "It's a male letting the neighborhood know this
+ * patch is his" names no season, the shot list carried the passage's "at dawn in spring" into what the
+ * picture must show, and with nothing said in so many words the robin's one reference — a thawing,
+ * snow-patched March lawn — lent its snow and its flat daylight, while the line before, drawn from the
+ * same reference under a line that names spring, came back leafy. Only a WARM season is said: a cold
+ * one is in the picture's own words already (`holdLineSeasons`), and asking for winter's look would put
+ * snow back on a mild Gulf Coast lawn "in winter" (job 411 scene 16). Empty when neither holds one. Pure.
  */
 export function seasonHourClause(scene: StoryboardScene): string {
   const line = scene.scriptText ?? scene.narration;
   const own = scene.showSubject ?? "";
+  const prompt = scene.visualPrompt ?? "";
+  const thingWords = new Set(
+    [scene.keyThing, scene.partOf, ...(scene.otherKeyThings ?? [])].flatMap(t => (t ?? "").toLowerCase().split(/[^a-z]+/)).filter(Boolean)
+  );
   const parts: string[] = [];
-  const season = lineSeason(line);
-  if (season && (season.season === "spring" || season.season === "summer") && !COLD_SIGNS.test(own))
+  const by = new Set<SaidBy>();
+  const season = seasonToSay(line, own, prompt, thingWords);
+  if (season) {
     parts.push(`IN ${season.said.toUpperCase()} (no snow, frost or ice on anything)`);
-  const hour = lineHour(line);
+    by.add(season.by);
+  }
+  const hour = hourToSay(line, own, prompt);
   if (hour) {
-    const others = Array.from(hoursIn(own)).filter(h => h !== hour.hour);
-    const twilight = hour.hour !== "night" && others.every(h => h === "dawn" || h === "dusk");
-    if (!others.length || twilight) parts.push(`${hour.said.toUpperCase()} (${AT_HOUR[hour.hour]})`);
+    parts.push(`${hour.held.said.toUpperCase()} (${AT_HOUR[hour.held.hour]})`);
+    by.add(hour.by);
   }
   if (!parts.length) return "";
-  return ` THIS PICTURE IS ${parts.join(", ")}, AS ITS LINE SAYS — whatever season, weather or light a reference image shows.`;
+  const as = by.size > 1 ? "AS ITS LINE AND ITS OWN WORDS SAY" : by.has("own") ? "AS ITS OWN WORDS SAY" : "AS ITS LINE SAYS";
+  return ` THIS PICTURE IS ${parts.join(", ")}, ${as} — whatever season, weather or light a reference image shows.`;
 }

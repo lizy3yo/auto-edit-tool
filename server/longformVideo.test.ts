@@ -2137,8 +2137,34 @@ describe("brollDepictsBook / non-CTA book guard", () => {
   // The splitVisual book guard is the ONLY guard on that field, and splitVisual is now enhanced
   // by an LLM first — so the guard has to survive what the LLM hands back, not just what the
   // storyboard wrote. Mock the enhancer into RETURNING a book: a version that only mocks a clean
-  // reply passes whether or not the guard exists at all.
-  it("swaps a booky splitVisual the ENHANCER introduced on a HOST scene", async () => {
+  // reply passes whether or not the guard exists at all. The book goes from the panel's OWN words,
+  // never for the neighbour's picture (job 416 scene 15 was drawn as scene 14's coast again).
+  it("takes a made-up book the ENHANCER put in a HOST scene's panel out of the panel's own words", async () => {
+    const scenes = [
+      sc({
+        index: 0,
+        hostPresent: true,
+        narration: "let me show you",
+        visualPrompt: "the host talking",
+        splitVisual: "a seed tray on the potting bench",
+      }),
+      sc({
+        index: 1,
+        narration: "spread the mulch evenly",
+        visualPrompt: "a wheelbarrow of mulch beside a flower bed",
+      }),
+    ];
+    mockInvoke.mockImplementation(async (p: any) =>
+      (p.userMessage as string).includes("a seed tray on the potting bench")
+        ? { text: "a damp seed tray on the potting bench, a well-thumbed almanac propped beside it" }
+        : { text: "a wheelbarrow of mulch beside a flower bed" }
+    );
+    await enhanceBrollPrompts(scenes, baseParams);
+    expect(brollDepictsBook(scenes[0].splitVisual!)).toBe(false);
+    expect(scenes[0].splitVisual).toBe("a damp seed tray on the potting bench");
+  });
+
+  it("a panel that was nothing but the made-up book falls back to the video's subject, not a neighbour or a seed with hands in it", async () => {
     const scenes = [
       sc({
         index: 0,
@@ -2158,9 +2184,10 @@ describe("brollDepictsBook / non-CTA book guard", () => {
         ? { text: "hands leafing through a well-thumbed almanac" }
         : { text: "a wheelbarrow of mulch beside a flower bed" }
     );
-    await enhanceBrollPrompts(scenes, baseParams);
+    await enhanceBrollPrompts(scenes, { ...baseParams, videoSubject: "starting seeds indoors" });
     expect(brollDepictsBook(scenes[0].splitVisual!)).toBe(false);
-    expect(scenes[0].splitVisual).toMatch(/wheelbarrow/);
+    expect(scenes[0].splitVisual).not.toMatch(/wheelbarrow|hands/);
+    expect(scenes[0].splitVisual).toMatch(/^starting seeds indoors — /);
   });
 
   it("uses the enhancer reply as the visual prompt", async () => {
@@ -3337,6 +3364,8 @@ describe("CTA split panel (splitVisual on a pitch beat)", () => {
     } as any);
     await enhanceBrollPrompts(scenes, baseParams);
     expect(brollDepictsBook(scenes[0].splitVisual!)).toBe(false);
+    // from its own seed, never the cutaway beside it
+    expect(scenes[0].splitVisual).toBe("seed trays");
   });
 });
 
@@ -4547,7 +4576,7 @@ describe("guardPitchVisuals", () => {
     expect(scenes[0].visualPrompt).toBe("a cedar feeder on a post");
   });
 
-  it("swaps a literal split panel on a pitch beat, and a book in any panel", () => {
+  it("swaps a literal or booky split panel on a pitch beat for on-topic b-roll", () => {
     const scenes = [
       sc(1, {
         cta: true,
@@ -4555,8 +4584,12 @@ describe("guardPitchVisuals", () => {
         hostPresent: true,
         splitVisual: "a phone showing a QR code",
       }),
+      // the pitch speaks of the video's own book: any book in its panel is that one, even under a
+      // line that speaks of print ("chapters") — the rule outside the pitch would keep it
       sc(2, {
+        cta: true,
         hostPresent: true,
+        scriptText: "It covers thirty feeders over nine chapters.",
         splitVisual: "an open handbook on the bench",
       }),
       sc(3, {
@@ -4567,6 +4600,80 @@ describe("guardPitchVisuals", () => {
     expect(guardPitchVisuals(scenes, SUBJECT)).toEqual([1, 2]);
     expect(scenes[0].splitVisual).toBe("cedar offcuts in a coffee can");
     expect(scenes[1].splitVisual).toBe("cedar offcuts in a coffee can");
+  });
+
+  it("outside the pitch a made-up book leaves a panel from its OWN words, never for a neighbour's picture", () => {
+    const scenes = [
+      sc(2, {
+        hostPresent: true,
+        scriptText: "Sand the edges smooth.",
+        splitVisual: "a cedar feeder on the bench, an open handbook beside it",
+      }),
+      sc(3, {
+        hostPresent: true,
+        scriptText: "Sand the edges smooth.",
+        splitVisual: "an open handbook on the bench",
+      }),
+      sc(4, {
+        stillImage: true,
+        visualPrompt: "cedar offcuts in a coffee can",
+      }),
+    ];
+    expect(guardPitchVisuals(scenes, SUBJECT)).toEqual([2, 3]);
+    expect(scenes[0].splitVisual).toBe("a cedar feeder on the bench");
+    expect(scenes[1].splitVisual).toMatch(/^cedar bird feeder build — /);
+    expect(scenes.map(s => s.splitVisual)).not.toContain("cedar offcuts in a coffee can");
+    expect(guardPitchVisuals(scenes, SUBJECT)).toEqual([]); // idempotent
+  });
+
+  it("outside the pitch a panel keeps a book its line is about, and loses the video's own book", () => {
+    const TITLES = ["The Feeder Builder's Guide"];
+    const manual = sc(5, {
+      hostPresent: true,
+      scriptText: "The plan in the old woodworking manual calls for a sloped roof,",
+      splitVisual: "an open woodworking manual on the bench, its page showing a feeder with a sloped roof",
+    });
+    const titled = sc(6, {
+      hostPresent: true,
+      scriptText: "Sand the edges smooth.",
+      splitVisual: "a cedar feeder on the bench, a copy of The Feeder Builder's Guide propped against the vise",
+    });
+    const mine = sc(7, {
+      hostPresent: true,
+      scriptText: "In my book I show the roof angle.",
+      showSubject: "the roof of a cedar feeder",
+      splitVisual: "a hardback book open on the bench",
+    });
+    const scenes = [manual, titled, mine, sc(8, { stillImage: true, visualPrompt: "cedar offcuts in a coffee can" })];
+    expect(guardPitchVisuals(scenes, SUBJECT, TITLES)).toEqual([6, 7]);
+    expect(manual.splitVisual).toBe(
+      "an open woodworking manual on the bench, its page showing a feeder with a sloped roof"
+    );
+    expect(titled.splitVisual).toBe("a cedar feeder on the bench");
+    // nothing of its own is left: what the line needs, never the cutaway beside it
+    expect(mine.splitVisual).toBe("the roof of a cedar feeder");
+    expect(mine.showSubject).toBe("the roof of a cedar feeder");
+  });
+
+  it("outside the pitch a word that only has 'book' in it is no book: the panel stays (job 120 scene 52's seed)", () => {
+    // The old guard read "notebook" as a book and swapped this panel for the cutaway beside it.
+    const NOTES =
+      "A handwritten ledger or notebook open on the sewing room work table, showing simple arithmetic and time notations in neat handwriting, natural light falling across the page.";
+    const scenes = [
+      sc(52, {
+        hostPresent: true,
+        scriptText:
+          "That works out to about eleven dollars an hour, which surprised me plenty, seeing as it's the plainest thing I sew.",
+        splitVisual: NOTES,
+      }),
+      sc(53, { stillImage: true, visualPrompt: "a worn cotton bread cloth draped over a kitchen rail" }),
+    ];
+    expect(guardPitchVisuals(scenes, SUBJECT, ["Plain Sewing: 50 Simple Projects for the Home"])).toEqual([]);
+    expect(scenes[0].splitVisual).toBe(NOTES);
+    // …while a real book under the same line, one it never speaks of, still goes
+    scenes[0].splitVisual = "a sewing pattern book open on the work table";
+    expect(guardPitchVisuals(scenes, SUBJECT)).toEqual([52]);
+    expect(scenes[0].splitVisual).not.toMatch(/book|bread cloth/);
   });
 
   it("leaves host shots, cover reveals, assets, clean prompts and non-pitch beats alone", () => {

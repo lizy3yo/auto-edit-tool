@@ -27,6 +27,7 @@ import {
   othersOfKindIn,
   repeatsTopic,
   sameSubject,
+  saysAbsent,
   showsScreen,
   topicWords,
   viewIndexOf,
@@ -178,7 +179,9 @@ export function memorySourcesFor(
     (!own || namesDevice(own)) &&
     namesDevice(s.hostPresent ? s.splitVisual ?? "" : s.showSubject ?? s.visualPrompt ?? "");
   for (const t of s.otherKeyThings ?? []) {
-    if (lendsNoPicture(t) || (onDevice && !namesDevice(t))) continue;
+    // Never one its own words say is NOT there (`saysAbsent`): job 368 scene 23, "dim coop interior with
+    // hens roosted and no feeder present", was handed the feeder's first picture.
+    if (lendsNoPicture(t) || (onDevice && !namesDevice(t)) || saysAbsent(pictureWords(s), t)) continue;
     const lends = (x: StoryboardScene) => before.includes(x) || namesItemThing(x.scriptText ?? x.narration, t);
     add(memoryOf(fit.filter(x => lends(x) && shows(x, t) && (!!own || !shows(x, s.keyThing!))), t));
   }
@@ -587,10 +590,15 @@ export function sameThingMove(
  * a wide shot with it small — Dale's job 352 drew every later benchtop planer from "garage workshop
  * with table saw and benchtop planer along back wall", while the very next picture was "man's hands
  * feeding a rough-sawn board into a benchtop planer" (stored films: 123 of 467 memories were not
- * about their thing, copied 390 times). Pure.
+ * about their thing, copied 390 times). NEVER A PICTURE THAT DOES NOT SHOW IT (`shows`), the earliest
+ * included: job 416's robin had no earlier picture about it, so the earliest it was filed beside — the
+ * empty lawn whose words say "no robins visible" — was its memory, and every later robin picture was
+ * that lawn from that camera spot. With none that shows it there is no memory: the picture is drawn
+ * from the thing's written look (`keyThingLookFor`). Pure.
  */
 function memoryOf(pictures: StoryboardScene[], thing: string): StoryboardScene | undefined {
-  return pictures.find(x => ownKeyThing(x) === thing && isSubject(x, thing)) ?? pictures[0];
+  const seen = pictures.filter(x => shows(x, thing));
+  return seen.find(x => ownKeyThing(x) === thing && isSubject(x, thing)) ?? seen[0];
 }
 
 /** Size and amount words: they say nothing about WHICH thing is meant. */
@@ -644,6 +652,9 @@ export function listItemsAround(
  */
 export function ownKeyThing(s: StoryboardScene): string | undefined {
   if (!s.keyThing) return undefined;
+  // A thing its own words say is NOT there is not what it is about (`saysAbsent`, job 416 scene 2):
+  // neither drawn from that thing's pictures nor held to it by the check.
+  if (saysAbsent(pictureWords(s), s.keyThing)) return undefined;
   // A STEP is about the thing it is done to, whatever its words call it ("oil it,", "store it
   // sealed,"): steps are done to ONE thing, never separate things like the items of a list of things.
   // Job 413 scenes 31-32, "drain it outside, store it sealed," — both filed under the gas can, neither
@@ -692,7 +703,10 @@ export const UNFINISHED_THING =
  */
 export function requiredThingsFor(s: StoryboardScene): string[] {
   const own = ownKeyThing(s);
-  return [own && beforeFinished(s) ? `${own} ${UNFINISHED_THING}` : own, ...(s.otherKeyThings ?? [])].filter(
+  // Never one its own words say is NOT there: job 416 scene 2, "empty backyard lawn …, no robins
+  // visible", was held to the robin and its first check said "missing".
+  const others = (s.otherKeyThings ?? []).filter(t => !saysAbsent(pictureWords(s), t));
+  return [own && beforeFinished(s) ? `${own} ${UNFINISHED_THING}` : own, ...others].filter(
     (t): t is string => !!t
   );
 }
@@ -1441,9 +1455,15 @@ const isScreen = (s: StoryboardScene) =>
 /** At most this many memory pictures go with one picture (the host photo may follow them). */
 export const MAX_MEMORY_REFS = 3;
 
-/** Whether a picture shows key thing `t` — as its own thing, or beside it. */
+/**
+ * Whether a picture shows key thing `t` — as its own thing, or beside it — and its own words never say
+ * the thing is NOT there (`saysAbsent`): job 416 scene 2, "empty backyard lawn at quiet morning, no
+ * robins visible", was filed with the robin beside it and became the robin's memory. Asked of the
+ * filing a board already carries too: a pass over a film filed before (read back from the database)
+ * or one with no key things listed keeps the old tags.
+ */
 const shows = (x: StoryboardScene, t: string) =>
-  x.keyThing === t || !!x.otherKeyThings?.includes(t);
+  (x.keyThing === t || !!x.otherKeyThings?.includes(t)) && !saysAbsent(pictureWords(x), t);
 
 /**
  * The camera position of `s` when it is drawn from memory: the next of `MEMORY_VIEWS` after the
@@ -1468,8 +1488,9 @@ export function memoryViewFor(scenes: StoryboardScene[], s: StoryboardScene): st
     if (k < 0) return undefined;
     return s.blurPrint && k === 0 ? BLUR_PRINT_VIEW : REDRAW_CAMERAS[k];
   }
-  // A place is never drawn from a picture of itself (`lendsNoPicture`), so it has no camera to move.
-  if (!drawn(s) || lendsNoPicture(s.keyThing)) return undefined;
+  // A place is never drawn from a picture of itself (`lendsNoPicture`), so it has no camera to move —
+  // nor is a picture whose words say its thing is NOT there (`saysAbsent`) drawn from that thing's.
+  if (!drawn(s) || lendsNoPicture(s.keyThing) || saysAbsent(pictureWords(s), s.keyThing)) return undefined;
   const i = scenes.indexOf(s);
   const before = scenes.slice(0, Math.max(0, i)).filter(x => source(x) && shows(x, s.keyThing!)).length;
   if (before === 0) return undefined;
@@ -1543,6 +1564,14 @@ export function tagKeyThings(scenes: StoryboardScene[], things: KeyThing[] | und
       s.buildStage = undefined;
     }
     if (s.partOf && another.some(a => a.name === s.partOf)) s.partOf = undefined;
+    // A THING ITS WORDS SAY IS NOT THERE IS NOT ITS THING (`saysAbsent`, job 416 scene 2): a planner's
+    // or a check's filing under it is given up, with the stage, and the picture is filed anew under
+    // what it does show ("empty backyard lawn …, no robins visible" → the lawn).
+    if (s.keyThing && saysAbsent(text, s.keyThing)) {
+      s.keyThing = undefined;
+      s.buildStage = undefined;
+    }
+    if (s.partOf && saysAbsent(text, s.partOf)) s.partOf = undefined;
     const named = keyThingsIn(text, things).map(t => t.name);
     // Filed anew only under a key thing the picture is ABOUT (or the item a screen shows): one beside
     // the subject would take the view that keeps its memory small (`BACKGROUND_VIEW`), and the surface
@@ -1568,7 +1597,11 @@ export function tagKeyThings(scenes: StoryboardScene[], things: KeyThing[] | und
       if (m.item === s) return true;
       const [k, item] = [at.get(s)!, at.get(m.item)!];
       if (k <= item || (s.listCut && scenes.slice(item, k + 1).every(x => x.listCut))) return false;
-      return namesItemThing(text, m.name) && !named.some(name => namesItemThing(name, m.name));
+      return (
+        namesItemThing(text, m.name) &&
+        !saysAbsent(text, m.name) &&
+        !named.some(name => namesItemThing(name, m.name))
+      );
     });
     for (const m of shown)
       if (m.name !== s.keyThing && !others.includes(m.name)) {

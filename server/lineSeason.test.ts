@@ -10,7 +10,7 @@
  */
 import { describe, expect, it } from "vitest";
 import type { KeyThing, StoryboardScene } from "@shared/types";
-import { holdLineSeasons, lineHour, lineSeason, SEASON_HOUR_RULE, seasonHourClause } from "./lineSeason";
+import { holdLineSeasons, lineHour, lineSeason, pictureSeason, SEASON_HOUR_RULE, seasonHourClause } from "./lineSeason";
 import { MEMORY_VIEWS } from "./pictureMemory";
 import { buildStillPrompt, MEMORY_SETTING_CLAUSE, memoryClause } from "./longformVideo";
 import { FIT_SYSTEM, SHOT_LIST_SYSTEM } from "./shotList";
@@ -261,11 +261,224 @@ describe("a picture drawn from references is told its season and hour (seasonHou
     expect(seasonHourClause(daylit)).toBe("");
   });
 
-  it("a picture whose own words hold winter is never told spring, and a line with no season says nothing", () => {
+  it("a picture whose own words hold winter is never told spring, and nothing names a season or hour says nothing", () => {
     expect(seasonHourClause(drawnFrom(pic(4, LINE_20, "a robin singing on a snowy branch")))).toBe(
       " THIS PICTURE IS AT FIRST LIGHT (the first low light of the day), AS ITS LINE SAYS — whatever season, weather or light a reference image shows."
     );
-    expect(seasonHourClause(drawnFrom(job411()[2]))).toBe("");
+    // Job 411 scene 21's line names neither; with own words that name neither, nothing is said. (Its
+    // real words, "above a green summer lawn", are summer — round 15, below.)
+    expect(seasonHourClause(drawnFrom(pic(21, job411()[2].scriptText!, "a male American robin singing from the top of a fence post")))).toBe("");
+  });
+});
+
+// ROUND 15, job 416 scene 20 (Walter Wren's robins, the practice film on the round-14 code): the
+// passage's next line, "It's a male letting the neighborhood know this patch is his and he's looking
+// for a mate.", names no season or hour; the shot list carried "at dawn in spring" into what the
+// picture must show, but the sentence above was said only for a LINE's season — so the robin's one
+// reference, a thawing, snow-patched March lawn, lent its snow and its flat daylight, between a leafy
+// spring branch (scene 19: the same reference, a line that names spring) and the winter-quiet robin.
+const LINE_416_20 = "It’s a male letting the neighborhood know this patch is his and he’s looking for a mate.";
+const job416 = () => [
+  pic(
+    19,
+    "Start with the singing. That bright song at first light, the one birders have long remembered as cheer up, cheerily, belongs to spring and summer.",
+    "a male American robin singing on a leafy tree branch at first light in spring, chest puffed",
+    { keyThing: "robin" }
+  ),
+  pic(20, LINE_416_20, "a male American robin singing from the top of a wooden fence post at dawn in spring, chest puffed out", {
+    visualPrompt: "A male American robin singing from the top of a wooden fence post at dawn in spring, chest puffed out, singing actively.",
+    keyThing: "robin",
+  }),
+  pic(
+    21,
+    "Once nesting season is over, that job is done, and through the winter a robin hardly sings at all. Mostly you’ll hear a low, soft clucking, a bit like somebody tutting under their breath, and that’s easy to miss with the storm windows shut.",
+    "an American robin with beak slightly open on a snow-patched backyard lawn, a house with closed white storm windows behind it",
+    { keyThing: "robin" }
+  ),
+];
+
+describe("the season a picture's own words set it in (pictureSeason)", () => {
+  it("said in a frame, as a line says it — job 416 scene 20's 'at dawn in spring'", () => {
+    expect(pictureSeason(job416()[1].showSubject)).toEqual({ season: "spring", said: "spring" });
+    expect(pictureSeason("tomato vines tied to a stake in the bed in early summer")).toEqual({ season: "summer", said: "early summer" });
+  });
+
+  it("and as a describing word before an outdoor scene, which a spoken line never counts", () => {
+    // Job 411 scene 21's own words, under the same line as job 416 scene 20.
+    expect(pictureSeason("a male American robin singing from the top of a fence post above a green summer lawn")?.season).toBe("summer");
+    expect(pictureSeason("a spring garden in full bloom behind the gate")?.season).toBe("spring");
+    expect(pictureSeason("fall leaves drifting across the stone path")?.season).toBe("autumn");
+    expect(lineSeason("We walked out across the summer lawn to the fence.")).toBeUndefined();
+    expect(lineSeason("The spring garden club meets at the library.")).toBeUndefined();
+  });
+
+  it("and before the light or the time of day it is seen in (job 332 scenes 14 and 26, job 401 scene 33)", () => {
+    // Job 332 scene 14's own words, drawn from two references.
+    expect(
+      pictureSeason(
+        "A foot-square pale pine grid with equal square openings, standing upright on a folding table draped in plain dark cloth outdoors under pale early-spring light."
+      )
+    ).toEqual({ season: "spring", said: "early spring" });
+    expect(pictureSeason("Neat rows of small charred cedar blocks on a dark-cloth-draped folding table outdoors in pale spring light.")?.season).toBe("spring");
+    expect(pictureSeason("Plain cream card resting on a wooden desk in a quiet study, late-spring light from a nearby window.")).toEqual({
+      season: "spring",
+      said: "late spring",
+    });
+    expect(pictureSeason("a robin on a fence post on a spring morning")?.season).toBe("spring");
+    expect(pictureSeason("a market table in even summer daylight")?.season).toBe("summer");
+    expect(pictureSeason("finished coasters on the bench in soft fall light")?.season).toBe("autumn");
+    // A spoken line reads it as before.
+    expect(lineSeason("It was a spring morning like any other.")).toBeUndefined();
+    // Never the coil or a tumble beside the light or the hour.
+    expect(pictureSeason("the tension of the spring in the morning light")).toBeUndefined();
+    expect(pictureSeason("a coiled spring beside the light switch")).toBeUndefined();
+    expect(pictureSeason("a spring-loaded light switch on the wall")).toBeUndefined();
+    expect(pictureSeason("a fall day at the foot of the stairs where she slipped")).toBeUndefined();
+  });
+
+  it("with every one of a line's exclusions: a tumble, the coil, a season planned for, a thing named after one, a name", () => {
+    expect(pictureSeason("an aluminium ladder lying at the foot of the stairs after the fall")).toBeUndefined();
+    expect(pictureSeason("a grab bar beside the tub where she landed in the fall")).toBeUndefined();
+    expect(pictureSeason("a close view of the tension of the spring in the gate latch")).toBeUndefined();
+    expect(pictureSeason("a coiled spring in the latch")).toBeUndefined();
+    expect(pictureSeason("a spring-loaded clamp on the bench")).toBeUndefined();
+    expect(pictureSeason("a crib and a folded blanket, ready for spring")).toBeUndefined();
+    expect(pictureSeason("seed packets laid out before spring")).toBeUndefined();
+    expect(pictureSeason("sliced summer squash on a cutting board")).toBeUndefined();
+    expect(pictureSeason("a heavy winter coat on a hook by the door")).toBeUndefined();
+    expect(pictureSeason("a street sign for Winter Park at the corner")).toBeUndefined();
+  });
+});
+
+describe("a picture drawn from references is told the season and hour its OWN words name (round 15, job 416 scene 20)", () => {
+  const drawnFrom = (s: StoryboardScene, view: string = MEMORY_VIEWS[3]): StoryboardScene => ({
+    ...s,
+    memoryView: view,
+    memoryRefUrls: ["https://r2/416/still-src-5.png"],
+  });
+  const SAY = "— whatever season, weather or light a reference image shows.";
+
+  it("scene 20: spring and dawn from its own words, right before the setting clause, once", () => {
+    const b = job416();
+    // Its own words hold the season already: the line names none, so nothing is added to them.
+    expect(holdLineSeasons(b)).toBe(0);
+    const s = drawnFrom(b[1]);
+    expect(seasonHourClause(s)).toBe(
+      ` THIS PICTURE IS IN SPRING (no snow, frost or ice on anything), AT DAWN (the first low light of the day), AS ITS OWN WORDS SAY ${SAY}`
+    );
+    expect(memoryClause(s).endsWith(`${seasonHourClause(s)}${MEMORY_SETTING_CLAUSE}`)).toBe(true);
+    expect(count(buildStillPrompt(s), "THIS PICTURE IS IN SPRING")).toBe(1);
+  });
+
+  it("scene 19's line and own words agree, so it reads as before; scene 21's snow and winter say nothing", () => {
+    const b = job416();
+    expect(seasonHourClause(drawnFrom(b[0], MEMORY_VIEWS[2]))).toBe(
+      ` THIS PICTURE IS IN SPRING (no snow, frost or ice on anything), AT FIRST LIGHT (the first low light of the day), AS ITS LINE SAYS ${SAY}`
+    );
+    expect(seasonHourClause(drawnFrom(b[2]))).toBe("");
+    expect(memoryClause(drawnFrom(b[2]))).not.toContain("THIS PICTURE IS");
+  });
+
+  it("job 411 scene 21, the same line: 'above a green summer lawn' is summer", () => {
+    expect(seasonHourClause(drawnFrom(job411()[2]))).toBe(
+      ` THIS PICTURE IS IN SUMMER (no snow, frost or ice on anything), AS ITS OWN WORDS SAY ${SAY}`
+    );
+  });
+
+  it("a season said of the light (job 332 scene 14, job 401 scene 33's rewrite)", () => {
+    const grid = pic(
+      14,
+      "I figured 2 hours. It took 6. It sells for $90 to $130, but once you take out the lumber, that's about $14 for every hour I stood at the bench.",
+      "A foot-square pale pine grid with equal square openings, standing upright on a folding table draped in plain dark cloth outdoors under pale early-spring light.",
+      { keyThing: "kumiko lattice panel" }
+    );
+    expect(seasonHourClause(drawnFrom(grid))).toBe(
+      ` THIS PICTURE IS IN EARLY SPRING (no snow, frost or ice on anything), AS ITS OWN WORDS SAY ${SAY}`
+    );
+    // What it must show names no season: the rewrite's is held.
+    const card = pic(33, "Then he turns the whole thing over in a single motion: life is not short.", "a cream sympathy card resting on the wooden desk in the study", {
+      visualPrompt: "Plain cream sympathy card with simple embossed border resting on a wooden desk in a quiet study, late-spring light from a nearby window.",
+      keyThing: "sympathy card",
+    });
+    expect(seasonHourClause(drawnFrom(card))).toBe(` THIS PICTURE IS IN LATE SPRING (no snow, frost or ice on anything), AS ITS OWN WORDS SAY ${SAY}`);
+    // Fall light in its own words keeps a spring line unsaid: its own words beat the line.
+    expect(seasonHourClause(drawnFrom(pic(5, "In the spring I set the hens' feeder out by the run.", "the feeder by the coop in soft fall light")))).toBe("");
+  });
+
+  it("an hour only the picture names (job 405 scene 20: the night visit, read from the cat's side)", () => {
+    const visit = drawnFrom(
+      pic(
+        20,
+        "We’re going to read the night visit from her side of the mattress, what she’s doing, why it works on you, and what to do about it.",
+        "the tabby cat walking across the bed at night near the host"
+      )
+    );
+    expect(seasonHourClause(visit)).toBe(` THIS PICTURE IS AT NIGHT (night-time, no daylight anywhere in it), AS ITS OWN WORDS SAY ${SAY}`);
+  });
+
+  it("the line's season and the picture's hour together", () => {
+    const s = drawnFrom(pic(7, "In the spring I set the hens' feeder out by the run.", "the feeder by the coop at dusk"));
+    expect(seasonHourClause(s)).toBe(
+      ` THIS PICTURE IS IN SPRING (no snow, frost or ice on anything), AT DUSK (the last low light of the day), AS ITS LINE AND ITS OWN WORDS SAY ${SAY}`
+    );
+  });
+
+  it("what the picture must show outranks its line; the line outranks the prompt writer's rewrite", () => {
+    // The shot list chose summer for this half of "spring and summer".
+    expect(seasonHourClause(drawnFrom(pic(8, LINE_20, "a robin singing on a fence post in summer")))).toBe(
+      ` THIS PICTURE IS IN SUMMER (no snow, frost or ice on anything), AT FIRST LIGHT (the first low light of the day), AS ITS LINE AND ITS OWN WORDS SAY ${SAY}`
+    );
+    // A rewrite that names spring under a winter line is not told spring — and winter is never said.
+    const winter = pic(9, "Through the winter a robin hardly sings at all.", "a quiet robin on a bare branch", {
+      visualPrompt: "A quiet robin on a branch in a spring garden.",
+    });
+    expect(seasonHourClause(drawnFrom(winter))).toBe("");
+    // With nothing above it, the rewrite's own words are held (old stories have no showSubject).
+    const rewrite = pic(10, LINE_416_20, "", { showSubject: undefined, visualPrompt: "A robin on a fence post at dawn in spring." });
+    expect(seasonHourClause(drawnFrom(rewrite))).toBe(
+      ` THIS PICTURE IS IN SPRING (no snow, frost or ice on anything), AT DAWN (the first low light of the day), AS ITS OWN WORDS SAY ${SAY}`
+    );
+  });
+
+  it("a cold season is never said, and snow in the picture's own words keeps a spring unsaid", () => {
+    expect(seasonHourClause(drawnFrom(pic(11, LINE_416_20, "a robin on a fence post in winter")))).toBe("");
+    expect(seasonHourClause(drawnFrom(pic(12, LINE_416_20, "a robin on a fence post in late fall")))).toBe("");
+    expect(seasonHourClause(drawnFrom(pic(13, LINE_416_20, "a robin on a snowy fence post at dawn in early spring")))).toBe(
+      ` THIS PICTURE IS AT DAWN (the first low light of the day), AS ITS OWN WORDS SAY ${SAY}`
+    );
+  });
+
+  it("a season the line only plans for is never taken back from the picture's words (job 158 scene 97)", () => {
+    const porch = pic(97, "or a neighbor two doors down expecting in the spring.", "the front porch and white picket fence, neighbor's yard next door", {
+      visualPrompt: "White picket fence and wooden front porch of a neighbor's house, spring yard beyond, empty and calm.",
+    });
+    expect(seasonHourClause(drawnFrom(porch))).toBe("");
+    expect(seasonHourClause(drawnFrom({ ...porch, showSubject: "the neighbor's front porch in spring" }))).toBe("");
+    const beds = pic(14, "Get the beds dug and ready for spring.", "the dug vegetable beds in spring");
+    expect(seasonHourClause(drawnFrom(beds))).toBe("");
+    // Job 411 scene 3's line: the spring is waited for — its picture is the empty frosty lawn at dawn.
+    const until = "and nobody sees another robin until spring. At least, that’s what just about everybody figures.";
+    expect(seasonHourClause(drawnFrom(pic(3, until, "an empty backyard lawn in spring")))).toBe("");
+    expect(seasonHourClause(drawnFrom(pic(3, until, "an empty frosty backyard lawn at dawn under a pale sky")))).toBe(
+      ` THIS PICTURE IS AT DAWN (the first low light of the day), AS ITS OWN WORDS SAY ${SAY}`
+    );
+    // A season only ruled out is still the moment, with an act ruled out: the summer lawn is said.
+    const mower = pic(14, "Never mow it short in summer.", "a push mower on a summer lawn");
+    expect(seasonHourClause(drawnFrom(mower))).toBe(` THIS PICTURE IS IN SUMMER (no snow, frost or ice on anything), AS ITS OWN WORDS SAY ${SAY}`);
+  });
+
+  it("never a season word that names the picture's key thing, the coil, or a tumble; an hour the picture contradicts", () => {
+    const latch = pic(15, LINE_416_20, "the gate latch on a sunny day in spring", { keyThing: "latch spring" });
+    expect(seasonHourClause(drawnFrom(latch))).toBe("");
+    // The same words about another key thing are the season.
+    expect(seasonHourClause(drawnFrom({ ...latch, keyThing: "gate latch" }))).toBe(
+      ` THIS PICTURE IS IN SPRING (no snow, frost or ice on anything), AS ITS OWN WORDS SAY ${SAY}`
+    );
+    expect(seasonHourClause(drawnFrom(pic(16, LINE_416_20, "the tension of the spring in the gate latch")))).toBe("");
+    expect(seasonHourClause(drawnFrom(pic(17, "She was alone for two days.", "a grab bar beside the tub where she landed in the fall")))).toBe("");
+    // What the picture must show is daylit: the rewrite's night is not said.
+    const table = pic(18, LINE_416_20, "a kitchen table in bright afternoon daylight", { visualPrompt: "A kitchen table at night." });
+    expect(seasonHourClause(drawnFrom(table))).toBe("");
   });
 });
 
