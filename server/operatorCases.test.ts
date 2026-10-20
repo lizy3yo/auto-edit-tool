@@ -7960,3 +7960,60 @@ describe("round 14: where a picture starts against the sentences (jobs 413 and 4
     expect(groups(shipped)).toHaveLength(1);
   });
 });
+
+describe("round 14: a sentence that moves to another setting ends the topic (job 412 scene 26)", async () => {
+  const { applyPictureSplits, atWork, contextRuns, parseContextGroups, parsePictureFixes } = await import("./shotList");
+  const { settingNote } = await import("./lineSetting");
+  const WILD = "a wild cat stalking low through scattered brush across the dawn-lit wild landscape toward a small mouse";
+  const TURN =
+    "and bigger hunters can’t see well, and she inherited that schedule the same way she inherited her whiskers. Indoor life softens it, but it rarely erases it, so plenty of house cats keep one foot in the old rhythm.";
+
+  it("412 #26: the indoor sentence leaves the wild topic, and the line check splits it off with its own picture", () => {
+    // The same-topic pass gave 23-26 one wild picture; the indoor talk ran 7.4 s under the desert.
+    const scenes = [
+      pic(23, "The honest word is crepuscular, which is just a fancy way of saying dawn and dusk.", WILD),
+      pic(24, "Her wild relatives do their serious hunting in the low light at the edges of the day,", WILD),
+      pic(25, "when small prey is out moving around", WILD),
+      pic(26, TURN, WILD),
+    ];
+    const groups = parseContextGroups(
+      JSON.stringify({ groups: [{ ids: [0, 1, 2, 3], show: WILD }] }),
+      contextRuns(scenes),
+      i => scenes[i].showSubject,
+      i => atWork(scenes[i]),
+      i => scenes[i].scriptText
+    );
+    expect(groups).toEqual([{ ids: [0, 1, 2], show: WILD }]);
+    // The line check is told where the line turns, and its split gives the indoor sentence its picture.
+    expect(settingNote(TURN, WILD)).toMatch(/turn to another setting at "Indoor life softens it": indoors/);
+    const line = pic(26, TURN, WILD, { audioDuration: 13.88 });
+    const fixes = parsePictureFixes(
+      JSON.stringify({
+        pictures: [
+          {
+            id: 0,
+            about: "the schedule she inherited from wild hunters",
+            shows_it: true,
+            split: [{ from: "Indoor life softens it", show: "a grey-and-white house cat stretched out on a living room sofa" }],
+          },
+        ],
+      }),
+      [line]
+    );
+    const r = applyPictureSplits([line], fixes, [], s => s.audioDuration ?? 0);
+    expect(r.scenes.map(s => s.showSubject)).toEqual([WILD, "a grey-and-white house cat stretched out on a living room sofa"]);
+    expect(r.scenes[1].scriptText).toMatch(/^Indoor life softens it/);
+    // Unchanged: lines that stay in the wild still share the wild picture, and a line set where its
+    // picture is gets no mark.
+    expect(
+      parseContextGroups(
+        JSON.stringify({ groups: [{ ids: [0, 1], show: WILD }] }),
+        [[0, 1]],
+        i => scenes[i + 1].showSubject,
+        i => atWork(scenes[i + 1]),
+        i => scenes[i + 1].scriptText
+      )
+    ).toEqual([{ ids: [0, 1], show: WILD }]);
+    expect(settingNote(TURN, "a grey-and-white house cat stretched out on a living room sofa")).toBe("");
+  });
+});

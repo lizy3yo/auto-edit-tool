@@ -38,6 +38,7 @@ import {
   sexOfLook,
 } from "./hostLook";
 import { hostNameRanges, namesHostBefore } from "./hostIntro";
+import { SETTING_TURN_RULE, settingClash, settingNote } from "./lineSetting";
 import {
   followedPeople,
   hostOwnWords,
@@ -1706,6 +1707,9 @@ export const SHOT_LIST_SYSTEM =
   "longer shots are better than many quick ones; a shot may run 10 seconds or more when nothing " +
   'new is named. The ONE exception is a spoken list: one quick shot per item ("a needle, a spool ' +
   'of thread, and a pair of shears" = three shots, list: true).\n' +
+  // Job 412 scene 26: "…she inherited that schedule… Indoor life softens it, …house cats…" stayed one
+  // shot of the wild hunter in the desert — the same idea, so the same shot.
+  `2b. ${SETTING_TURN_RULE} A shot starts there.\n` +
   "3. SAME AS BEFORE. When a beat's FIRST shot shows the same thing as the shot before it (the " +
   "previous beat is still on that subject), set same: true — it continues that picture instead of " +
   "starting a new one. Use it whenever the context has not changed.\n" +
@@ -2775,6 +2779,14 @@ today, is WRONG: rewrite it naming the time and place, its people dressed for it
 passage about a medieval town = a medieval baker in a linen tunic at a brick oven, never a baker of
 today). A picture marked "inside a passage set in …" is in such a stretch. The stretch ends where the
 words come back to today or to the host's own life; a line inside it about today is today.
+THE LINE'S SETTING. ${SETTING_TURN_RULE} A picture is WRONG when it is set where or when its line is
+not — a line about life indoors over a picture out in the wild, a line about today over a picture of
+long ago — even when it shows the right thing or the right idea: rewrite it in the line's own setting.
+Judge where and when the TALK is, never only where one thing in it is put or kept ("and the kids get
+sent inside" in a line about work in the yard is still the yard). A line that starts in one setting
+and moves to another in a later sentence gets a new picture where that sentence starts: SPLIT there
+(ONE PICTURE, ONE SUBJECT), each part's picture set where its own words are. A picture marked "its
+words turn to another setting at …" has such a sentence: split it there, from = those words.
 
 WHAT NOT TO DO. A sentence RULES SOMETHING OUT when it says not to do something ("never…", "don't…"),
 says what something is NOT ("I don't mean…", "no, not the…"), what to use INSTEAD ("…instead of the
@@ -2828,8 +2840,10 @@ runs at least 3 seconds (its share of the picture's seconds) and is at least 4 w
 BEFORE the split when they only FINISH a sentence the picture before started (the line opens in the
 middle of a sentence, as right after a list): those may be short, and they go back to that picture,
 so split there all the same. Never split
-sentences that stay on the same thing — more said about it, the same thing from another side, an
-idea about it. A picture marked "joined" may be split this way, where a sentence starts.
+sentences that stay on the same thing in the same setting — more said about it, the same thing from
+another side, an idea about it. A later sentence that moves to ANOTHER SETTING is split all the same,
+however much it stays on the same thing or idea (THE LINE'S SETTING).
+A picture marked "joined" may be split this way, where a sentence starts.
 
 ONE IDEA, ONE PICTURE. A picture marked "same sentence" continues a sentence the picture before it
 started. When the two parts are ONE idea about one thing — the thing and where, how or what it is
@@ -3581,6 +3595,12 @@ export function applyPictureSplits(
  * Opus reads every picture with the lines around it, so it — not a word list, which fired on "just
  * don't count on it" in five channels — says what each such picture must not show (`forbids`); the
  * picture check then asks only those pictures about it.
+ *
+ * THE LINE'S SETTING (2026-10-20, job 412 scene 26): the check also judges whether a picture is set
+ * where and when its line is, and splits a line whose later sentence moves to another setting even
+ * when it stays on the same idea — "…she inherited that schedule… | Indoor life softens it, …house
+ * cats…" ran 7.4 s over the wild hunter in the desert, read as "an idea about" the same schedule.
+ * Where the words make the turn plain, the picture is marked with it (`settingNote`).
  */
 export async function fitPicturesToLines(
   scenes: StoryboardScene[],
@@ -3622,8 +3642,10 @@ export async function fitPicturesToLines(
       any = true;
       // The thing the line closes on, when the picture's words leave it out (`closingThing`).
       const closing = closingThing(said, s.showSubject ?? s.visualPrompt);
+      // Where the line turns to a setting the picture is not in (`settingNote`, job 412 scene 26).
+      const setting = settingNote(said, s.showSubject ?? s.visualPrompt);
       lines.push(
-        `#${i} PICTURE${secs}${s.sameShot ? " (continues)" : ""}${s.joinedLine ? " (joined)" : ""}${sameSentence ? " (same sentence)" : ""}${i === firstMain ? " (FIRST of the MAIN thing)" : ""}${fitPictureNotes(s)}${closing ? ` (ends on "${closing}")` : ""}: said "${said}" | shows: ${s.showSubject ?? s.visualPrompt ?? ""}`
+        `#${i} PICTURE${secs}${s.sameShot ? " (continues)" : ""}${s.joinedLine ? " (joined)" : ""}${sameSentence ? " (same sentence)" : ""}${i === firstMain ? " (FIRST of the MAIN thing)" : ""}${fitPictureNotes(s)}${closing ? ` (ends on "${closing}")` : ""}${setting}: said "${said}" | shows: ${s.showSubject ?? s.visualPrompt ?? ""}`
       );
     }
     if (!any) continue;
@@ -4598,6 +4620,8 @@ Lines that COMPARE are never one group: one place, time or way set against anoth
 kitchens… in a camper…", "whereas", "unlike", "instead,", "while in…"), or a line saying a place is
 empty or has none next to a line where the thing is there ("the shelf is bare… a jar stands there").
 One still shows only one side, and that side under the other side's words gives the point away.
+${SETTING_TURN_RULE} A line that moves to another setting is never in a group with the lines before
+it, and a line that starts in one setting and moves to another in a later sentence is in no group.
 
 The group's picture must fit the FIRST line of the group above all: it is what plays when the
 picture appears. A thing a line names stays with that line: a short lead-in line that names a thing
@@ -4661,8 +4685,9 @@ export type ContextGroup = { ids: number[]; show: string };
 
 /**
  * The model's groups, kept only when they are real: 2+ consecutive ids inside ONE run, not
- * overlapping another group, with a picture description, and not spanning a comparison
- * (`contrastAcross`). Anything else is dropped. Pure.
+ * overlapping another group, with a picture description, not spanning a comparison
+ * (`contrastAcross`), and never past a line that turns to a setting the group's picture is not in
+ * (`settingClash`). Anything else is dropped. Pure.
  */
 export function parseContextGroups(
   text: string,
@@ -4706,8 +4731,23 @@ export function parseContextGroups(
     // drilling, because the last line's hands had to stay in the group's picture).
     // And a picture of a thing its own line names keeps it when the group's picture leaves it out
     // (`losesNamedThing`, job 413: "Pull up a stool." under the phone call of the line after it).
+    // And a line naming a setting the group's picture is not in keeps its own picture
+    // (`settingClash`, job 412 scenes 23-26: "…she inherited that schedule… Indoor life softens it, …
+    // house cats…" under the wild hunter in the desert brush, the same idea so the same topic). When a
+    // line before it was in the group, the talk has MOVED to that setting: the group ends there, and
+    // no line after it takes the old setting's picture either, even one naming no setting of its own
+    // — it is still where the talk went.
     const runsOf: number[][] = [[]];
+    let held = false;
+    let ended = false;
     ids.forEach((id, k) => {
+      if (ended) return;
+      if (saidOf && settingClash(saidOf(id), show)) {
+        if (held) ended = true;
+        else runsOf.push([]);
+        return;
+      }
+      held = true;
       const turns = !!atWorkOf && k > 0 && atWorkOf(id) !== atWorkOf(ids[k - 1]);
       if (
         showOf &&
