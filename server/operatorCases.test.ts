@@ -6842,8 +6842,9 @@ describe("Werner's job 408 scene 23: a props look by its parts reaches the first
     expect(keyThingLookFor(auger, things)).toBe(
       "a closet auger, a J-bent steel tube, a black rubber sleeve, a crank handle joined to the top of the tube"
     );
-    // A "where" naming a place still goes in the place cut.
-    expect(pictureLook(things[1].look)).toBe("paved slope in front of the garage, dusted with light frost");
+    // A "where" naming a place still goes in the place cut — and the frost, the weather, with it
+    // (round 14, `lookWithoutLight`).
+    expect(pictureLook(things[1].look)).toBe("paved slope in front of the garage");
     // Round 14: a driveway is a PLACE — its look is no own-thing look but where a picture is set
     // (`placeLook`), the frost and what happens there left to each picture's own words.
     const drive = pic(5, "It waits by the road.", "a paved driveway", { keyThing: "driveway" });
@@ -8098,5 +8099,60 @@ describe("round 14 review: a list item on a device, and a step after a failed pi
     attachMemory(b, [], steel);
     // It was drawn from no picture of the froe and came back an all-metal L.
     expect(memorySourcesFor(b, b[5]).map(s => s.index)).toEqual([6]);
+  });
+});
+
+describe("the season and the light are each picture's own (round 14, job 411 scene 20 and job 412 scene 25)", () => {
+  // 411-20: "That bright song at first light … belongs to spring and summer" was planned with no season,
+  // filled from the channel's winter home base and drawn from two snowy robin pictures — the robin
+  // singing over snow in the season the next line says it is quiet. 412-25: the props list wrote the
+  // wilderness "dawn-lit … with low golden light", so every picture of it asked for golden light and the
+  // check called it staged on every draw. The full cases are in lineSeason.test.ts and lookLight.test.ts.
+  const LINE =
+    "Start with the singing. That bright song at first light, the one birders have long remembered as cheer up, cheerily, belongs to spring and summer.";
+
+  it("411-20: the song is held in spring, told so beside its snowy references; the quiet winter robin is left alone", async () => {
+    const { holdLineSeasons } = await import("./lineSeason");
+    const { buildStillPrompt, MEMORY_SETTING_CLAUSE, memoryClause } = await import("./longformVideo");
+    const { MEMORY_VIEWS } = await import("./pictureMemory");
+    const song = {
+      index: 20,
+      narration: LINE,
+      scriptText: LINE,
+      showSubject: "a robin singing on a branch at first light in the backyard",
+      visualPrompt: "a robin singing on a branch at first light in the backyard",
+      keyThing: "robin",
+    } as StoryboardScene;
+    const quiet = {
+      index: 22,
+      narration: "n",
+      scriptText: "Once nesting season is over, that job is done, and through the winter a robin hardly sings at all.",
+      showSubject: "a quiet robin perched silently on a bare branch in winter",
+      visualPrompt: "a quiet robin perched silently on a bare branch in winter",
+      keyThing: "robin",
+    } as StoryboardScene;
+    expect(holdLineSeasons([song, quiet])).toBe(1);
+    expect(song.showSubject).toBe("a robin singing on a branch at first light in the backyard, in spring");
+    expect(quiet.showSubject).toBe("a quiet robin perched silently on a bare branch in winter");
+    const refs = { memoryView: MEMORY_VIEWS[0], memoryRefUrls: ["https://r2/411/still-src-12.png", "https://r2/411/still-src-14.png"] };
+    const clause = memoryClause({ ...song, ...refs });
+    expect(clause).toContain("THIS PICTURE IS IN SPRING (no snow, frost or ice on anything), AT FIRST LIGHT");
+    expect(clause.endsWith(MEMORY_SETTING_CLAUSE)).toBe(true);
+    expect(buildStillPrompt({ ...quiet, ...refs })).not.toContain("THIS PICTURE IS");
+  });
+
+  it("412-25: the wilderness the writers read has no dawn or golden light; a thing's light it HAS stays", async () => {
+    const { lookWithoutLight, sheetWithoutLight } = await import("./pictureMemory");
+    const sheet = [
+      "bedroom: a quiet bedroom at pre-dawn hours, soft dim blue-grey light, an unmade bed as the central feature, calm and tidy surroundings",
+      "MAIN cat: a domestic shorthair cat, soft grey-and-white coat, medium build, a long tail held low, pale green eyes",
+      "wild landscape: an open dawn-lit wilderness with low golden light, scattered brush and distant hills, calm and empty of people",
+    ].join("\n");
+    const read = sheetWithoutLight(sheet);
+    expect(read).not.toMatch(/golden|dawn|blue-grey light/);
+    expect(read).toContain("wild landscape: an open wilderness, scattered brush and distant hills, calm and empty of people");
+    expect(read).toContain("MAIN cat: a domestic shorthair cat, soft grey-and-white coat, medium build, a long tail held low, pale green eyes");
+    const alarm = "round white plastic disc like the main alarm but slightly thicker, with a small blinking indicator light on its face";
+    expect(lookWithoutLight(alarm)).toBe(alarm);
   });
 });

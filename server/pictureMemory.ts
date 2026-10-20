@@ -19,6 +19,8 @@ import { nearCopyCameraIndex, REDRAW_CAMERAS } from "./pictureVariety";
 import {
   BUILD_STAGES,
   anotherOfItsKind,
+  isPersonLine,
+  isViewerLine,
   keyThingsIn,
   namesDevice,
   nearlySameSubject,
@@ -930,7 +932,8 @@ function partBeforeWhere(clause: string): string {
  * shaping keeps only its colour and material words, a clause about the surface keeps nothing. Pure.
  */
 export function pictureLook(look: string, mode: "full" | "noStage" | "colourMaterial" = "full"): string {
-  const raw = look
+  // Never its light, weather or hour (`lookWithoutLight`, job 412 scene 25's "low golden light").
+  const raw = lookWithoutLight(look)
     .replace(/[.\s]+$/, "")
     .split(/\s*[,;]\s*|\s+[—–]\s+/)
     .map(c => c.trim())
@@ -2009,6 +2012,185 @@ export function placeLook(look: string): string {
     })
     .filter(c => /[a-z]{3,}/i.test(c));
   return kept.join(", ");
+}
+
+/*
+ * A WRITTEN LOOK CARRIES NO LIGHT, WEATHER OR HOUR (round 14, the verification film 412 scene 25). The
+ * props list wrote "wild landscape: an open dawn-lit wilderness with low golden light, scattered brush
+ * and distant hills", and that look reached the pictures of it twice over: as the key thing's look
+ * ("HOW THE WILD LANDSCAPE LOOKS in every picture of this video: … low golden light") and as the props
+ * list the prompt writer is told to draw "exactly like this" — "golden low light on distant hills". The
+ * check's staged rule (`STAGED_RULE`) counts a golden glow as staged, so no redraw could clear it: four
+ * draws for a 2-second shot, shipped flagged. The light, the weather, the season and the hour change
+ * from picture to picture and are each picture's own words' (`MEMORY_SETTING_CLAUSE` holds them so for
+ * references, `placeLook` for places); a look says what the thing IS. Round 13's staged redraw takes the
+ * golden out of a look only once a picture has failed (`plainLight`); this keeps it out of the look
+ * itself, wherever a look reaches a prompt — the props list as the writers read it
+ * (`sheetWithoutLight`) and every look a picture is drawn by (`pictureLook`). What stays: light the
+ * thing HAS ("a small blinking indicator light on its face", "light-catching", "a plain lit screen",
+ * "soft matte glow" on pearls), a light colour or wear ("light grey", "light wear", "a light dusting of
+ * outdoor residue"), a thing named for a season or the weather ("a heavy canvas winter coat", "a
+ * frosted glass globe", "winter plumage"), and a look whose thing IS the weather or the light ("snow:
+ * …"). Over the stored films it changes 86 of 1,375 key-thing looks and 107 home lines, every cut
+ * light, sky, weather or an hour.
+ */
+/** Words that only say how light, the sky or the weather is. Never a plain colour: "in light grey" is the thing's. */
+const LOOK_LIGHT_QUALITY =
+  "soft|softly|dim|dimmed|low|warm|cool|cold|bright|pale|golden|natural|harsh|gentle|faint|diffused?|even|flat|" +
+  "fading|dappled|muted|hazy|slanting|ambient|fluorescent|overhead|indoor|outdoor|window|lamp|candle|street|" +
+  "sun|moon|blue-gr[ae]y|gr[ae]y-blue|dark|deep|long|early|late|mid|dawn|dusk|twilight|morning|evening|" +
+  "afternoon|night|nighttime|night-time|overnight|daytime|pre-dawn|predawn|winter|wintry|summer|autumn|" +
+  "autumnal|fall|spring|light|thin|fresh|heavy|clear|open|cloudy|overcast|stormy|temperate|mild|gr[ae]y|silvery|silver|" +
+  "sunlight|daylight|lamplight|moonlight|candlelight|firelight";
+/** What a light, sky or weather clause is about: the light itself, or the weather — and a cold season's chill. */
+const LOOK_LIGHT_HEAD =
+  "light|lighting|sunlight|sunshine|daylight|lamplight|moonlight|candlelight|firelight|starlight|glow|shadows?|" +
+  "sun|snow|snowfall|frost|rain|rainfall|drizzle|sleet|fog|sky|skies|weather|climate|chill";
+/** The hour and the season, said as a time ("at dawn and dusk", "at pre-dawn hours", "through winter"). */
+const LOOK_TIME_WORDS =
+  "dawn|dusk|sunrise|sunset|daybreak|nightfall|twilight|mornings?|evenings?|afternoons?|nights?|nighttime|" +
+  "midnight|midday|noon|daytime|hours?|seasons?|winter|summer|spring|autumn|fall|first|golden hour";
+/** What follows the light or weather a clause is about: where it falls, or nothing. */
+const LOOK_LIGHT_AFTER =
+  "streaming|filtering|spilling|falling|pouring|coming|shining|glowing|flooding|slanting|casting|washing|" +
+  "bathing|rising|setting|visible|from|through|in|on|onto|into|across|over|at|above|throughout|everywhere|" +
+  "that|which|behind|beyond|around|along|outside|overhead";
+/**
+ * A clause that is only light, sky or weather: "low golden light", "light filtering through tall
+ * windows", "grey sky above". Never a light colour or weight: "light in colour", "light in weight".
+ */
+const LOOK_LIGHT_CLAUSE = new RegExp(
+  `^(?:(?:and|with|in|under|bathed in|lit by)\\s+)?(?:(?:a|an|the|some|its)\\s+)?` +
+    `(?:(?:${LOOK_LIGHT_QUALITY})(?:\\s+(?:and|to|or|into)\\s+|\\s+|-|/))*` +
+    `(?:${LOOK_LIGHT_HEAD})(?!\\s+in\\s+(?:colou?rs?|tones?|weight|shades?|hues?)\\b)(?:\\s*$|\\s+(?:${LOOK_LIGHT_AFTER})\\b)`,
+  "i"
+);
+/** A clause that only says what light the thing gives off: "casting warm light over the sewing table" (job 348). */
+const LOOK_CASTS_LIGHT = new RegExp(
+  `^(?:casting|throwing|giving off|shedding|spreading)\\s+(?:(?:${LOOK_LIGHT_QUALITY})\\s+)*(?:light|glow|shadows?)\\b`,
+  "i"
+);
+/** A word of a light, time or weather tail ("with low golden light", "at pre-dawn hours", "under a clear sky"). */
+const LOOK_TAIL_WORD = new RegExp(
+  `^(?:${LOOK_LIGHT_QUALITY}|${LOOK_LIGHT_HEAD}|${LOOK_TIME_WORDS}|a|an|the|and|or|to|of|its|this|that|layer|blanket|dusting|coat|sheet|blue|gr[ae]y|white|silver|orange|amber|pink)$`,
+  "i"
+);
+/** What a tail must end on to be one: the light, the weather or the time itself — never "in light grey". */
+const LOOK_TAIL_END = new RegExp(`^(?:${LOOK_LIGHT_HEAD}|${LOOK_TIME_WORDS})$`, "i");
+/**
+ * Light said as one describing word: "dawn-lit", "sunlit"; weather left on it: "frost-dusted",
+ * "snow-topped" — before what it describes or on its own. "softly lit", "pre-dawn" and the like only
+ * before a word: "the screen softly lit" is a screen that is on.
+ */
+const LOOK_LIT_WORD =
+  /\b(?:[a-z]+-lit|sunlit|moonlit|lamplit|candlelit|firelit|starlit|(?:snow|frost|rain|ice|dew)-(?:dusted|covered|topped|capped|soaked|slicked|kissed|crusted|glazed|laden))\b|\b(?:(?:softly|dimly|brightly|warmly|evenly|gently|faintly|barely|well)[\s-]+lit|pre-?dawn|night-?time|(?:late|early|mid)-(?:night|morning|evening|afternoon))\b(?=\s+[a-z])/gi;
+/**
+ * What lights it: "lit by oil lamp in evening and daylight in afternoon" (job 150), "lit by a warm desk
+ * lamp in the evenings" (job 302), a clause "lit warm at evening" (job 207) — never a thing's own light
+ * ("a paper lantern lit from within").
+ */
+const LOOK_LIT_BY = /(?:^|\s+)(?:[a-z]+ly\s+)?(?:lit|lighted|illuminated|warmed)\s+(?:only\s+)?(?:by|with)\b.*$/i;
+const LOOK_LIT_ONLY =
+  /^(?:[a-z]+ly\s+)?(?:lit|lighted|illuminated)(?:\s+(?:warm|warmly|softly|dimly|brightly|low|only|by|with|at|in|from(?!\s+within))\b|\s*$)/i;
+/** What a light or weather cut leaves dangling, besides `DANGLING_CUT`'s: "set (against a cold gray autumn sky)", job 303. */
+const LOOK_DANGLING = /(?:(?:^|\s+)(?:set|seen|shown|viewed|framed|placed))+$/i;
+/** A clause left only saying how lit or how cold it is ("dim" of "dim at dusk"). */
+const ONLY_LIGHT_QUALITY = new RegExp(`^(?:(?:${LOOK_LIGHT_QUALITY})\\s*)+$`, "i");
+
+/**
+ * Whether a clause's last words, from a joining word on, are only light, weather or the hour: "with low
+ * golden light", "at pre-dawn hours", "through winter", "in fading blue evening light". A season after "a"
+ * is a thing ("held shut with a spring"); the tail must end on the light, the weather or the time itself.
+ */
+function lightTail(tail: string): boolean {
+  const words = tail.trim().toLowerCase().split(/\s+/).slice(1);
+  if (!words.length || !LOOK_TAIL_END.test(words[words.length - 1])) return false;
+  return words.every((w, i) => LOOK_TAIL_WORD.test(w) && !(/^(?:spring|fall)$/.test(w) && /^an?$/.test(words[i - 1] ?? "")));
+}
+
+/**
+ * A written look without the light, the weather, the season or the hour it was written in (see above):
+ * "an open dawn-lit wilderness with low golden light, scattered brush and distant hills" → "an open
+ * wilderness, scattered brush and distant hills"; "a quiet bedroom at pre-dawn hours, soft dim
+ * blue-grey light, an unmade bed as the central feature" → "a quiet bedroom, an unmade bed as the
+ * central feature". A clause that is only light or weather goes ("bright natural light streaming in",
+ * "pale morning sky"), a light, weather or time tail is cut from a clause ("closed tight through
+ * winter", "dim at dusk"), and so is light said as one word ("dawn-lit", "frost-dusted"). Unchanged —
+ * byte for byte — when there is none, and when nothing would be left. Pure.
+ */
+export function lookWithoutLight(look: string): string {
+  if (!look?.trim()) return look;
+  const parts = look.split(/(\s*[,;]\s*|\s+[—–]\s+)/);
+  let changed = false;
+  const kept: { text: string; sep: string }[] = [];
+  for (let i = 0; i < parts.length; i += 2) {
+    const sep = i > 0 ? parts[i - 1] : "";
+    const clause = parts[i].replace(/[.\s]+$/, "");
+    const bare = clause.trim();
+    if (LOOK_LIGHT_CLAUSE.test(bare) || LOOK_CASTS_LIGHT.test(bare) || LOOK_LIT_ONLY.test(bare)) {
+      changed = true;
+      continue;
+    }
+    // What lights it, then a trailing light, weather or time tail, read from the end ("…, at dawn and dusk").
+    let x = clause.replace(LOOK_LIT_BY, "");
+    const joins = Array.from(
+      x.matchAll(/\s+(?:at|in|during|under|through|throughout|with|by|across|against|beneath|below|before|after)\s+/gi),
+      m => m.index!
+    );
+    for (let k = joins.length - 1; k >= 0 && lightTail(x.slice(joins[k])); k--) x = x.slice(0, joins[k]);
+    if (x !== clause) x = x.replace(DANGLING_CUT, "").replace(LOOK_DANGLING, "");
+    // A describing word after a comma that was all light leaves its noun to the words before it: "in a
+    // modest, dimly lit house" (job 148) → "in a modest house", never "in a modest, house".
+    const ledByLight = new RegExp(`^(?:${LOOK_LIT_WORD.source})\\s+[a-z'-]+$`, "i").test(x.trim());
+    // An article before a word taken out fits the word now after it: "an early-morning field" → "a field".
+    x = x
+      .replace(LOOK_LIT_WORD, "\u0001")
+      .replace(/\b([Aa])n?\s+\u0001\s*(?=([A-Za-z]))/g, (_m, a: string, next: string) => `${a}${/[aeiou]/i.test(next) ? "n" : ""} `)
+      .replace(/\s*\u0001\s*/g, " ")
+      .replace(/\s{2,}/g, " ")
+      .trim();
+    if (x === clause.trim()) {
+      kept.push({ text: parts[i].replace(/[.\s]+$/, ""), sep });
+      continue;
+    }
+    changed = true;
+    // A clause the cut left with only how lit it is ("dim" of "dim at dusk") is no look either — but a
+    // clause that was only ever "thin" or "dark" is the thing's own (job 345's coasters, job 357's dog).
+    const left = x.replace(/^(?:and|or|with)\s+|\s+(?:and|or|with)$/gi, "").trim();
+    if (!/[a-z]{3,}/i.test(left) || ONLY_LIGHT_QUALITY.test(left)) continue;
+    kept.push({ text: x, sep: ledByLight && kept.length && /,/.test(sep) ? " " : sep });
+  }
+  if (!changed || !kept.length) return look;
+  const out = kept.map((k, i) => (i === 0 ? k.text : `${k.sep}${k.text}`)).join("");
+  return /\.\s*$/.test(look) ? `${out}.` : out;
+}
+
+/** Whether a key thing's name IS a light ("window light", "candle glow"): its look is that light. Pure. */
+export function isLightName(name: string | undefined): boolean {
+  return !!name?.trim() && /^(?:light|lighting|sunlight|sunshine|daylight|lamplight|moonlight|candlelight|firelight|starlight|glow|shadows?|sun)$/i.test(nameHead(name));
+}
+
+/**
+ * The props list as the shot list, the line check and the prompt writer read it: every line's look
+ * without its light, weather or hour (`lookWithoutLight`) — the home setting's too (job 411's
+ * "backyard: …, late fall to winter light", read beside a line about spring). A line whose thing IS
+ * the weather or the light ("snow: a thin even layer of white snow …") keeps its look, and so do the
+ * people's lines. Unchanged when there is nothing to take out. Pure.
+ */
+export function sheetWithoutLight(sheet: string | undefined): string {
+  if (!sheet?.trim()) return sheet ?? "";
+  return sheet
+    .split("\n")
+    .map(line => {
+      const at = line.indexOf(":");
+      if (at < 0 || isPersonLine(line) || isViewerLine(line)) return line;
+      const name = labelName(line.slice(0, at).replace(/^[-*•\d.)\s]+/, ""));
+      if (isWeatherName(name) || isLightName(name)) return line;
+      const look = line.slice(at + 1).trim();
+      const cut = lookWithoutLight(look);
+      return cut === look ? line : `${line.slice(0, at + 1)} ${cut}`;
+    })
+    .join("\n");
 }
 
 /** At most this many things standing in a place are named with it. */
