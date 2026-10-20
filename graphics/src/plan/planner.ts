@@ -20,7 +20,7 @@
 //
 // Pure apart from the two things it is handed: `ask` (the model call — metered by the app) and
 // `ensureIcon` (makes an emoji's image available).
-import { CARD_HOLD_MAX_SEC, CueError, LINGER_SEC, MIN_ON_SCREEN_SEC, MIN_SHOT_SEC, NEW_LINE_GRACE_SEC, blinkBeside, findPhrase, findVerbatim, holdToCut, indexWords, ownSentenceEnd, parseSpokenNumber, resolveCues, sameWord, tokens, tooShortToRead, withinEdits, type CueSpec, type ResolvedCue, type Word } from "../cueResolve";
+import { CARD_HOLD_MAX_SEC, CueError, LINGER_SEC, MIN_ON_SCREEN_SEC, MIN_SHOT_SEC, NEW_LINE_GRACE_SEC, blinkBeside, findPhrase, findVerbatim, holdToCut, indexWords, ownSentenceEnd, parseSpokenNumber, resolveCues, sameWord, tokens, tooShortToRead, withinEdits, type CueSpec, type ResolvedCue, type TokenIndex, type Word } from "../cueResolve";
 import { TEMPLATES, resolveSets, templateById } from "../registry";
 import { FPS, LAYOUT, WIDTH } from "../theme";
 import { DIM_GAP_SEC, MIN_GAP_SEC, checkRules, nameTagRange, type FilmLayout, type LayoutScene } from "./rules";
@@ -163,12 +163,19 @@ Full-screen cards — replace the picture, so ONLY inside a b-roll stretch, neve
 - Versus — compares two kinds or options: {"kicker", "left": {"icon" (optional),"title" (1-3 words),"sub" (≤6 words),"say","at"}, "right": {same}, "winner": "left"|"right"|"none"}
   (a side's "say" is all its words as said, its sub's words among them: the title appears on "at", the sub as its own words are said)
 - BigNumber — says a number that matters (a time, an amount, a count): {"kicker", "prefix": "$" (a currency sign, if any), "value": number, "unit": "1-2 words", "at": "@the spoken number", "line": phrase, "countSec": 0.6 for small numbers}. Start it on the sentence that holds the number, not sentences before.
+  (a REAL figure only: a round number said to mean "many" — "made this trip a hundred times before", "a million
+  reasons", "a thousand ways" — is a figure of speech, never counted up like a statistic. The "unit" is the word or
+  two he says RIGHT AFTER the number — "about 40 minutes left" is 40 "minutes left", "kept the other 12 going" is
+  12 "going" — or none: never a word he does not say there, even one he said earlier in the sentence)
 - StepCards — gives 2-4 steps the viewer should do, when the steps have no pictures of their own (over STEP PICTURE scenes, StepLabels): {"kicker", "steps": [{"text" (≤${STEP_MAX_WORDS} words), "icon" (optional), "at": "@words"}]}
   (each step is the narrator's own words, shortened, keeping his "a", "the", "it" — "Leave it on the shelf", never
   "Leave on shelf" — never a word he does not say, and never stopped before what its last word takes. Steps are
   done ONE AFTER ANOTHER: a choice the line offers — "…, or …", "alternatively" — is part of the
   step before it, never a step of its own: "Call the office, or send an email" is ONE step, "Call or email")
 - BeforeAfter — an old way or state replaced by a new one: {"kicker", "before": {"icon" (optional),"label","at"}, "after": {"icon" (optional),"label","at"}}
+  (its arrow says one turned into the other, so the line SAYS a change between two times or states — then and
+  now, "used to", "became", "is now", "instead", one season against another. Two things true at the SAME time —
+  one state said two ways, "it barely moves at all; mostly it just sits there" — are no before and after)
 - TwoPoint — links two places or things ("the one in the basement sets off the one by your bed"): {"title": phrase, "a": {"label","sub","at"}, "b": {"label","sub","at"}}
 - FactCard — states a finding or a general fact ("most…", "studies show…", "the rule is…"): {"kicker": "Fact", "fact": ONE WHOLE SENTENCE (≤14 words), "emphasis", "source": "where it comes from, ONLY if the script says it", "icon" (optional)}
 - YesNoCard — asks a yes/no question and answers it: {"kicker", "question": ONE WHOLE SENTENCE (≤14 words), "answer": "yes"|"no", "at": "@the spoken answer", "line": phrase (optional, the reason)}
@@ -212,7 +219,11 @@ On top of the footage:
 - BigNumberOverlay — says a number that matters while the picture matters too (over b-roll): same props as BigNumber
 - DimCaption — a striking line over b-roll, one short sentence seen at a glance — never two in a row: {"phrase": phrase (≤10 words), "emphasis"}
 - ArrowCaption — a line pointing at something in the picture ("this one", "that disc", "right here") (over b-roll): {"phrase": phrase (≤10 words), "emphasis"}
-- MythStamp — says a myth over footage (no correction card needed): {"label": "Myth", "at": "@the myth's key words", "phrase": phrase (optional, ≤10 words)}
+- MythStamp — states a belief the narrator calls FALSE, over footage (no correction card needed): {"label": "Myth", "at": "@the belief's key words", "phrase": phrase (REQUIRED, ≤10 words)}
+  (the "phrase" is the BELIEF ITSELF as he says it — "Most people think the paint is dry", "Bats are blind" —
+  so the stamp says what the myth is. Never the host's own true statement about a claim — "The title says…",
+  "I called it…" — and never a claim he only softens ("that's a bit strong"): stamped, those call the film's own
+  words a myth. He calls it false nearby — "it's neither", "that's not true", "a myth", "never")
 - Quote — the host's OWN advice or saying, in one memorable line (over b-roll): {"quote": ONE WHOLE SENTENCE (≤16 words), "author": "the host's name", "emphasis"}.
   It is signed with the host's name, so it is never words the script gives someone ELSE to say: a line
   the viewer is told to say or ask ("Just ask: Could I get that in writing, please?"), a request to a
@@ -711,6 +722,275 @@ export function tidyNumbers(node: unknown): void {
     else if (bare(a.value) && unitOf(b.value)) a.value = `${a.value.trim()} ${unitOf(b.value)}`;
   }
   for (const v of Object.values(o)) tidyNumbers(v);
+}
+
+/* ───────────── A card says what the voice says ───────────── */
+// Round 14, the verification films: four cards drew something the voice never said. Each check reads
+// the words AS SAID around where the cue resolved, and names what is wrong so the one repair round can
+// mend it (the catalogue states each rule up front too).
+
+const ENDS_A_SENTENCE = /[.?!]["”')]*$/;
+const ENDS_A_CLAUSE = /[,;:.?!]["”')]*$/;
+/** Words as read here: lower case, straight apostrophes, one space. */
+const plainText = (ws: Word[]) => ws.map(w => w.text.trim().toLowerCase().replace(/[’‘]/g, "'")).join(" ");
+/** The first word of the sentence word `i` is in. */
+function sentenceStart(words: Word[], i: number): number {
+  while (i > 0 && !ENDS_A_SENTENCE.test(words[i - 1].text.trim())) i--;
+  return i;
+}
+/** The last word of the sentence word `i` is in. */
+function sentenceEnd(words: Word[], i: number): number {
+  while (i < words.length - 1 && !ENDS_A_SENTENCE.test(words[i].text.trim())) i++;
+  return i;
+}
+/** The words (positions, first to last) an element is said on, from the word the resolver timed it on
+ * (`sync`, by the start of its name: '.at "' for a cue's own "at", 'before.at "' for a side's,
+ * 'phrase "' for a word-by-word line) and its own words (`said`). Undefined when the cue has no such
+ * element. */
+function elementWords(c: ResolvedCue, words: Word[], index: TokenIndex, element: string, said: string): { first: number; last: number } | undefined {
+  const s = c.sync.find(x => x.element.startsWith(element));
+  const first = s ? words.findIndex(w => w.start === s.wordStart) : -1;
+  if (first < 0) return undefined;
+  const from = index.findIndex(t => t.word === first);
+  const hits = from >= 0 ? findVerbatim(index, said.replace(/^@/, ""), from) : null;
+  return { first, last: hits && index[hits[0]].word === first ? index[hits[hits.length - 1]].word : first };
+}
+
+/** Where a number graphic's value is said, in the tokens of its sentence from a couple of words before
+ * its "at" (job 412's "@hundred" lands on "hundred", and "a hundred" is the number): the tokens (each
+ * with its word), and the value's position and length among them. Undefined when the value is not
+ * found there. */
+function numberSaid(words: Word[], at: number, value: number): { toks: { tok: string; word: number }[]; p: number; n: number } | undefined {
+  const from = Math.max(sentenceStart(words, at), at - 2);
+  const toks: { tok: string; word: number }[] = [];
+  for (let i = from; i <= Math.min(sentenceEnd(words, at), at + 14); i++) for (const tok of tokens(words[i].text)) toks.push({ tok, word: i });
+  const digits = String(value).replace(/\D/g, "");
+  const plain = toks.map(t => t.tok);
+  for (let p = 0; p < toks.length; p++) {
+    if (plain[p] === digits) return { toks, p, n: 1 };
+    const spoken = parseSpokenNumber(plain, p);
+    if (spoken && spoken.value === value) return { toks, p, n: spoken.n };
+  }
+  return undefined;
+}
+
+/**
+ * A ROUND NUMBER SAID TO MEAN "MANY" IS NO STATISTIC. Luca's job 412 (0:20) counted a big number up
+ * 16, 77, 96, 100 and landed on "100 times" under "because she has made this crossing a hundred times
+ * before" — a figure of speech; the script gives no count. A hundred, a thousand, a million or a billion
+ * of TIMES, REASONS, WAYS, THINGS, QUESTIONS, IDEAS, EXCUSES, WORDS, STORIES or PIECES ("a million little
+ * reasons") says "many". "Times" is a real measure as a rate or a ratio — "a hundred times a minute",
+ * "a thousand times stronger", "a hundred times the size" — and a round count of anything else ("more
+ * than a hundred years", the same channel's job 411) is a fact. Returns the words as said, or undefined.
+ * Pure.
+ */
+const ROUND_FIGURES = new Set([100, 1000, 1e6, 1e9]);
+const FIGURE_NOUN = /^(?:times|reasons|ways|things|questions|ideas|excuses|words|stories|pieces)$/;
+const FIGURE_DESCRIBING = /^(?:little|tiny|small|different|other|new|good|great|silly|crazy|possible)$/;
+const TIMES_A_MEASURE =
+  /^(?:a|an|per|each|every|as|than|the|more|less|fewer|bigger|smaller|larger|faster|slower|longer|shorter|stronger|weaker|higher|lower|better|worse|cheaper|greater|heavier|lighter|louder|quieter|hotter|colder|harder|softer|deeper|wider|thicker|thinner|older|younger|safer|brighter)$/;
+export function figureOfSpeech(words: Word[], at: number, value: number): string | undefined {
+  if (!ROUND_FIGURES.has(value)) return undefined;
+  const said = numberSaid(words, at, value);
+  if (!said) return undefined;
+  const { toks, p, n } = said;
+  const after = toks.slice(p + n).map(t => t.tok);
+  const k = FIGURE_DESCRIBING.test(after[0] ?? "") ? 1 : 0;
+  const noun = after[k];
+  if (!noun || !FIGURE_NOUN.test(noun) || (noun === "times" && TIMES_A_MEASURE.test(after[k + 1] ?? ""))) return undefined;
+  const nounWord = toks[p + n + k].word;
+  return words
+    .slice(toks[p].word, Math.min(nounWord + 2, sentenceEnd(words, nounWord) + 1))
+    .map(w => w.text.trim())
+    .join(" ");
+}
+
+/** A short unit as written, and the words that say it: "%" is "percent", "a.m." is "in the morning". */
+const WRITTEN_UNITS: [RegExp, string[]][] = [
+  [/^%$/, ["percent", "per cent"]],
+  [/^a\.?\s?m\.?$/i, ["am", "a m", "in the morning"]],
+  [/^p\.?\s?m\.?$/i, ["pm", "p m", "in the afternoon", "in the evening", "at night"]],
+  [/^°\s?[cf]?$/i, ["degrees"]],
+  [/^hrs?\.?$/i, ["hours"]],
+  [/^mins?\.?$/i, ["minutes"]],
+  [/^secs?\.?$/i, ["seconds"]],
+  [/^yrs?\.?$/i, ["years"]],
+  [/^lbs?\.?$/i, ["pounds"]],
+  [/^oz\.?$/i, ["ounces"]],
+  [/^ft\.?$/i, ["feet", "foot"]],
+  [/^mph$/i, ["miles per hour", "miles an hour"]],
+];
+/** How far past the number a unit's words may run: "seven OF THE thieves", "nine TIMES out of 10". */
+const UNIT_REACH = 5;
+
+/**
+ * THE UNIT IS SAID RIGHT AFTER THE NUMBER. Sam's job 414 (0:31) ended a number card "held the other /
+ * 24 skills" for "held the other 24 together": "skills" was never said after the number (only "the
+ * last skill" earlier in the sentence), and "together" never shown — on screen the last skill WAS 24
+ * skills. A unit's words are said in order within UNIT_REACH words after the number, in its own
+ * sentence: "17 summers left", "seven of the thieves", "nine times out of 10", "Three piles." A short
+ * unit as written is said in words ("15%" heard as "15%" or "percent", "2 a.m." as "two in the
+ * morning"). Returns what is said after the number when the unit is not, else undefined — also when
+ * the number itself cannot be found (the number check names that). Pure.
+ */
+export function unitNotSaid(unit: unknown, words: Word[], at: number, value: number): string | undefined {
+  if (typeof unit !== "string" || !unit.trim()) return undefined;
+  const said = numberSaid(words, at, value);
+  if (!said) return undefined;
+  const { toks, p, n } = said;
+  const numberWord = toks[p + n - 1].word;
+  // "15%." is one word, and its "%" is no token: the sign said with the number is its unit.
+  if (unit.trim() === "%" && words[numberWord].text.includes("%")) return undefined;
+  const written = WRITTEN_UNITS.find(([re]) => re.test(unit.trim()));
+  const after = toks.slice(p + n).map(t => t.tok);
+  const forms = [tokens(unit), ...(written?.[1] ?? []).map(f => tokens(f))].filter(f => f.length);
+  const inOrder = (want: string[]) => {
+    let j = 0;
+    for (const w of want) {
+      while (j < Math.min(after.length, UNIT_REACH) && !sameWord(after[j], w)) j++;
+      if (j >= Math.min(after.length, UNIT_REACH)) return false;
+      j++;
+    }
+    return true;
+  };
+  if (forms.some(inOrder)) return undefined;
+  return words
+    .slice(toks[p].word, Math.min(numberWord + 4, sentenceEnd(words, numberWord)) + 1)
+    .map(w => w.text.trim())
+    .join(" ");
+}
+
+/**
+ * A BEFORE AND AFTER IS A CHANGE THE VOICE SAYS. The card draws an arrow from one side into the other,
+ * so the two must be two times or two states. Walter's job 411 (2:24) drew "Hardly sings → Soft
+ * clucking" under "IN WINTER" for "through the winter, a robin hardly sings at all. Mostly you'll hear
+ * a low, soft clucking" — one season's behaviour said two ways, as if the bird turned from one into the
+ * other. The sides' own words, the few words leading into the first (within its sentence) and the rest
+ * of the second's clause must say the change, the way round 11 asks the words between two values
+ * before NumberLabel draws "vs":
+ * - a time set against another, or a change said as one ("now", "used to", "no longer", "became",
+ *   "instead", "replaced", "what you want is"…) — job 400's clock "that was background noise at 30 is
+ *   now the loudest thing in the room";
+ * - a past state on the first side and a present one on the second ("was … is");
+ * - or two different seasons, months or times of day.
+ * Pure: the words, and where each side's "at" words are said (first and last word, film order).
+ */
+const CHANGE_SAID = new RegExp(
+  [
+    "\\b(?:now|nowadays|today|these days|anymore|any more|no longer|used to|back then|back when|at first|ago|once|later|after|afterwards?|before|until|till|since|then|eventually|finally|by the time|from then on)\\b",
+    "\\b(?:bec[oa]me|becomes|becoming|turn(?:s|ed|ing)? (?:into|to)|grew into|grow(?:s|n)? into|chang(?:e|es|ed|ing)|(?:went|goes|gone|going|got) from|replac(?:e|es|ed|ing|ement)|swap(?:s|ped|ping)?|switch(?:es|ed|ing)?|upgrad(?:e|es|ed|ing)|instead|rather than|trad(?:e|es|ed|ing) (?:in|up|for))\\b",
+    "\\bwhat you (?:want|need)\\b",
+  ].join("|")
+);
+const PAST_STATE = /\b(?:was|were|had|used)\b/;
+const PRESENT_STATE = /\b(?:is|are|has|have)\b|'s\b|'re\b/;
+const TIME_NAMES = /\b(spring|summer|fall|autumn|winter|morning|afternoon|evening|night|dawn|dusk|january|february|march|april|may|june|july|august|september|october|november|december)\b/g;
+export function changeSaid(words: Word[], a: { first: number; last: number }, b: { first: number; last: number }): boolean {
+  const [one, two] = a.first <= b.first ? [a, b] : [b, a];
+  const from = Math.max(sentenceStart(words, one.first), one.first - 3);
+  let to = Math.max(one.last, two.last);
+  for (let k = 0; k < 8 && to < words.length - 1 && !ENDS_A_CLAUSE.test(words[to].text.trim()); k++) to++;
+  const all = plainText(words.slice(from, to + 1));
+  if (CHANGE_SAID.test(all)) return true;
+  if (PAST_STATE.test(plainText(words.slice(from, one.last + 1))) && PRESENT_STATE.test(plainText(words.slice(one.last + 1, to + 1)))) return true;
+  const seasons = new Set(Array.from(all.matchAll(TIME_NAMES), m => (m[1] === "autumn" ? "fall" : m[1])));
+  return seasons.size >= 2;
+}
+
+/**
+ * A MYTH STAMP STAMPS A BELIEF THE VOICE CALLS FALSE. Three ways a stamp went wrong:
+ * - with no "phrase" it says MYTH over a picture and nothing else: Luca's job 412 (0:33) stamped
+ *   "call it revenge" with no words, up only 1.2 s; Walter's job 411's planner, refused a lower-case
+ *   phrase, simply dropped it. The phrase is REQUIRED — it is the belief;
+ * - the host's own true statement about a claim: Sam's job 414 (0:47) stamped "The title says lost" —
+ *   the title does say it, so the card called the film's own title a myth. A phrase that opens on the
+ *   film's own words ("the title", "this video", "my book") or the host saying or naming something
+ *   ("I said", "we call it") is never the belief;
+ * - a claim the voice never calls false: the same line goes on "which is too strong" — a softening, not
+ *   a myth. Around the phrase (the sentence before it, its own, three after) the narrator must name it
+ *   a belief or false ("myth", "not true", "actually", "everybody figures", "people call"…), or say a
+ *   negation outside the phrase's own words ("it's neither", "Life is not short." — the job 401 stamp
+ *   on "Everyone complains that life is too short", three sentences before it).
+ * Returns why, or undefined. Pure: the cue as planned, as resolved, and the words.
+ */
+const OPENERS_OF_A_LINE = /^(?:(?:so|and|but|now|well|okay|see)[\s,]+)*/;
+const FILMS_OWN_WORDS = /^(?:(?:the|this|my|our)\s+(?:(?:video|channel|book)'s\s+)?(?:title|video|channel|episode|script|thumbnail|headline)|(?:this|my|our)\s+(?:book|list))\b/;
+const HOST_SAYS = /^(?:i|we)(?:\s+[a-z']+){0,2}\s+(?:say|says|said|call|calls|called|name|named|titled|wrote|write|promised|mean|meant)\b/;
+const CALLED_FALSE = new RegExp(
+  [
+    "\\b(?:myths?|misconceptions?|misunderst(?:ood|and|anding)|legends?|folklore|old wives|rumou?rs?|superstitions?)\\b",
+    "\\b(?:untrue|false|wrong|nonsense|mistaken|bogus|baloney|hogwash)\\b",
+    "\\b(?:turns? out|in fact|actually|the truth|truth is|the reality|honest)\\b",
+    "\\b(?:people|everyone|everybody|folks|most of us|most|many|they|you'd|you might|we've been|we were|we all)(?:\\s+[a-z']+){0,2}\\s+(?:think|thinks|thought|believe|believes|believed|figure|figures|figured|assume|assumes|assumed|say|says|said|call|calls|called|claim|claims|swear|swears|insist|insists|complain|complains|reckon|reckons|told|heard|expect|expects)\\b",
+  ].join("|")
+);
+const NEGATION = /\b(?:not|no|never|nobody|nothing|none|neither|nor|nowhere)\b|n't\b/;
+export function mythStampProblem(spec: CueSpec, c: ResolvedCue, words: Word[]): string | undefined {
+  const phrase = (spec.props?.phrase as { text?: unknown } | undefined)?.text;
+  if (typeof phrase !== "string" || !phrase.trim())
+    return (
+      `MYTH is stamped with no "phrase", so it never says what the myth is. Give it its "phrase": the BELIEF itself, ` +
+      `in his words from where its clause starts, with a capital letter ("Most people think the paint is dry"), or drop it`
+    );
+  const line = phrase.trim().toLowerCase().replace(/[’‘]/g, "'").replace(OPENERS_OF_A_LINE, "");
+  if (FILMS_OWN_WORDS.test(line) || HOST_SAYS.test(line))
+    return (
+      `"${phrase}" is the host's own true statement about a claim, not the belief — stamped MYTH, it calls the film's own ` +
+      `words a myth. Stamp the belief itself, in his words, only where he calls it false; otherwise show the line another way, or drop it`
+    );
+  const index = indexWords(words);
+  const at = elementWords(c, words, index, 'phrase "', phrase);
+  if (!at) return undefined;
+  const from = sentenceStart(words, Math.max(0, sentenceStart(words, at.first) - 1));
+  let to = sentenceEnd(words, at.last);
+  for (let k = 0; k < 3 && to < words.length - 1; k++) to = sentenceEnd(words, to + 1);
+  if (CALLED_FALSE.test(plainText(words.slice(from, to + 1)))) return undefined;
+  if (NEGATION.test(plainText(words.slice(from, at.first))) || NEGATION.test(plainText(words.slice(at.last + 1, to + 1)))) return undefined;
+  const next = words.slice(at.last + 1, Math.min(to + 1, at.last + 14)).map(w => w.text.trim()).join(" ");
+  return (
+    `"${phrase}" is stamped MYTH, but nothing he says around it calls it false ("…${next}…") — a claim he only softens ` +
+    `or goes on from is no myth. Show the line another way (a caption), or drop it`
+  );
+}
+
+/** Why a BeforeAfter's two sides are not a change the voice says (`changeSaid`), or undefined. */
+export function beforeAfterProblem(spec: CueSpec, c: ResolvedCue, words: Word[]): string | undefined {
+  const side = (k: "before" | "after") => spec.props?.[k] as { at?: unknown; label?: unknown } | undefined;
+  const [before, after] = [side("before"), side("after")];
+  if (typeof before?.at !== "string" || typeof after?.at !== "string") return undefined;
+  const index = indexWords(words);
+  const a = elementWords(c, words, index, 'before.at "', before.at);
+  const b = elementWords(c, words, index, 'after.at "', after.at);
+  if (!a || !b || changeSaid(words, a, b)) return undefined;
+  const lo = Math.min(a.first, b.first);
+  const said = words.slice(lo, Math.min(words.length, Math.max(a.last, b.last) + 1)).map(w => w.text.trim()).join(" ");
+  return (
+    `"${String(before.label ?? "")}" → "${String(after.label ?? "")}" is no before and after: "${said}" says no change between two times or ` +
+    `states (no "now", "used to", "became", "instead", no then against now) — the arrow says one turned into the other. ` +
+    `Two sides of one state are shown another way (a caption), or not at all`
+  );
+}
+
+/** Why a number graphic's number or unit is not what the voice says (`figureOfSpeech`, `unitNotSaid`),
+ * or undefined. Read where its "at" resolved. */
+export function numberCardProblem(spec: CueSpec, c: ResolvedCue, words: Word[]): string | undefined {
+  const value = spec.props?.value;
+  if (typeof value !== "number" || typeof spec.props?.at !== "string") return undefined;
+  const at = elementWords(c, words, indexWords(words), '.at "', spec.props.at);
+  if (!at) return undefined;
+  const figure = figureOfSpeech(words, at.first, value);
+  if (figure)
+    return (
+      `"${figure}" is a figure of speech — the number means "many" here, not a count he gives. Counted up on a ` +
+      `number graphic it reads as a statistic: show the line as a caption (DimCaption), or drop it`
+    );
+  const heard = unitNotSaid(spec.props.unit, words, at.first, value);
+  if (heard)
+    return (
+      `its unit "${String(spec.props.unit)}" is not what he says after the number — he says "${heard}". The unit is the ` +
+      `word or two he says RIGHT AFTER the number, or none: leave "unit" out, or use those words`
+    );
+  return undefined;
 }
 
 /* ───────────── Script moments and spoken lists ───────────── */
@@ -1623,6 +1903,25 @@ export async function planGraphics(input: PlanInput): Promise<PlanResult> {
           );
           continue;
         }
+      }
+      // A CARD SAYS WHAT THE VOICE SAYS, read where it resolved: a number graphic counts a real figure
+      // with the words said right after it (`numberCardProblem`: job 412 counted "a hundred times
+      // before" up to 100, job 414 showed "24 skills" for "24 together"); a myth stamp stamps the belief
+      // the voice calls false (`mythStampProblem`: job 414 stamped "The title says lost"); a before and
+      // after is a change the voice says (`beforeAfterProblem`: job 411's "Hardly sings → Soft
+      // clucking", both said of one winter).
+      const notAsSaid =
+        typeof spec.props.value === "number"
+          ? numberCardProblem(spec, mine, words)
+          : spec.template === "MythStamp"
+            ? mythStampProblem(spec, mine, words)
+            : spec.template === "BeforeAfter"
+              ? beforeAfterProblem(spec, mine, words)
+              : undefined;
+      if (notAsSaid) {
+        undo();
+        bad(notAsSaid);
+        continue;
       }
       // A LIST WINDOW is a list the narrator says (`listCheck`): Gideon's job 400 (1:41) numbered "1 Two
       // thousand years ago / 2 Seneca wrote a short / 3 Furious / 4 Loving essay" on ONE sentence,

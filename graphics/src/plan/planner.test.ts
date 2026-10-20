@@ -212,7 +212,10 @@ describe("no graphic is up too short to read (Dale's job 397: 1.27 s and 1.40 s,
     chapter(4, "Craft fairs", "Number four. Take your smalls", 3.5),
     chapter(5, "Marketplace", "Number five. Sell your furniture", 4.5),
   ];
-  const fee: CueSpec = { id: "regular-fee-10", template: "BigNumber", start: "Etsy's regular fees take roughly $10", startPad: -0.15, end: "off a $100 board.", endPad: 0.3, props: { at: "@$10", line: { text: "Etsy's regular fees take roughly", words: true }, unit: "in fees", value: 10, kicker: "On a $100 board", prefix: "$", countSec: 0.6 } };
+  // As job 397 stored it but for its unit: "in fees" is not said after "$10" ("$10 off a $100 board."),
+  // which a new card is refused for since round 14 (asSaid.test.ts). It never timed the card: the
+  // resolver found no "in fees" after the number either.
+  const fee: CueSpec = { id: "regular-fee-10", template: "BigNumber", start: "Etsy's regular fees take roughly $10", startPad: -0.15, end: "off a $100 board.", endPad: 0.3, props: { at: "@$10", line: { text: "Etsy's regular fees take roughly", words: true }, value: 10, kicker: "On a $100 board", prefix: "$", countSec: 0.6 } };
 
   it("a chapter planned at 1.4 s is raised to 1.5 s, never refused, and the fee card after it still fits", async () => {
     const { ask } = asking([...series, fee]);
