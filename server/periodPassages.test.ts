@@ -140,6 +140,11 @@ describe("the list finder says where and when a list's sentence is set", () => {
     expect(LISTS_SYSTEM).toMatch(/A sequence of steps gets one the\s+same way when it tells how something was done then or there/);
     expect(LISTS_SYSTEM).toMatch(/here and now — steps the viewer is told to do today included/);
     expect(LISTS_SYSTEM).not.toMatch(CHANNEL_WORDS_418);
+    // Its past-tense example is the WAY something was done, never a story told once: the rule that a
+    // story of what happened is no list ("I went home, made dinner, and slept") still stands beside it,
+    // so a story of long ago is not turned into steps drawn as the host's hands.
+    expect(LISTS_SYSTEM).toMatch(/the way it was done, which is a\s+sequence of steps, unlike a story of what happened once/);
+    expect(LISTS_SYSTEM).toMatch(/a story of what happened \("I went home, made dinner, and slept"\) — steps are things to DO/);
   });
 
   it("clean: a how-to of today keeps none, whatever the model wrote (Hank's job 326)", () => {

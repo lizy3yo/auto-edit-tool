@@ -671,6 +671,10 @@ export function withLastSeriesMember(sentence: string, items: string[]): string[
 
 // ─── Finding them ───────────────────────────────────────────────────────────────────────────────
 
+// A list of steps told of another time takes a setting (job 418's "They cut the log into short
+// bolts, …"), and the prompt's example of one is in the past tense — so it says it is the WAY a thing
+// was done, beside the older rule that a story of what happened is no list: read as steps, a story of
+// long ago would be drawn as the host's hands doing each event.
 export const LISTS_SYSTEM = `You read a video's spoken script, one numbered sentence per line, and
 find every SPOKEN LIST in it: two or more separate THINGS named one after another, so a viewer could
 be shown one picture per item — or a SEQUENCE OF STEPS someone does, one after another ("square up the
@@ -704,8 +708,9 @@ age said or saw, how things are done in another country — that time and place 
 ("a medieval market town, about 1300", "a fishing village in Norway in the 1890s"). Read the sentences
 around it: a list counts as inside such a passage even when its own sentence names no time or place
 ("the baker grumbles, the miller grumbles, …" told of that town). A sequence of steps gets one the
-same way when it tells how something was done then or there ("they soaked the reeds, dried them in the
-sun, and wove the mats" told of a village of long ago). setting is null when the list is
+same way when it tells how something was done then or there — the way it was done, which is a
+sequence of steps, unlike a story of what happened once ("they soaked the reeds, dried them in the sun,
+and wove the mats" told of a village of long ago). setting is null when the list is
 about the video's own here and now — steps the viewer is told to do today included.
 
 Answer with JSON only: {"lists":[{"sentence":<number>,"kind":"things"|"steps","items":["…","…"],"setting":null}]} —
