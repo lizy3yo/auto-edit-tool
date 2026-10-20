@@ -3419,8 +3419,10 @@ function startsSentenceAt(text: string, spans: TokenSpan[], at: number): boolean
  * the split starts the next sentence), those words go to the picture before — the step's own picture
  * ("store it sealed, nowhere near a spark.") — and the rest gets its own picture. Never when the
  * lead is a sentence of its own ("Pull up a stool." after a sentence ended, job 413 scene 15: its
- * words do not belong to the picture before), never to the host, a CTA, cover, asset, split or a
- * list's group picture (`fitCandidate`), and never past the picture before's limit (`maxAt`).
+ * words do not belong to the picture before) or HOLDS one after the end it finishes ("…on its hook.
+ * Pull up a stool." would put the stool under the picture before), never to the host, a CTA, cover,
+ * asset, split or a list's group picture (`fitCandidate`), and never past the picture before's limit
+ * (`maxAt`).
  */
 export function applyPictureSplits(
   scenes: StoryboardScene[],
@@ -3488,6 +3490,8 @@ export function applyPictureSplits(
         !!(prev.scriptText ?? "").trim() &&
         !SENTENCE_END.test((prev.scriptText ?? "").trim()) &&
         startsSentenceAt(text, spans, bounds[1]) &&
+        // Only the end of that sentence: no sentence of its own starts inside the lead.
+        !spans.slice(1, bounds[1]).some((_, j) => startsSentenceAt(text, spans, j + 1)) &&
         secOf(prev) + leadSec <= limit;
       if (!handBack) {
         out.push(s);
@@ -4448,6 +4452,8 @@ export function joinShortSplits(
 export const SENTENCE_START_MAX_WORDS = 4;
 /** …and the longest they may run: on the voice when the word timeline knows, else their share of the picture. */
 export const SENTENCE_START_MAX_SEC = 1.5;
+/** Short forms whose full stop ends no sentence ("Mr. Hale", "St. Louis", "saws, drills, etc. and"). */
+const SHORT_FORM = /^(?:mr|mrs|ms|dr|st|mt|ft|jr|sr|vs|etc|no|approx|lt|capt|gen|prof|rev|ave|rd|inc|co|ltd)$/;
 
 /**
  * A SENTENCE STARTS ON ITS OWN PICTURE (2026-10-20, job 414 scenes 28-29). The storyboard cuts the
@@ -4502,8 +4508,10 @@ export function carrySentenceStarts(
     if (!text || SENTENCE_END.test(text)) continue;
     const spans = tokenSpans(text);
     let at = -1;
+    // A title's or a place's short form ends on a full stop and is no sentence end: "…down to St.
+    // Louis" would hand "Louis" to the next picture.
     for (let k = spans.length - 1; k > 0 && spans.length - k <= SENTENCE_START_MAX_WORDS; k--)
-      if (startsSentenceAt(text, spans, k)) {
+      if (startsSentenceAt(text, spans, k) && !SHORT_FORM.test(spans[k - 1].tok)) {
         at = k;
         break;
       }
@@ -4750,7 +4758,11 @@ const NOT_A_NAMED_THING = new Set([
   "host", "hand", "hands", "man", "woman", "person", "people", "someone", "fingers", "arm", "arms",
   "thing", "things", "way", "kind", "lot", "bit", "part", "piece", "time", "day", "year", "place", "side", "view",
   "close", "detail", "frame", "picture", "shot", "photo",
+  // "the host at work" is in every picture of someone working, and "that works" names no thing.
+  "work", "works",
 ]);
+/** A word with its singular forms ("kettles" → kettle, "glasses" → glass, "berries" → berry). */
+const nameForms = (w: string): string[] => [w, w.replace(/s$/, ""), w.replace(/es$/, ""), w.replace(/ies$/, "y")];
 /** A word that opens a thing's name in a spoken line: "a stool", "the kettle", "your city office". */
 const THING_OPENER = /^(?:a|an|the|this|that|these|those|my|your|our|his|her|their|its|some|each|every|another)$/;
 
@@ -4774,21 +4786,24 @@ export function losesNamedThing(own: string | undefined, said: string | undefine
       .replace(/[^a-z0-9]+/g, " ")
       .split(" ")
       .filter(w => w.length > 2 && !NOT_A_NAMED_THING.has(w));
-  const stem = (w: string) => w.replace(/(?:es|s)$/, "");
+  // A word meets its singular or plural in any spelling: one stem that cut "es" off every word read
+  // "kettles" as "kettl" beside "kettle", and refused a group whose picture had two kettles in it.
+  const meets = (w: string, set: Set<string>) => nameForms(w).some(f => set.has(f));
   // The things the line names: the two words after "a", "the", "your"… ("Pull up a stool" = stool).
-  const toks = tokenSpans(said ?? "").map(t => t.tok);
+  const toks = tokenSpans(said ?? "").map(t => t.tok.replace(/'s$/, ""));
   const inLine = new Set<string>();
   toks.forEach((t, k) => {
     if (!THING_OPENER.test(t)) return;
-    for (const w of toks.slice(k + 1, k + 3)) if (w.length > 2 && !NOT_A_NAMED_THING.has(w)) inLine.add(stem(w));
+    for (const w of toks.slice(k + 1, k + 3))
+      if (w.length > 2 && !NOT_A_NAMED_THING.has(w)) nameForms(w).forEach(f => inLine.add(f));
   });
   // A thing's own name: never a describing word (a colour, a material, a size) or a doing word.
   const named = words(topicWords(own)).filter(
-    w => inLine.has(stem(w)) && !describesTheName(w) && !/(?:ing|ed|ly)$/.test(w)
+    w => meets(w, inLine) && !describesTheName(w) && !/(?:ing|ed|ly)$/.test(w)
   );
   if (named.length === 0) return false;
-  const inGroup = new Set(words(group).map(stem));
-  const missing = named.filter(w => !inGroup.has(stem(w))).length;
+  const inGroup = new Set(words(group).flatMap(nameForms));
+  const missing = named.filter(w => !meets(w, inGroup)).length;
   return missing / named.length > 0.5;
 }
 

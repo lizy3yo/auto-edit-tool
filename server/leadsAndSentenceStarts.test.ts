@@ -155,6 +155,24 @@ describe("a short lead that finishes the sentence before goes back to its pictur
     expect(applyPictureSplits(quick, fixes(), [], s => (s === quick[2] ? 3.5 : s.audioDuration ?? 0), () => 10.5).split).toBe(0);
   });
 
+  it("unchanged: a lead that finishes the sentence but then says one of its own stays with its line", () => {
+    // "on its hook." finishes the saw's sentence, but "Pull up a stool." is a sentence of its own:
+    // handed back, the stool would be said under the saw. The line keeps its picture, as before.
+    const scenes = [
+      pic(1, "put the saw away,", "a hand saw hanging on a pegboard", { audioDuration: 1.5 }),
+      pic(
+        2,
+        "on its hook. Pull up a stool. The money side is where this gets interesting, and the numbers surprised me more than anything else this year.",
+        "a hand saw hanging on its hook",
+        { audioDuration: 9 }
+      ),
+    ];
+    const fixes = [{ id: 1, split: [{ from: "The money side is", show: "a notebook of sums open on the bench" }] }];
+    const r = applyPictureSplits(scenes, fixes, [], s => s.audioDuration ?? 0, () => 12);
+    expect(r.split).toBe(0);
+    expect(r.scenes).toEqual(scenes);
+  });
+
   it("through the line check: the hand-back lands, held to the picture's limit", async () => {
     mockInvoke.mockResolvedValue({
       text: JSON.stringify({
@@ -289,6 +307,15 @@ describe("a sentence starts on its own picture (job 414 scenes 28-29)", () => {
       pic(2, "cups of each, mixed by hand.", "hands mixing dough in a bowl", { shotGroup: 2, audioDuration: 3 }),
     ];
     expect(carrySentenceStarts(scenes, len, () => 21, () => 0.6).moved).toBe(0);
+    // A place's or a title's short form ends no sentence: "Louis" stays with "St.".
+    const place = [
+      pic(1, "We drove the whole load of boards all the way down to St. Louis", "a pickup truck loaded with boards on a highway", {
+        shotGroup: 1,
+        audioDuration: 6,
+      }),
+      pic(2, "and sold every one at the market there.", "boards stacked on a market table", { shotGroup: 2, audioDuration: 4 }),
+    ];
+    expect(carrySentenceStarts(place, len, () => 21, () => 0.5).moved).toBe(0);
   });
 
   it("lastWordsSec: too few words heard tells nothing; a number heard as one word reads longer, never shorter", () => {
@@ -377,6 +404,15 @@ describe("a thing a line names stays with that line (job 413 scenes 10 and 15)",
     expect(losesNamedThing("a kettle on the stove", "Put the kettle on.", "a teapot and two cups on a table")).toBe(true);
     // No line, nothing to judge.
     expect(losesNamedThing("a kettle on the stove", undefined, "a teapot")).toBe(false);
+  });
+
+  it("unchanged: a thing the group shows in the plural, or 'work', is never a thing lost", () => {
+    // One kettle said and drawn, two in the group's picture: the kettle is there.
+    expect(losesNamedThing("a kettle on the stove", "Put the kettle on.", "two kettles on a stove")).toBe(false);
+    expect(losesNamedThing("a berry in a bowl", "Take a berry.", "a bowl of berries")).toBe(false);
+    expect(losesNamedThing("a box on the shelf", "Grab a box.", "boxes stacked on a shelf")).toBe(false);
+    // "that works" names no thing, and "at work" is in every picture of someone working.
+    expect(losesNamedThing("the host's hands at work on the bench", "And that works every time.", "a finished bench")).toBe(false);
   });
 
   it("the planners are told a thing is never shown before the line that names it", () => {
