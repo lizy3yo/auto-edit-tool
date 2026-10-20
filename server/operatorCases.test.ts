@@ -7831,3 +7831,69 @@ describe("another of the same kind is not the key thing (round 14, job 412 scene
     expect(buildStillPrompt(b[1])).not.toContain("ANOTHER ONE OF ITS KIND");
   });
 });
+
+describe("round 14: a continuation knows what it continues (jobs 413 and 412)", () => {
+  // Job 413 scenes 15-16: two views of one phone call, 11.4 s, came back as the same over-the-shoulder
+  // shot, the phone a corded desk phone in one and a smartphone in the other. The call names no key
+  // thing, so the second view had no reference to the first, no concrete camera, and was drawn at the
+  // same moment. Job 412 scene 8 was scene 3's shot again: the list cut out of its beat ("ankle, knee,
+  // hip, ribs") left the "ribs" close-up right before it, and its camera and its near-copy partner were
+  // read off that close-up. The full cases are in continuationChain.test.ts.
+  const look =
+    "A lean man in his late fifties with fair, weathered skin, graying hair under a woven straw cowboy hat, wearing a light blue denim button-up shirt";
+  const row = (index: number, show: string, over: Partial<StoryboardScene> = {}) =>
+    ({ index, narration: "n", scriptText: "n", showSubject: show, visualPrompt: show, ...over }) as StoryboardScene;
+  const CALL = "the host on the phone at the workbench calling the city office";
+
+  it("413: the call's second view waits for the first, is drawn from it for the phone and the clothes, from a concrete camera", async () => {
+    const { attachMemory, memoryFor, memoryView, nearCopyPartner, pictureSettled } = await import("./pictureMemory");
+    const { memoryClause, memoryFields } = await import("./longformVideo");
+    const { REDRAW_CAMERAS } = await import("./pictureVariety");
+    const { OTHER_VIEWS } = await import("./shotList");
+    const host = { humanPresent: true, brollHostLook: look, brollHostRef: "https://r2/host-photos/phone-v4-413.jpg" };
+    const b = [row(15, CALL, host), row(16, `${CALL}${OTHER_VIEWS[0]}`, host)];
+    attachMemory(b, b);
+    expect(nearCopyPartner(b[1])).toBe(b[0]);
+    let done = false;
+    const waiting = memoryFor(b[1], 5_000).then(m => ((done = true), m));
+    await new Promise(r => setTimeout(r, 20));
+    expect(done).toBe(false);
+    b[0].pictureUrl = "https://r2/413/still-src-15.png";
+    pictureSettled(b[0]);
+    const s = { ...b[1], ...memoryFields(await waiting, memoryView(b[1])) } as StoryboardScene;
+    expect(s.memoryRefUrls).toEqual(["https://r2/413/still-src-15.png"]);
+    expect(s.memoryView).toBe(REDRAW_CAMERAS[0]);
+    const clause = memoryClause(s);
+    expect(clause).toContain("this one CONTINUES — the same moment");
+    expect(clause).toContain("a thing in someone's hand the same thing");
+  });
+
+  it("412: scene 8 continues scene 3 past the list, and is compared with it — never the 'ribs' close-up", async () => {
+    const { continuedPicture, memorySourcesFor, nearCopyPartnerFor } = await import("./pictureMemory");
+    const b = [
+      row(3, "cat walking across sleeping owner's legs in bed", { keyThing: "cat" }),
+      row(4, "cat stepping along owner's body from ankle toward ribs in bed", { keyThing: "cat", listCut: true }),
+      row(5, "close-up of the cat's white-tipped paw pressing onto the sleeping owner's knee", { keyThing: "cat paws", listCut: true }),
+      row(7, "close-up of the cat's white-tipped paw pressing on the sleeping owner's ribs", { keyThing: "cat paws", listCut: true }),
+      row(8, "cat continuing steady walk across owner's body in bed", { keyThing: "cat", sameShot: true }),
+    ];
+    expect(continuedPicture(b, b[4])?.index).toBe(3);
+    expect(nearCopyPartnerFor(b, b[4])?.index).toBe(3);
+    expect(memorySourcesFor(b, b[4]).map(s => s.index)).toEqual([3]);
+  });
+
+  it("409: the host marked to continue past a list is never drawn from someone else's picture", async () => {
+    const { keylessContinued, memorySourcesFor } = await import("./pictureMemory");
+    const b = [
+      row(14, "a person in their sixties sitting alone in the quiet study", { humanPresent: true, otherPerson: "a person in their sixties" }),
+      row(18, "an older man planting a young tree in a backyard on a sunny morning, seen from behind", {
+        listCut: true,
+        humanPresent: true,
+        otherPerson: "an older man",
+      }),
+      row(19, "the host speaking thoughtfully at his desk in the study", { sameShot: true, humanPresent: true, brollHostLook: look }),
+    ];
+    expect(keylessContinued(b, b[2])).toBeUndefined();
+    expect(memorySourcesFor(b, b[2])).toEqual([]);
+  });
+});

@@ -8172,6 +8172,38 @@ function notShownClause(scene: StoryboardScene): string {
   return ` The ${namesInSentence(apart)} ${apart.length > 1 ? "are" : "is"} drawn as this picture's own words describe ${apart.length > 1 ? "them" : "it"}.`;
 }
 
+/**
+ * A CONTINUATION OF NO KEY THING (round 14, job 413 scenes 15-16): drawn from the picture it continues
+ * (`keylessContinued`), which lends how the people and things in it look and nothing else — the call's
+ * second picture had no reference and drew a smartphone where the first had a corded desk phone, and
+ * with the old picture as a template it would have been the same over-the-shoulder shot again. The
+ * concrete camera (`memoryViewFor`, `REDRAW_CAMERAS`) is what sets it apart. People are named only when
+ * it shows someone: a picture of no one — or one drawn with nobody in it after the host check refused
+ * it — takes the things alone, and no person or hand from the reference. Empty when the reference is
+ * not the picture it continues (a list item's group picture has its own clause). Pure.
+ */
+export function continuedMomentClause(scene: StoryboardScene): string {
+  const n = scene.memoryRefUrls?.length ?? 0;
+  const p = scene.memoryRightBefore;
+  if (!n || p == null || p < 0 || p >= n || !scene.memoryContinues) return "";
+  const which = n === 1 ? "The first reference image" : `Reference image ${p + 1}`;
+  const who = scene.humanPresent
+    ? "the people and things in it look from it — the same clothes and the very same objects, a thing in someone's hand the same thing"
+    : "the things in it look from it — the very same objects, and no person or hand from it";
+  const view = scene.memoryView
+    ? ` Camera position for THIS picture: ${scene.memoryView} — clearly different from the reference's.`
+    : "";
+  const host =
+    scene.humanPresent && scene.brollHostRef ? " The last reference image is the host, only for how they look." : "";
+  return (
+    ` ${which} is the earlier picture this one CONTINUES — the same moment, already shown in this video: ` +
+    `take ONLY how ${who} — never the picture itself. This is a clearly new photo of that moment from the ` +
+    `camera position given for THIS picture — never that picture's angle with the subject only a little ` +
+    `closer or further away, never the same pose, the same hand positions or the same things at the same ` +
+    `angles in the same places.${view}${host}`
+  );
+}
+
 function memoryReferenceClause(scene: StoryboardScene): string {
   const n = scene.memoryRefUrls?.length ?? 0;
   // A phone or laptop screen showing a key thing (`SCREEN_ITEM_VIEW`): the thing is only the photo
@@ -8189,7 +8221,8 @@ function memoryReferenceClause(scene: StoryboardScene): string {
       "this one item, close up and filling the frame — the very same one as in the reference: " +
       "identical shape, colours, materials and wear."
     );
-  if (!n || !scene.keyThing) return "";
+  if (n && !scene.keyThing) return continuedMomentClause(scene);
+  if (!n) return "";
   // Every key thing in the picture is drawn from its own earlier picture (the heater AND the mattress)
   // — those the references show; the rest are drawn from the words (`notShownClause`).
   const all = [scene.keyThing, ...shownOthers(scene)];

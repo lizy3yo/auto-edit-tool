@@ -15,7 +15,7 @@
 import { insideView } from "./cutOpen";
 import { PART_VIEW } from "./namedLooks";
 import type { KeyThing, MemoryRef, PlaceLook, StoryboardScene, ThingLook } from "@shared/types";
-import { REDRAW_CAMERAS } from "./pictureVariety";
+import { nearCopyCameraIndex, REDRAW_CAMERAS } from "./pictureVariety";
 import {
   BUILD_STAGES,
   anotherOfItsKind,
@@ -67,7 +67,12 @@ export function memorySourcesFor(
   // close-up is the same machine, cutter or pile as in the group (`listSetFor`).
   const set = listSetFor(scenes, s);
   if (set) return [set];
-  if (!s.keyThing || !drawn(s)) return [];
+  // A picture of NO key thing is drawn from the picture it CONTINUES, and only that (`keylessContinued`).
+  if (!s.keyThing) {
+    const from = source(s) ? keylessContinued(scenes, s) : undefined;
+    return from ? [from] : [];
+  }
+  if (!drawn(s)) return [];
   // A LIST ITEM is its own thing: it is drawn from a key thing's memory only when its OWN words name
   // that thing, or it is a part of it (`partOf`). Dale's job 397: "Smalls, about $10 to $40.
   // Coasters, ornaments, small cutting boards." — the coasters and the ornaments both inherited the
@@ -119,12 +124,104 @@ export function memorySourcesFor(
   // weather (`lendsNoPicture`): job 411's lawn handed scene 2's whole yard to every picture set on it.
   const same = lendsNoPicture(s.keyThing) ? [] : before.filter(x => shows(x, s.keyThing!));
   add(memoryOf(same, s.keyThing));
-  add(same[same.length - 1]);
+  // …the latest before it, or — marked to continue — the picture its topic continues (`topicPictureBefore`):
+  // job 412 scene 8 ("cat continuing steady walk across owner's body in bed") came after a list cut out
+  // of its beat, "ankle, knee, hip, ribs", and was drawn from the "ribs" close-up as its latest picture
+  // and as the one it continued, so its camera and its checks looked at a paw while it copied scene 3.
+  const chain = s.sameShot && !s.listCut ? topicPictureBefore(scenes, s) : undefined;
+  add(chain && same.includes(chain) ? chain : same[same.length - 1]);
   // Every other key thing in it: that thing's memory (the heater beside the mattress) — a place's
   // never (job 411 scene 16: "a green lawn in a Gulf Coast yard" drawn from the northern lawn in snow).
   for (const t of s.otherKeyThings ?? [])
     if (!lendsNoPicture(t)) add(memoryOf(before.filter(x => shows(x, t)), t));
   return out;
+}
+
+/**
+ * THE PICTURE A TOPIC CONTINUES, BY ITS CHAIN (round 14, job 412 scene 8). A picture marked to continue
+ * (`sameShot`) continues the last picture of its topic — not whatever sits right before it. A spoken
+ * list cut out of the middle of one beat (`applySpokenLists`) leaves the beat's later part after the
+ * list: "She walks the full length of you, | ankle, | knee, | hip, | ribs, | steady as a tightrope
+ * walker…" — scene 8 continues scene 3, and the "ribs" close-up right before it is an insert. So the
+ * walk back skips the list's items and its group picture (`listSet`), and an operator's image or a book
+ * cover set in between; it stops at a host take or a split screen, where a topic ends
+ * (`breakTopicsAtHostTakes`). A list item keeps the picture right before it: items are never inserts in
+ * their own list. Undefined when what it reaches is not a drawn full-frame picture. Pure.
+ */
+export function topicPictureBefore(scenes: StoryboardScene[], s: StoryboardScene): StoryboardScene | undefined {
+  const i = scenes.indexOf(s);
+  if (i <= 0) return undefined;
+  let j = i - 1;
+  if (!s.listCut)
+    while (j >= 0 && (scenes[j].listCut || scenes[j].listSet || scenes[j].assetImageUrl || scenes[j].coverHero)) j--;
+  const x = j >= 0 ? scenes[j] : undefined;
+  return x && source(x) ? x : undefined;
+}
+
+/**
+ * A CONTINUATION OF NO KEY THING IS DRAWN FROM WHAT IT CONTINUES (round 14, job 413 scenes 15-16). "the
+ * host on the phone at the workbench calling the city office" ran past its limit and its second part
+ * repeated the words with a view ("…, a close-up of one detail of it filling the frame"). Every
+ * continuation safeguard asked for a key thing, and the call named none: no reference to the picture it
+ * continued, no concrete camera, and nothing made it wait for that picture — the two were drawn at once.
+ * It came back as the same over-the-shoulder shot, and the phone was a corded desk phone in one and a
+ * smartphone in the other, in the same call. The picture it continues is the latest earlier picture
+ * whose words it repeats once any view is taken off (`repeatsTopic`), else — marked to continue — the
+ * last picture of its topic (`topicPictureBefore`). It lends how the people and things in it look, never
+ * its framing (`continuedMomentClause` in longformVideo.ts).
+ * Never for a list item (each is its own thing), a screen or a split panel. Never from a picture no other
+ * picture is drawn from: a screen, one further along, one whose check said its subject is missing, one
+ * seen cut open, one filed under a place (a place lends no picture, `lendsNoPicture`), or — behind the QR
+ * card — one with someone in it. Never from a picture of SOMEONE ELSE (`samePeople`): job 409 scene 19,
+ * "the host speaking thoughtfully at his desk in the study", is marked to continue past a list to scene
+ * 14, "a person in their sixties sitting alone in the quiet study" — lent that picture, the host would
+ * be drawn in the other person's clothes. Nor from one showing a key thing this picture names only as
+ * ANOTHER of its kind (`othersOfKind`): a wild cat is never drawn from the pet's picture. Pure.
+ */
+export function keylessContinued(scenes: StoryboardScene[], s: StoryboardScene): StoryboardScene | undefined {
+  const i = scenes.indexOf(s);
+  if (i <= 0 || s.keyThing || s.listCut || !source(s) || isScreen(s)) return undefined;
+  const backdrop = !!s.qrHero && !s.coverHero && !s.assetImageUrl && !s.hostPresent;
+  const another = (s.othersOfKind ?? []).map(o => o.name).filter(t => !s.otherKeyThings?.includes(t));
+  const lends = (x: StoryboardScene) =>
+    source(x) &&
+    !isScreen(x) &&
+    !laterStage(x, s) &&
+    !x.memoryUnfit &&
+    !insideView(x.showSubject) &&
+    !insideView(x.visualPrompt) &&
+    !lendsNoPicture(x.keyThing) &&
+    !(backdrop && withSomeone(x)) &&
+    samePeople(x, s) &&
+    !another.some(t => shows(x, t));
+  const words = pictureWords(s);
+  for (let j = i - 1; j >= 0; j--) {
+    const x = scenes[j];
+    if (lends(x) && repeatsTopic(pictureWords(x), words)) return x;
+  }
+  const chain = s.sameShot ? topicPictureBefore(scenes, s) : undefined;
+  return chain && lends(chain) ? chain : undefined;
+}
+
+/**
+ * Who a picture shows by name: someone else (`otherPerson`, in its own words), the host at work
+ * (`brollHostLook` / `brollHostRef`), or undefined — nobody, or someone it does not say.
+ */
+const whoIsIn = (x: StoryboardScene): string | undefined =>
+  x.otherPerson?.trim()
+    ? `other:${x.otherPerson.trim().toLowerCase()}`
+    : x.brollHostLook || x.brollHostRef
+      ? "host"
+      : undefined;
+
+/**
+ * Whether two pictures can be one moment for the people in them: both name the same person, or at most
+ * one of them names anyone. The host and someone else, or two different people, never are (job 409
+ * scenes 14 and 19). Pure.
+ */
+export function samePeople(a: StoryboardScene, b: StoryboardScene): boolean {
+  const [x, y] = [whoIsIn(a), whoIsIn(b)];
+  return !x || !y || x === y;
 }
 
 /** The words a picture is drawn by: a split's panel description, else its own. */
@@ -207,9 +304,10 @@ export function lastPictureBefore(scenes: StoryboardScene[], s: StoryboardScene)
  *
  * Returns the latest of `s`'s memory pictures whose words `s` repeats once any view is taken off
  * (`repeatsTopic` — job 403 scene 14 repeats scene 10, 11 s and three pictures later), else, for a
- * picture marked to continue (`sameShot`) whose words were rewritten, the picture right before it.
- * Undefined for a list item drawn from its group picture and a screen, whose framing is set apart
- * already. Pure.
+ * picture marked to continue (`sameShot`) whose words were rewritten, the last picture of its topic
+ * (`topicPictureBefore` — past a list cut out of its beat, job 412 scene 8). A picture of no key thing
+ * has that one picture as its memory (`keylessContinued`). Undefined for a list item drawn from its
+ * group picture and a screen, whose framing is set apart already. Pure.
  */
 export function continuedPicture(
   scenes: StoryboardScene[],
@@ -223,8 +321,8 @@ export function continuedPicture(
     .filter(x => repeatsTopic(pictureWords(x), words))
     .sort((a, b) => scenes.indexOf(b) - scenes.indexOf(a))[0];
   if (byWords) return byWords;
-  const before = scenes[i - 1];
-  return s.sameShot && sources.includes(before) ? before : undefined;
+  const before = s.sameShot ? topicPictureBefore(scenes, s) : undefined;
+  return before && sources.includes(before) ? before : undefined;
 }
 
 /**
@@ -247,11 +345,13 @@ export function recomposeFrom(
  * The picture the near-copy check ALWAYS lays beside `s`, whatever the fingerprints say
  * (`nearCopyCandidates`' `always`): what it is drawn from as the picture it must not repeat
  * (`recomposeFrom`), else — a picture with no memory link — the latest earlier picture whose words it
- * repeats, else, marked to continue (`sameShot`), the picture right before it. That is the check a
+ * repeats, else, marked to continue (`sameShot`), the last picture of its topic. That is the check a
  * copy drawn from WORDS still meets: job 405 scene 8 and job 401 scenes 3 and 5 copied their memory
  * twice, were drawn from words with no reference, and shipped as the same composition unchecked.
  * Never a split panel: a split is never a memory source, and panels meet the near-copy check through
- * their fingerprints (`nearCopyCandidates`). Pure.
+ * their fingerprints (`nearCopyCandidates`). Marked to continue, it is the last picture of its topic
+ * (`topicPictureBefore`), never a list item cut out of the beat in between: job 412 scene 8 was paired
+ * with the "ribs" close-up and shipped as scene 3's shot again, unflagged. Pure.
  */
 export function nearCopyPartnerFor(
   scenes: StoryboardScene[],
@@ -267,8 +367,7 @@ export function nearCopyPartnerFor(
     const x = scenes[j];
     if (source(x) && !isScreen(x) && repeatsTopic(pictureWords(x), words)) return x;
   }
-  const before = scenes[i - 1];
-  return s.sameShot && source(before) ? before : undefined;
+  return s.sameShot ? topicPictureBefore(scenes, s) : undefined;
 }
 
 /**
@@ -295,18 +394,35 @@ export function repeatedPicture(
  * view names, else the next after the camera of the picture it repeats — and never that picture's
  * own. Job 405 scenes 22 and 24 both said "a close-up of one detail of it" (a host glimpse cut one
  * picture in two), were both drawn close up from the same reference, and came back as one picture
- * twice. Any other picture reads its own view (-1 for none). Pure.
+ * twice. Any other picture reads its own view (-1 for none).
+ * A picture of NO key thing that continues one with words of its own (`keylessContinued`) has no memory
+ * view to fall back on (`memoryViewFor`), and drawn from that picture with no camera it would copy its
+ * framing, so it too takes a concrete camera, never the one of the picture it continues: the view its
+ * own words name, else — a small or close-framed subject (`smallSubject`) — the close-up in turn, else
+ * the other side (`SIDE_CAMERA`), which keeps a whole subject whole where a close-up of one detail
+ * would leave most of what its words describe out. Pure.
  */
 export function continuationCameraIndex(scenes: StoryboardScene[], s: StoryboardScene, depth = 0): number {
   const own = viewIndexOf(pictureWords(s).replace(/[\s.]+$/, ""));
   const from = depth < 8 ? repeatedPicture(scenes, s) : undefined;
-  if (!from) return own - 1;
+  if (!from) {
+    const cont = depth < 8 && !s.keyThing ? continuedPicture(scenes, s) : undefined;
+    if (!cont) return own - 1;
+    const was = continuationCameraIndex(scenes, cont, depth + 1);
+    const small = smallSubject(s);
+    if (own > 0) return own - 1 !== was ? own - 1 : nearCopyCameraIndex(1, was, small);
+    if (small || was === SIDE_CAMERA) return nearCopyCameraIndex(1, was, small);
+    return SIDE_CAMERA;
+  }
   const prev = continuationCameraIndex(scenes, from, depth + 1);
   const n = REDRAW_CAMERAS.length;
   let k = own > 0 ? own - 1 : (prev + 1) % n;
   if (k === prev) k = (k + 1) % n;
   return k;
 }
+
+/** Where the camera from the other side ("seen from the other side, from low down") is in `REDRAW_CAMERAS`. */
+const SIDE_CAMERA = REDRAW_CAMERAS.findIndex(c => /\bother side\b/.test(c));
 
 /** What the still loop does with the same-thing check's answer on a memory picture (`sameThingMove`). */
 export type SameThingMove = "pass" | "redraw" | "words" | "flag";
@@ -1086,13 +1202,23 @@ const shows = (x: StoryboardScene, t: string) =>
 /**
  * The camera position of `s` when it is drawn from memory: the next of `MEMORY_VIEWS` after the
  * pictures of its key thing before it, so two in a row never share one. Undefined for the memory
- * picture itself, and for a picture of no key thing. Pure.
+ * picture itself, and for a picture of no key thing unless it continues one (`keylessContinued`). Pure.
  */
 export function memoryViewFor(scenes: StoryboardScene[], s: StoryboardScene): string | undefined {
   if (listSetFor(scenes, s)) return SET_ITEM_VIEW;
   if (isScreen(s) && s.keyThing && drawn(s)) return SCREEN_ITEM_VIEW;
+  // A picture of NO key thing has a camera only as a continuation, drawn from the picture it continues
+  // (`keylessContinued`): a concrete one (`REDRAW_CAMERAS`) — job 413 scene 16 had only its words' "a
+  // close-up of one detail of it", which meant nothing for a man seen from behind, and came back as
+  // scene 15's over-the-shoulder shot.
+  if (!s.keyThing) {
+    if (!source(s) || !continuedPicture(scenes, s)) return undefined;
+    const k = continuationCameraIndex(scenes, s);
+    if (k < 0) return undefined;
+    return s.blurPrint && k === 0 ? BLUR_PRINT_VIEW : REDRAW_CAMERAS[k];
+  }
   // A place is never drawn from a picture of itself (`lendsNoPicture`), so it has no camera to move.
-  if (!s.keyThing || !drawn(s) || lendsNoPicture(s.keyThing)) return undefined;
+  if (!drawn(s) || lendsNoPicture(s.keyThing)) return undefined;
   const i = scenes.indexOf(s);
   const before = scenes.slice(0, Math.max(0, i)).filter(x => source(x) && shows(x, s.keyThing!)).length;
   if (before === 0) return undefined;
@@ -1672,7 +1798,11 @@ export function attachMemory(
     // A reference is never a picture of a PLACE the picture is about (`lendsNoPicture`), whatever it
     // was filed under: told "this exact pharmacy aisle" it would hand its aisle on (job 409 scene 3).
     const placeOwn = lendsNoPicture(s.keyThing);
-    ownSourcesOf.set(s, sources.filter(x => x === set || (!!s.keyThing && !placeOwn && shows(x, s.keyThing))));
+    // A picture of no key thing has only the picture it continues (`keylessContinued`): its own subject.
+    ownSourcesOf.set(
+      s,
+      sources.filter(x => x === set || (s.keyThing ? !placeOwn && shows(x, s.keyThing) : x === keylessContinued(board, s)))
+    );
     viewOf.set(s, memoryViewFor(board, s));
     lookOf.set(s, keyThingLookFor(s, keyThings, makes));
     otherLooksOf.set(s, otherThingLooksFor(s, keyThings, makes));
@@ -1761,6 +1891,14 @@ export function pictureSettled(s: StoryboardScene): void {
   gate(s).open();
 }
 
+/** Wait — at most `timeoutMs` — for `src`'s picture when it is still being made in this pass. */
+async function madeOrTimedOut(src: StoryboardScene, timeoutMs: number): Promise<void> {
+  if (src.pictureUrl || !pending.has(src)) return;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  await Promise.race([gate(src).promise, new Promise<void>(r => (timer = setTimeout(r, timeoutMs)))]);
+  if (timer) clearTimeout(timer);
+}
+
 /**
  * The pictures `s` is drawn from, waiting (at most `timeoutMs`) for one still being made in this
  * pass. A memory that never came is skipped — the picture is then drawn from words, as before — and
@@ -1797,15 +1935,15 @@ export async function memoryFor(
   const prev = rightBeforeOf.get(s);
   let own = false;
   let before: number | undefined;
+  // THE PICTURE IT MUST NOT REPEAT IS MADE FIRST (round 14, job 413 scenes 15-16): the near-copy check
+  // lays it beside this one (`nearCopyPartner`) but only once it is drawn and remembered, and two
+  // pictures of one phone call, neither drawn from the other, were drawn at the same moment. A partner
+  // that is no memory picture of this one is waited for the same way — always an earlier scene
+  // (`nearCopyPartnerFor`), so nothing waits on itself. Only while that check runs (`PICTURE_VARIETY`).
+  const partner = partnerOf.get(s);
+  if (partner && process.env.PICTURE_VARIETY !== "0") await madeOrTimedOut(partner, timeoutMs);
   for (const src of sourcesOf.get(s) ?? []) {
-    if (!src.pictureUrl && pending.has(src)) {
-      let timer: ReturnType<typeof setTimeout> | undefined;
-      await Promise.race([
-        gate(src).promise,
-        new Promise<void>(r => (timer = setTimeout(r, timeoutMs))),
-      ]);
-      if (timer) clearTimeout(timer);
-    }
+    await madeOrTimedOut(src, timeoutMs);
     if (!src.pictureUrl || src.memoryUnfit) continue;
     used.push(src);
     // Which of this picture's other key things the reference shows: a redraw that drops one reference
