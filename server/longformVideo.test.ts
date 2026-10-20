@@ -44,6 +44,7 @@ import {
   enforceStillMotionRatio,
   enforceHostSplitMix,
   addMissingSplitsToUnrendered,
+  panelSeedFor,
   enforceVisualAdjacency,
   runtimeQuarters,
   HOST_RAMP,
@@ -1630,6 +1631,26 @@ describe("enforceHostSplitMix", () => {
     if (split2 !== undefined) expect(split2).toBe("host talks 2");
   });
 
+  // Job 414 scene 4 (2026-10-20): a forced panel's seed was the beat's old cutaway, and the lane that
+  // wrote it was never told what its line needs. It starts from `showSubject` now, then the cutaway,
+  // and is rewritten from its OWN seed, never an older panel's.
+  it("starts a forced panel from what its line needs, then the old cutaway, rewritten from its own seed", () => {
+    const need = (i: number) => `what line ${i} needs`;
+    const scenes = Array.from({ length: 6 }, (_, i) =>
+      host(i, { showSubject: need(i), splitVisualSeed: `an older panel ${i}` })
+    );
+    enforceHostSplitMix(scenes);
+    const split = scenes.filter(s => s.splitVisual);
+    expect(split).toHaveLength(1);
+    expect(split[0].splitVisual).toBe(need(split[0].index));
+    expect(split[0].splitVisualSeed).toBeUndefined();
+    for (const s of scenes.filter(s => !s.splitVisual))
+      expect(s.splitVisualSeed).toBe(`an older panel ${s.index}`);
+    // No subject: the old cutaway, then the beat's own prompt, as before.
+    expect(panelSeedFor({ showSubject: "  ", brollVisual: "the apples", visualPrompt: "host talks" })).toBe("the apples");
+    expect(panelSeedFor({ visualPrompt: "host talks" })).toBe("host talks");
+  });
+
   it("never splits a CTA beat — the pitch is host full screen — and clears one Claude wrote", () => {
     const scenes = [
       host(0),
@@ -1726,6 +1747,14 @@ describe("enforceHostSplitMix", () => {
       const added = addMissingSplitsToUnrendered(scenes);
       expect(added).toEqual([]);
       expect(scenes.every(s => s.splitVisual === undefined)).toBe(true);
+    });
+
+    it("a rendered beat keeps its panel seed too", () => {
+      const scenes = Array.from({ length: 6 }, (_, i) =>
+        withClip(host(i, { splitVisualSeed: `old ${i}` }))
+      );
+      addMissingSplitsToUnrendered(scenes);
+      scenes.forEach((s, i) => expect(s.splitVisualSeed).toBe(`old ${i}`));
     });
 
     it("leaves a rendered composite alone instead of clearing it back", () => {
@@ -2787,6 +2816,92 @@ describe("enhanceBrollPrompts — nothing its line does not name, nothing in a p
   it("the rules name no channel's things", () => {
     for (const rule of [NOTHING_UNNAMED_RULE, NOTHING_THERE_RULE])
       expect(rule).not.toMatch(/axe|froe|drawknife|cabin|tool|robin|holly|crock/i);
+  });
+});
+
+// A SPLIT PANEL IS WRITTEN FROM WHAT ITS LINE NEEDS, AND KEEPS THE TOOL ITS LINE NAMES (2026-10-20,
+// job 414 scenes 4 and 22). The rows are the job's own.
+describe("enhanceBrollPrompts — a split panel from its line, keeping the tool it names", () => {
+  const HOST =
+    "the channel's host, exactly as in their host photo, seated in a chair talking directly to the camera";
+  const LINE_4 =
+    "The roof was split oak, the walls were hewn poplar, and the door hung on wooden pins with a string for a lock. But on the back wall hung";
+  const CABIN =
+    "an old log cabin seen from outside, its walls made of hewn logs with scalloped axe marks and pale chinking, a roof of split oak boards, and a plank door hung on wooden pins with a latch string hanging out";
+  const LINE_22 = "They went up rough as shakes, or got shaved thin at one end with a drawknife to make shingles.";
+  const HANDS_22 =
+    "the host's hands pulling a drawknife by its two bent end handles along one end of a thin pale board, curling off shavings so that end tapers thinner";
+  const SHINGLE =
+    "a split shingle lying on a log outside the cabin, one end shaved thin to a smooth taper, fresh pale wood curls scattered beside it";
+  const panelScene = (index: number, scriptText: string, need: string, extra: Partial<StoryboardScene> = {}) =>
+    ({
+      index,
+      narration: scriptText,
+      scriptText,
+      hostPresent: true,
+      visualPrompt: HOST,
+      showSubject: need,
+      brollVisual: need,
+      splitVisual: need,
+      ...extra,
+    }) as StoryboardScene;
+  const panelMessage = () =>
+    (mockInvoke.mock.calls.map(c => c[0].userMessage as string).find(m => m.includes("RIGHT PANEL")) ?? "");
+
+  afterEach(() => {
+    mockInvoke.mockReset();
+  });
+
+  it("414 scene 4: the panel writer is told the line's subject as the panel's, before the narration", async () => {
+    mockInvoke.mockResolvedValue({ text: "An old log cabin seen from outside, split oak roof, a plank door on wooden pins" } as any);
+    const scenes = [panelScene(4, LINE_4, CABIN)];
+    await enhanceBrollPrompts(scenes, baseParams);
+    const sent = panelMessage();
+    expect(sent).toContain(`MUST SHOW (what this line needs — the subject of the panel, drawn with NO person): ${CABIN}\n`);
+    expect(sent.indexOf("MUST SHOW")).toBeLessThan(sent.indexOf("Scene narration:"));
+    expect(scenes[0].splitVisual).toBe("An old log cabin seen from outside, split oak roof, a plank door on wooden pins");
+    expect(scenes[0].visualPrompt).toBe(HOST);
+  });
+
+  it("a panel the panel check rewrote since is not pulled back to its old subject (job 409 scene 6)", async () => {
+    const PHONE = "the black smartphone resting face-up on a quiet desk in soft gray morning light, the room still";
+    mockInvoke.mockResolvedValue({ text: PHONE } as any);
+    const scenes = [
+      panelScene(
+        6,
+        "Maybe you have done that arithmetic. Most people past sixty have — usually in silence, usually in some ordinary place,",
+        "the host sitting alone quietly in his study, deep in thought",
+        { splitVisual: PHONE, splitVisualSeed: PHONE }
+      ),
+    ];
+    await enhanceBrollPrompts(scenes, baseParams);
+    expect(panelMessage()).toContain(SPLIT_PANEL_PERSON_FREE_DIRECTIVE);
+    expect(panelMessage()).not.toContain("MUST SHOW (what this line needs");
+    expect(scenes[0].splitVisual).toBe(PHONE);
+  });
+
+  it("414 scene 22: a rewrite of the result alone gets the drawknife back, resting on the work", async () => {
+    mockInvoke.mockResolvedValue({ text: SHINGLE } as any);
+    const scenes = [panelScene(22, LINE_22, HANDS_22)];
+    await enhanceBrollPrompts(scenes, baseParams);
+    expect(scenes[0].splitVisual).toBe(`${SHINGLE}, a drawknife resting on the work, unattended.`);
+    // The seed a redraw rewrites from is untouched.
+    expect(scenes[0].splitVisualSeed).toBe(HANDS_22);
+    // A rewrite that kept the tool is left as written.
+    mockInvoke.mockReset();
+    const KEPT = "a thin pale board on a stump, one end shaved to a taper, a drawknife lying across it";
+    mockInvoke.mockResolvedValue({ text: KEPT } as any);
+    const kept = [panelScene(22, LINE_22, HANDS_22)];
+    await enhanceBrollPrompts(kept, baseParams);
+    expect(kept[0].splitVisual).toBe(KEPT);
+  });
+
+  it("the panel directive weighs most of the line and keeps the named tool, in neutral words", () => {
+    expect(SPLIT_PANEL_PERSON_FREE_DIRECTIVE).toMatch(/a TOOL the narration says the job is done with/);
+    expect(SPLIT_PANEL_PERSON_FREE_DIRECTIVE).toMatch(/stays in the panel, resting on the work, unattended/);
+    expect(SPLIT_PANEL_PERSON_FREE_DIRECTIVE).toMatch(/what MOST of it is about, by how long each part is said/);
+    expect(SPLIT_PANEL_PERSON_FREE_DIRECTIVE).toMatch(/A MUST SHOW line, when given, IS that subject/);
+    expect(SPLIT_PANEL_PERSON_FREE_DIRECTIVE).not.toMatch(/\b(?:shingles?|drawknife|cabin|roof|oak|poplar|back wall|froe)\b/i);
   });
 });
 

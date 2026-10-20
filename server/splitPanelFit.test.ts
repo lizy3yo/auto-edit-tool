@@ -18,6 +18,10 @@ import {
   applyPanelFixes,
   FIT_SYSTEM,
   fitSplitPanelsToLines,
+  keepPanelTools,
+  leadIntoNext,
+  lineTool,
+  withLineTool,
   oneThingOnly,
   oneThingPanels,
   PANEL_FIT_RULES,
@@ -389,5 +393,200 @@ describe("the panel pass end to end (canned answer — the plumbing, not the mod
     const r = await fitSplitPanelsToLines(scenes, { keyThings: GARAGE });
     expect(r).toEqual({ checked: 0, fixed: 0 });
     expect(scenes[0].splitVisual).toBe(PANEL_19);
+  });
+});
+
+// A PANEL IS ABOUT ITS WHOLE LINE, AND KEEPS THE TOOL ITS LINE NAMES (round 14, 2026-10-20). Job 414
+// (an Appalachian woodworking film): scene 4's panel showed the inside back wall for ten seconds while
+// the voice described the cabin from outside — only the line's last six words, the start of the next
+// sentence, were about that wall — and scene 22's panel showed a finished shingle under "got shaved
+// thin at one end with a drawknife", the tool gone with the hands. The rows are the job's own.
+describe("a panel is about its whole line, and keeps the tool its line names (job 414 scenes 4 and 22)", () => {
+  const LINE_4 =
+    "The roof was split oak, the walls were hewn poplar, and the door hung on wooden pins with a string for a lock. But on the back wall hung";
+  const WALL_4 =
+    "A back wall inside an abandoned log cabin, hewn poplar logs showing axe marks, with an axe, froe, and drawknife hung on the wall above a worn wooden shelf.";
+  const LINE_22 = "They went up rough as shakes, or got shaved thin at one end with a drawknife to make shingles.";
+  const SHINGLE_22 =
+    "a split shingle lying on a log outside the cabin, one end shaved thin to a smooth taper, fresh pale wood curls scattered beside it";
+  const CABIN_THINGS: KeyThing[] = [
+    { main: true, name: "steel tools", look: "an axe, a froe, and a drawknife hanging together on the cabin's back interior wall" },
+    { name: "split shingle", look: "a thin pale wood board, one end shaved thinner by a drawknife, tapered edge" },
+  ];
+
+  beforeEach(() => mockInvoke.mockReset());
+
+  it("414 scene 4: the words that only begin the next sentence are found, with about how long they are said", () => {
+    expect(leadIntoNext(LINE_4, 9.9482)).toEqual({ words: "But on the back wall hung", sec: 2.1 });
+    expect(leadIntoNext(LINE_4)).toEqual({ words: "But on the back wall hung" });
+  });
+
+  it("a whole clause, a line of one sentence, a lone word or a long tail is no lead-in", () => {
+    // A line that ends its sentence.
+    expect(
+      leadIntoNext("The roof was split oak, the walls were hewn poplar, and the door hung on wooden pins with a string for a lock.")
+    ).toBeUndefined();
+    // Job 409 scene 3: mostly that second sentence, and a whole clause — its panel of the cards is right.
+    expect(
+      leadIntoNext("His father made it to eighty-one. And somewhere between the sympathy cards and the cards for new grandbabies,")
+    ).toBeUndefined();
+    // Job 153 scene 452: a whole clause that is the line's point.
+    expect(leadIntoNext("The Japanese look people paid me for wasn't the precision work. It was the fire,")).toBeUndefined();
+    // Job 410 scene 10: one sentence, cut mid-clause, with nothing before it.
+    expect(
+      leadIntoNext("Today you're getting fourteen things flight attendants will quietly hand over for free, depending on")
+    ).toBeUndefined();
+    // Job 335 scene 15: one word names nothing.
+    expect(leadIntoNext("Earlier in a way that decides whether anybody wakes up on their own. So")).toBeUndefined();
+    // More than a third of the line.
+    expect(
+      leadIntoNext("I won't pretend. What I made was a plain wool blanket that kept a whole family warm all winter and")
+    ).toBeUndefined();
+  });
+
+  it("the panel check is told the lead-in; a line that ends its sentence is sent as before", async () => {
+    const scenes = [
+      panel(4, LINE_4, WALL_4, { audioDuration: 9.9482 }),
+      panel(22, LINE_22, SHINGLE_22, { audioDuration: 6.6774, keyThing: "split shingle" }),
+    ];
+    mockInvoke.mockResolvedValueOnce({ text: JSON.stringify({ pictures: [] }) });
+    await fitSplitPanelsToLines(scenes, { keyThings: CABIN_THINGS });
+    const sent: string = mockInvoke.mock.calls[0][0].userMessage;
+    expect(sent).toContain(
+      `#0 PANEL (9.9 s) (ends on "But on the back wall hung", about 2.1 s): said "${LINE_4}" | shows: ${WALL_4}`
+    );
+    expect(sent).toContain(`#1 PANEL (6.7 s): said "${LINE_22}" | shows: ${SHINGLE_22}`);
+  });
+
+  it("414 scene 22: the check's rewrite of the result alone gets the drawknife, resting on the work", async () => {
+    const scenes = [
+      panel(22, LINE_22, "a pale board on a stump, one end tapered, a drawknife beside it", { audioDuration: 6.6774 }),
+    ];
+    mockInvoke.mockResolvedValueOnce({
+      text: JSON.stringify({
+        pictures: [{ id: 0, about: "shaving shingles thin", shows_it: false, show: SHINGLE_22, thing: "split shingle", stage: "done" }],
+      }),
+    });
+    const r = await fitSplitPanelsToLines(scenes, { keyThings: CABIN_THINGS });
+    expect(r).toEqual({ checked: 1, fixed: 1 });
+    const want = `${SHINGLE_22}, a drawknife resting on the work, unattended.`;
+    expect(scenes[0].splitVisual).toBe(want);
+    // A later redraw rewrites from the same words.
+    expect(scenes[0].splitVisualSeed).toBe(want);
+    // The tool is no key thing of the panel: it is drawn from the shingle's pictures.
+    expect(scenes[0].keyThing).toBe("split shingle");
+    expect(scenes[0].otherKeyThings).toBeUndefined();
+  });
+
+  it("the tool a line says its job is done with — never a ruled-out tool or a word naming something else", () => {
+    expect(lineTool(LINE_22)).toBe("drawknife");
+    expect(
+      lineTool("For the handholds, I drilled a hole at each end of a slot in those end pieces and cut out between the holes with a jigsaw.")
+    ).toBe("jigsaw");
+    expect(
+      lineTool("sawed the notches through all of them at once with a cheap pull saw, and cleaned each notch out with a little chisel,")
+    ).toBe("cheap pull saw");
+    expect(lineTool("where you can get at it with your scissors.")).toBe("scissors");
+    expect(lineTool("Trim it with a pair of shears and you are done.")).toBe("pair of shears");
+    // Ruled out by its own clause, or by what the sentence forbids.
+    expect(lineTool("You don't need to shave it with a drawknife, a sharp knife works.")).toBeUndefined();
+    expect(lineTool(LINE_22, "a drawknife on the shingle")).toBeUndefined();
+    // The tool word is not the end of the noun, or names no tool at all.
+    expect(lineTool("Start the hole with a drill bit sized to the screw.")).toBeUndefined();
+    expect(lineTool("Two passengers settled in with a plane seat each.")).toBeUndefined();
+    expect(lineTool("Face it with a level head and it goes fine.")).toBeUndefined();
+    expect(lineTool("They went up rough as shakes, or got shaved thin at one end to make shingles.")).toBeUndefined();
+  });
+
+  it("a panel that names the tool, one about another sentence, or one on the host's body is left alone", () => {
+    // A panel that has the drawknife, however it is spelt.
+    const KEPT = "a pale board on a stump, one end tapered, a drawknife lying across it";
+    expect(withLineTool(KEPT, LINE_22)).toBe(KEPT);
+    expect(withLineTool("a pale board, one end tapered, a draw knife lying across it", LINE_22)).toBe(
+      "a pale board, one end tapered, a draw knife lying across it"
+    );
+    // The same kind of tool written another way: a hand saw for a handsaw, a paintbrush for a paint brush.
+    const SAWN = "a pine board with a slot, a hand saw lying beside it";
+    expect(withLineTool(SAWN, "Cut the slot with a handsaw.")).toBe(SAWN);
+    const TRIM = "freshly painted white window trim, a paintbrush resting on the open can";
+    expect(withLineTool(TRIM, "Paint the trim with a paint brush.")).toBe(TRIM);
+    // Jobs 118 and 122: the chisel is the first sentence's, the panel is the second's cleat.
+    const CLEAT =
+      "Wooden shelf back edge showing a slim wooden cleat fastened with screws, clamped horizontally on a workbench under even indoor daylight.";
+    const LINE_CLEAT =
+      "knock the chunks out, and pare it flat with the chisel, same rule as before, board clamped down and both hands behind the edge. When you hang it, screw a hidden cleat on the back into a wall stud,";
+    expect(withLineTool(CLEAT, LINE_CLEAT)).toBe(CLEAT);
+    // A panel drawn on the host's own hair stays on the host.
+    const HAIR = "freshly trimmed silver hair ends, a close view";
+    expect(withLineTool(HAIR, "Trim the ends with a pair of scissors every eight weeks.")).toBe(HAIR);
+    // Never twice.
+    const once = withLineTool(SHINGLE_22, LINE_22);
+    expect(once).toBe(`${SHINGLE_22}, a drawknife resting on the work, unattended.`);
+    expect(withLineTool(once, LINE_22)).toBe(once);
+    // A tool said only in the plural is drawn as a pair.
+    expect(
+      withLineTool("Finished rag quilt squares laid flat, their exposed seams standing proud", "where you can get at it with your scissors.")
+    ).toBe("Finished rag quilt squares laid flat, their exposed seams standing proud, a pair of scissors resting on the work, unattended.");
+  });
+
+  it("a tool word that only names its marks puts no tool in the picture (job 407 scene 19, the same line)", () => {
+    // Job 407's panel asked for "drawknife strokes", and the film hung the drawknife on the wall
+    // behind a bare board: the strokes are not the tool.
+    const STROKES =
+      "A pale oak board held flat on a work surface, one end shaved thin by drawknife strokes, wood curls resting on the board and ground nearby.";
+    expect(withLineTool(STROKES, LINE_22)).toBe(
+      "A pale oak board held flat on a work surface, one end shaved thin by drawknife strokes, wood curls resting on the board and ground nearby, a drawknife resting on the work, unattended."
+    );
+    expect(withLineTool("a pine board with a slot, fresh saw marks along its edge", "Cut the slot with a handsaw.")).toBe(
+      "a pine board with a slot, fresh saw marks along its edge, a handsaw resting on the work, unattended."
+    );
+    // A sawhorse is no saw.
+    expect(withLineTool("a pine board cut in two on sawhorses", "Cut the board with a saw.")).toBe(
+      "a pine board cut in two on sawhorses, a saw resting on the work, unattended."
+    );
+  });
+
+  it("a tool said in the plural or as a sheet reads as English; a tool said as a figure of speech is none", () => {
+    expect(withLineTool("a pine box with clean corners", "Pare the corners with the chisels, then oil it.")).toBe(
+      "a pine box with clean corners, chisels resting on the work, unattended."
+    );
+    expect(withLineTool("a pine box with softened edges", "Smooth the edges with some sandpaper.")).toBe(
+      "a pine box with softened edges, a sheet of sandpaper resting on the work, unattended."
+    );
+    for (const idiom of [
+      "Some buyers come with an axe to grind, and they will leave a bad review.",
+      "Go over every listing with a fine-tooth comb.",
+      "He painted the whole market with a broad brush.",
+      "They tar every seller with the same brush.",
+    ]) {
+      expect(lineTool(idiom), idiom).toBeUndefined();
+      expect(withLineTool("a booth at a weekend market", idiom), idiom).toBe("a booth at a weekend market");
+    }
+  });
+
+  it("a place name's full stop is no sentence end", () => {
+    expect(leadIntoNext("We drove all the way across three counties to St. Louis to buy")).toBeUndefined();
+    expect(leadIntoNext("The whole lot came from the old hardware store run by Mr. Jenkins down the road")).toBeUndefined();
+    // A real sentence end is still found.
+    expect(leadIntoNext("We drove all the way across three counties to the market. And there it")).toEqual({ words: "And there it" });
+  });
+
+  it("keepPanelTools changes only the panels asked for, never a CTA panel", () => {
+    const a = panel(1, LINE_22, SHINGLE_22);
+    const b = panel(2, LINE_22, SHINGLE_22);
+    const cta = { ...panel(3, LINE_22, SHINGLE_22), cta: true } as StoryboardScene;
+    expect(keepPanelTools([a, b, cta], s => s !== b)).toBe(1);
+    expect(a.splitVisual).toMatch(/a drawknife resting on the work, unattended\.$/);
+    expect(b.splitVisual).toBe(SHINGLE_22);
+    expect(cta.splitVisual).toBe(SHINGLE_22);
+  });
+
+  it("the panel rules weigh the whole line and keep the named tool, in neutral words", () => {
+    expect(PANEL_FIT_RULES).toMatch(/A TOOL the line says the job is done with/);
+    expect(PANEL_FIT_RULES).toMatch(/A panel of the result alone, the named tool left out, is WRONG/);
+    expect(PANEL_FIT_RULES).toMatch(/shows what MOST of the line is about, by how\s+long each part is said/);
+    expect(PANEL_FIT_RULES).toMatch(/A PANEL marked \(ends on "…"\)/);
+    expect(PANEL_FIT_RULES).not.toMatch(CHANNEL_OBJECTS);
+    expect(PANEL_FIT_RULES).not.toMatch(/\b(?:shingles?|drawknife|cabin|roof|oak|poplar|back wall|froe)\b/i);
   });
 });
