@@ -115,6 +115,18 @@ describe("a number graphic counts a real figure, never a figure of speech (job 4
     expect(said("a thousand ways to get it wrong.", 1000)).toBe("a thousand ways to");
     expect(said("a hundred times over.", 100)).toBe("a hundred times over.");
   });
+
+  it("a count a maker gives is no figure of speech: a hundred pieces sold, a thousand words a day; a million pieces is", () => {
+    const said = (s: string, value: number) => {
+      const words = s.split(" ").map((text, i) => ({ text, start: i, end: i + 0.5 }));
+      return figureOfSpeech(words, 0, value);
+    };
+    expect(said("a hundred pieces at that fair.", 100)).toBeUndefined();
+    expect(said("a thousand pieces in the puzzle.", 1000)).toBeUndefined();
+    expect(said("a thousand words a day.", 1000)).toBeUndefined();
+    expect(said("a hundred questions per class.", 100)).toBeUndefined();
+    expect(said("a million pieces on the floor.", 1e6)).toBe("a million pieces on");
+  });
 });
 
 describe("a number's unit is the words said right after it (job 414's '24 skills' for '24 together')", () => {
@@ -151,6 +163,18 @@ describe("a number's unit is the words said right after it (job 414's '24 skills
   it("job 397's '$10 in fees' for '$10 off a $100 board' would be refused today (an approved card is kept as it is)", () => {
     expect(unitNotSaid("in fees", fees, wordAt(fees, "$10"), 10)).toBe("$10 off a $100 board.");
   });
+
+  it("a sign the transcriber writes on the number is said after it, and a unit said in the singular as a describing word is the same unit", () => {
+    // "$10" is "ten dollars", "15%." is "fifteen percent": the unit spelled out is said
+    expect(unitNotSaid("dollars", fees, wordAt(fees, "$10"), 10)).toBeUndefined();
+    expect(unitNotSaid("percent", adFee, wordAt(adFee, "15%."), 15)).toBeUndefined();
+    const w = "It was 40° outside, so leave a two-inch overhang on a six-foot fence.".split(" ").map((text, i) => ({ text, start: i, end: i + 0.5 }));
+    expect(unitNotSaid("degrees", w, 2, 40)).toBeUndefined();
+    expect(unitNotSaid("inches", w, 7, 2)).toBeUndefined();
+    expect(unitNotSaid("feet", w, 11, 6)).toBeUndefined();
+    // and the unit is still what is said: the same fence is not 6 "yards"
+    expect(unitNotSaid("yards", w, 11, 6)).toBe("six-foot fence.");
+  });
 });
 
 describe("a myth stamp stamps the belief the voice calls false (jobs 412 and 414)", () => {
@@ -177,6 +201,10 @@ describe("a myth stamp stamps the belief the voice calls false (jobs 412 and 414
     expect(own("My book says to wait a week")).toMatch(/host's own true statement/);
     expect(own("Her book says to wait a week")).toBeUndefined();
     expect(own("I always thought the paint was dry")).toBeUndefined();
+    // a bare "the title" is the film's own only when it then says something; "the video game…" may be the belief
+    expect(own("The title is too strong")).toMatch(/host's own true statement/);
+    expect(own("The video game makes kids violent")).toBeUndefined();
+    expect(own("The headline rate is what you pay")).toBeUndefined();
   });
 
   it("414: a stamp on what follows ('Since folk schools still teach plenty of these') is refused — he only softens the title, never calls anything false", () => {
@@ -247,6 +275,13 @@ describe("a before and after is a change the voice says (job 411's 'Hardly sings
     expect(span(words("In summer it sings all day; in winter it barely chirps."), [2, 5], [8, 10])).toBe(true);
     // "In winter it barely chirps; mostly it just clucks." — one season, said two ways
     expect(span(words("In winter it barely chirps; mostly it just clucks."), [2, 4], [6, 8])).toBe(false);
+    // "may" and "fall" are a time only where a word names one: "it may barely chirp" is no second season…
+    expect(span(words("In winter it may barely chirp; mostly it just clucks."), [3, 5], [7, 9])).toBe(false);
+    expect(span(words("In winter the leaves fall and it barely chirps; mostly it clucks."), [4, 8], [10, 11])).toBe(false);
+    // …"in March" and "by May" are
+    expect(span(words("In March it barely chirps; by May it sings all day."), [2, 4], [8, 10])).toBe(true);
+    // an old way the viewer is told to stop, and the new one: the catalogue's "old way replaced by a new one"
+    expect(span(words("Stop rinsing it with bleach; use plain vinegar."), [1, 4], [5, 7])).toBe(true);
   });
 });
 

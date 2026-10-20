@@ -778,17 +778,21 @@ function numberSaid(words: Word[], at: number, value: number): { toks: { tok: st
  * A ROUND NUMBER SAID TO MEAN "MANY" IS NO STATISTIC. Luca's job 412 (0:20) counted a big number up
  * 16, 77, 96, 100 and landed on "100 times" under "because she has made this crossing a hundred times
  * before" — a figure of speech; the script gives no count. A hundred, a thousand, a million or a billion
- * of TIMES, REASONS, WAYS, THINGS, QUESTIONS, IDEAS, EXCUSES, WORDS, STORIES or PIECES ("a million little
- * reasons") says "many". "Times" is a real measure as a rate or a ratio — "a hundred times a minute",
- * "a thousand times stronger", "a hundred times the size" — and a round count of anything else ("more
+ * of TIMES, REASONS, WAYS, THINGS, QUESTIONS, IDEAS, EXCUSES, WORDS or STORIES ("a million little
+ * reasons") says "many", and a million or a billion PIECES ("shattered into a million pieces") — a
+ * hundred or a thousand pieces is a count a maker gives ("I sold a hundred pieces at that fair"). Any of
+ * them as a RATE is a measure ("1,000 words a day", "a hundred times a minute"), and "times" as a ratio
+ * too ("a thousand times stronger", "a hundred times the size"); a round count of anything else ("more
  * than a hundred years", the same channel's job 411) is a fact. Returns the words as said, or undefined.
  * Pure.
  */
 const ROUND_FIGURES = new Set([100, 1000, 1e6, 1e9]);
-const FIGURE_NOUN = /^(?:times|reasons|ways|things|questions|ideas|excuses|words|stories|pieces)$/;
+const FIGURE_NOUN = /^(?:times|reasons|ways|things|questions|ideas|excuses|words|stories)$/;
+const FIGURE_NOUN_PAST_COUNTING = /^pieces$/;
 const FIGURE_DESCRIBING = /^(?:little|tiny|small|different|other|new|good|great|silly|crazy|possible)$/;
+const A_RATE = /^(?:a|an|per|each|every)$/;
 const TIMES_A_MEASURE =
-  /^(?:a|an|per|each|every|as|than|the|more|less|fewer|bigger|smaller|larger|faster|slower|longer|shorter|stronger|weaker|higher|lower|better|worse|cheaper|greater|heavier|lighter|louder|quieter|hotter|colder|harder|softer|deeper|wider|thicker|thinner|older|younger|safer|brighter)$/;
+  /^(?:as|than|the|more|less|fewer|bigger|smaller|larger|faster|slower|longer|shorter|stronger|weaker|higher|lower|better|worse|cheaper|greater|heavier|lighter|louder|quieter|hotter|colder|harder|softer|deeper|wider|thicker|thinner|older|younger|safer|brighter)$/;
 export function figureOfSpeech(words: Word[], at: number, value: number): string | undefined {
   if (!ROUND_FIGURES.has(value)) return undefined;
   const said = numberSaid(words, at, value);
@@ -797,7 +801,9 @@ export function figureOfSpeech(words: Word[], at: number, value: number): string
   const after = toks.slice(p + n).map(t => t.tok);
   const k = FIGURE_DESCRIBING.test(after[0] ?? "") ? 1 : 0;
   const noun = after[k];
-  if (!noun || !FIGURE_NOUN.test(noun) || (noun === "times" && TIMES_A_MEASURE.test(after[k + 1] ?? ""))) return undefined;
+  const next = after[k + 1] ?? "";
+  const many = !!noun && (FIGURE_NOUN.test(noun) || (value >= 1e6 && FIGURE_NOUN_PAST_COUNTING.test(noun)));
+  if (!many || A_RATE.test(next) || (noun === "times" && TIMES_A_MEASURE.test(next))) return undefined;
   const nounWord = toks[p + n + k].word;
   return words
     .slice(toks[p].word, Math.min(nounWord + 2, sentenceEnd(words, nounWord) + 1))
@@ -822,6 +828,23 @@ const WRITTEN_UNITS: [RegExp, string[]][] = [
 ];
 /** How far past the number a unit's words may run: "seven OF THE thieves", "nine TIMES out of 10". */
 const UNIT_REACH = 5;
+/** A sign the transcriber writes ON the number stands for words said right after it: "$10" is "ten
+ * dollars", "15%" is "fifteen percent", "40°" is "forty degrees". */
+const SIGNS_SAID: [RegExp, string][] = [
+  [/\$/, "dollars"],
+  [/%/, "percent"],
+  [/°/, "degrees"],
+  [/£/, "pounds"],
+  [/€/, "euros"],
+  [/¢/, "cents"],
+];
+/** Plurals the plain "-s" match (`sameWord`) misses — a unit is often said as a describing word, in
+ * the singular: "a six-foot fence" is 6 "feet", "a two-inch overhang" 2 "inches". */
+const IRREGULAR_PLURALS: Record<string, string> = { feet: "foot", teeth: "tooth", people: "person", children: "child", men: "man", women: "woman", geese: "goose", mice: "mouse" };
+const sameUnitWord = (a: string, b: string): boolean => {
+  if (sameWord(a, b) || a === `${b}es` || b === `${a}es`) return true;
+  return (IRREGULAR_PLURALS[a] ?? a) === (IRREGULAR_PLURALS[b] ?? b);
+};
 
 /**
  * THE UNIT IS SAID RIGHT AFTER THE NUMBER. Sam's job 414 (0:31) ended a number card "held the other /
@@ -830,8 +853,10 @@ const UNIT_REACH = 5;
  * skills. A unit's words are said in order within UNIT_REACH words after the number, in its own
  * sentence: "17 summers left", "seven of the thieves", "nine times out of 10", "Three piles." A short
  * unit as written is said in words ("15%" heard as "15%" or "percent", "2 a.m." as "two in the
- * morning"). Returns what is said after the number when the unit is not, else undefined — also when
- * the number itself cannot be found (the number check names that). Pure.
+ * morning"), a sign written on the number is said after it ("$10" is "ten dollars", `SIGNS_SAID`), and a
+ * unit said in the singular as a describing word is the same unit ("a six-foot fence", `sameUnitWord`).
+ * Returns what is said after the number when the unit is not, else undefined — also when the number
+ * itself cannot be found (the number check names that). Pure.
  */
 export function unitNotSaid(unit: unknown, words: Word[], at: number, value: number): string | undefined {
   if (typeof unit !== "string" || !unit.trim()) return undefined;
@@ -839,15 +864,15 @@ export function unitNotSaid(unit: unknown, words: Word[], at: number, value: num
   if (!said) return undefined;
   const { toks, p, n } = said;
   const numberWord = toks[p + n - 1].word;
-  // "15%." is one word, and its "%" is no token: the sign said with the number is its unit.
-  if (unit.trim() === "%" && words[numberWord].text.includes("%")) return undefined;
   const written = WRITTEN_UNITS.find(([re]) => re.test(unit.trim()));
-  const after = toks.slice(p + n).map(t => t.tok);
+  // "15%." is one word, and its "%" is no token: the sign is said with the number, right after it.
+  const signs = SIGNS_SAID.filter(([re]) => re.test(words[numberWord].text)).map(([, w]) => w);
+  const after = [...signs, ...toks.slice(p + n).map(t => t.tok)];
   const forms = [tokens(unit), ...(written?.[1] ?? []).map(f => tokens(f))].filter(f => f.length);
   const inOrder = (want: string[]) => {
     let j = 0;
     for (const w of want) {
-      while (j < Math.min(after.length, UNIT_REACH) && !sameWord(after[j], w)) j++;
+      while (j < Math.min(after.length, UNIT_REACH) && !sameUnitWord(after[j], w)) j++;
       if (j >= Math.min(after.length, UNIT_REACH)) return false;
       j++;
     }
@@ -869,8 +894,8 @@ export function unitNotSaid(unit: unknown, words: Word[], at: number, value: num
  * of the second's clause must say the change, the way round 11 asks the words between two values
  * before NumberLabel draws "vs":
  * - a time set against another, or a change said as one ("now", "used to", "no longer", "became",
- *   "instead", "replaced", "what you want is"…) — job 400's clock "that was background noise at 30 is
- *   now the loudest thing in the room";
+ *   "instead", "replaced", "what you want is", an old way the viewer is told to "stop" or "quit"…) —
+ *   job 400's clock "that was background noise at 30 is now the loudest thing in the room";
  * - a past state on the first side and a present one on the second ("was … is");
  * - or two different seasons, months or times of day.
  * Pure: the words, and where each side's "at" words are said (first and last word, film order).
@@ -880,11 +905,16 @@ const CHANGE_SAID = new RegExp(
     "\\b(?:now|nowadays|today|these days|anymore|any more|no longer|used to|back then|back when|at first|ago|once|later|after|afterwards?|before|until|till|since|then|eventually|finally|by the time|from then on)\\b",
     "\\b(?:bec[oa]me|becomes|becoming|turn(?:s|ed|ing)? (?:into|to)|grew into|grow(?:s|n)? into|chang(?:e|es|ed|ing)|(?:went|goes|gone|going|got) from|replac(?:e|es|ed|ing|ement)|swap(?:s|ped|ping)?|switch(?:es|ed|ing)?|upgrad(?:e|es|ed|ing)|instead|rather than|trad(?:e|es|ed|ing) (?:in|up|for))\\b",
     "\\bwhat you (?:want|need)\\b",
+    // An old way replaced by a new one: "Stop rinsing it with bleach; use vinegar."
+    "\\b(?:stop(?:s|ped|ping)?|quit(?:s|ting)?|ditch(?:es|ed|ing)?|no more)\\b",
   ].join("|")
 );
 const PAST_STATE = /\b(?:was|were|had|used)\b/;
 const PRESENT_STATE = /\b(?:is|are|has|have)\b|'s\b|'re\b/;
-const TIME_NAMES = /\b(spring|summer|fall|autumn|winter|morning|afternoon|evening|night|dawn|dusk|january|february|march|april|may|june|july|august|september|october|november|december)\b/g;
+// "May", "March" and "fall" are a time only after a word that names one ("in May", "this fall",
+// "every fall"): "it may barely chirp" or "the leaves fall" beside "in winter" is no second season.
+const TIME_NAMES =
+  /\b(spring|summer|autumn|winter|morning|afternoon|evening|night|dawn|dusk|january|february|april|june|july|august|september|october|november|december)\b|\b(?:in|by|until|till|since|from|through|this|last|next|every|each|early|late|mid|the|that|of)\s+(fall|march|may)\b/g;
 export function changeSaid(words: Word[], a: { first: number; last: number }, b: { first: number; last: number }): boolean {
   const [one, two] = a.first <= b.first ? [a, b] : [b, a];
   const from = Math.max(sentenceStart(words, one.first), one.first - 3);
@@ -893,7 +923,7 @@ export function changeSaid(words: Word[], a: { first: number; last: number }, b:
   const all = plainText(words.slice(from, to + 1));
   if (CHANGE_SAID.test(all)) return true;
   if (PAST_STATE.test(plainText(words.slice(from, one.last + 1))) && PRESENT_STATE.test(plainText(words.slice(one.last + 1, to + 1)))) return true;
-  const seasons = new Set(Array.from(all.matchAll(TIME_NAMES), m => (m[1] === "autumn" ? "fall" : m[1])));
+  const seasons = new Set(Array.from(all.matchAll(TIME_NAMES), m => (m[1] === "autumn" ? "fall" : (m[1] ?? m[2]))));
   return seasons.size >= 2;
 }
 
@@ -904,7 +934,7 @@ export function changeSaid(words: Word[], a: { first: number; last: number }, b:
  *   phrase, simply dropped it. The phrase is REQUIRED — it is the belief;
  * - the host's own true statement about a claim: Sam's job 414 (0:47) stamped "The title says lost" —
  *   the title does say it, so the card called the film's own title a myth. A phrase that opens on the
- *   film's own words ("the title", "this video", "my book") or the host saying or naming something
+ *   film's own words ("the title says", "this video", "my book") or the host saying or naming something
  *   ("I said", "we call it") is never the belief;
  * - a claim the voice never calls false: the same line goes on "which is too strong" — a softening, not
  *   a myth. Around the phrase (the sentence before it, its own, three after) the narrator must name it
@@ -914,7 +944,13 @@ export function changeSaid(words: Word[], a: { first: number; last: number }, b:
  * Returns why, or undefined. Pure: the cue as planned, as resolved, and the words.
  */
 const OPENERS_OF_A_LINE = /^(?:(?:so|and|but|now|well|okay|see)[\s,]+)*/;
-const FILMS_OWN_WORDS = /^(?:(?:the|this|my|our)\s+(?:(?:video|channel|book)'s\s+)?(?:title|video|channel|episode|script|thumbnail|headline)|(?:this|my|our)\s+(?:book|list))\b/;
+// "This video", "my book" are the film's own; after a bare "the" only when it then says something —
+// "the title says", "the video is" — since "the video game", "the headline rate" or "the channel lock"
+// may well be the belief.
+const FILMS_OWN_WORDS = new RegExp(
+  "^(?:(?:this|my|our)\\s+(?:(?:video|channel|book)'s\\s+)?(?:title|video|channel|episode|script|thumbnail|headline|book|list)\\b" +
+    "|the\\s+(?:(?:video|channel|book)'s\\s+)?(?:title|video|channel|episode|script|thumbnail|headline)\\s+(?:says|said|reads|read|calls|called|is|was|promises|promised|claims|claimed|names|named|asks|asked)\\b)"
+);
 const HOST_SAYS = /^(?:i|we)(?:\s+[a-z']+){0,2}\s+(?:say|says|said|call|calls|called|name|named|titled|wrote|write|promised|mean|meant)\b/;
 const CALLED_FALSE = new RegExp(
   [
