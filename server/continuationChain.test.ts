@@ -26,6 +26,7 @@ import {
   pictureSettled,
   recomposeFrom,
   samePeople,
+  sharedWords,
   topicPictureBefore,
 } from "./pictureMemory";
 import { buildStillPrompt, continuedMomentClause, memoryClause, memoryFields } from "./longformVideo";
@@ -142,6 +143,95 @@ describe("the picture a topic continues, by its chain (topicPictureBefore)", () 
     const m = await memoryFor(b[6], 0);
     expect(m).toMatchObject({ urls: ["https://r2/412/still-src-3.png"], own: true, before: 0, continues: true });
   });
+
+  // The other side of the same rule (review of round 14): a continuation whose words are about the
+  // list's LAST ITEM carries on from that item, and is laid beside it — the copy a viewer could see.
+  it("352-170: 'which is bark edge left along the side' continues the wane close-up, never the cull bins", () => {
+    const board = "rough-sawn board";
+    const b = [
+      pic(165, "culls and shorts bins at the end of the lumber yard racks", { keyThing: "culls and shorts bins" }),
+      pic(166, "close-up of a rough oak board face with a round dark brown knot about the size of a coin, the grain lines curving around it", {
+        keyThing: "culls and shorts bins",
+        listCut: true,
+      }),
+      pic(168, "close-up of a rough oak board with a pale cream band along one edge, clearly lighter than the darker tan-brown wood beside it", {
+        keyThing: board,
+        partOf: board,
+        listCut: true,
+      }),
+      pic(169, "close-up of one long edge of a rough oak board where a strip of rough brown-grey bark replaces the square corner", {
+        keyThing: board,
+        partOf: board,
+        listCut: true,
+      }),
+      pic(170, "close-up of a rough oak board's side edge with a strip of rough brown-grey bark and rounded log surface left along it in place of a square corner", {
+        keyThing: board,
+        partOf: board,
+        sameShot: true,
+      }),
+    ];
+    expect(topicPictureBefore(b, b[4])?.index).toBe(169);
+    expect(continuedPicture(b, b[4])?.index).toBe(169);
+    expect(nearCopyPartnerFor(b, b[4])?.index).toBe(169);
+    expect(memorySourcesFor(b, b[4]).map(s => s.index)).toContain(169);
+  });
+
+  it("352-117 and 392-32: the end grain and the necklace at the window carry on from the last item", () => {
+    const board = "rough-sawn board";
+    const grain = [
+      pic(114, "planer shavings piled loosely beneath the benchtop planer in the garage", { keyThing: "planer shavings" }),
+      pic(115, "host sighting down a rough-sawn board held at eye level in the yard", { keyThing: board, listCut: true, ...atWork }),
+      pic(116, "close-up of the end grain on a rough-sawn board end", { keyThing: board, listCut: true }),
+      pic(117, "close-up of end grain showing growth rings running straight up and down through the board thickness", {
+        keyThing: board,
+        sameShot: true,
+      }),
+    ];
+    expect(topicPictureBefore(grain, grain[3])?.index).toBe(116);
+    expect(nearCopyPartnerFor(grain, grain[3])?.index).toBe(116);
+    const neck = [
+      pic(29, "pearl strand necklace held against a sweater neckline, close view", { keyThing: "Pearl strand", humanPresent: true }),
+      pic(30, "hands holding a necklace up near the face beside a bright window", {
+        keyThing: "necklace collection",
+        listCut: true,
+        humanPresent: true,
+      }),
+      pic(31, "necklace held at the neck beside a bright window, daylight bouncing off it onto the skin under the chin, close view", {
+        keyThing: "Window",
+        listCut: true,
+        humanPresent: true,
+      }),
+      pic(32, "a necklace held under the chin catching light from the window, close view", {
+        keyThing: "necklace collection",
+        sameShot: true,
+        humanPresent: true,
+      }),
+    ];
+    expect(topicPictureBefore(neck, neck[3])?.index).toBe(31);
+    expect(nearCopyPartnerFor(neck, neck[3])?.index).toBe(31);
+  });
+
+  it("with nothing before the list to continue, the last item is it, as before (346-14 after the quilt's blocks)", () => {
+    const quilt = "sampler quilt";
+    const host = pic(10, "", { showSubject: undefined, visualPrompt: "the host talking to the camera", hostPresent: true });
+    const b = [
+      host,
+      pic(13, "close-up of a horizontal row of dark triangles on light backgrounds, all pointing the same way, running across the middle of the quilt", {
+        keyThing: quilt,
+        partOf: quilt,
+        listCut: true,
+      }),
+      pic(14, "sampler quilt spread out showing twelve pieced blocks", { keyThing: quilt, sameShot: true }),
+    ];
+    expect(topicPictureBefore(b, b[2])?.index).toBe(13);
+  });
+
+  it("subject words: views, framing and little words aside, each word by its stem", () => {
+    const b = job412();
+    expect(sharedWords(b[1], b[6])).toBe(5); // cat, walk, across, owner, bed
+    expect(sharedWords(b[5], b[6])).toBe(2); // cat, owner
+    expect(sharedWords(pic(1, `a dog asleep on the porch${OTHER_VIEWS[0]}`), pic(2, "a close view of the frame"))).toBe(0);
+  });
 });
 
 describe("a continuation of no key thing is drawn from what it continues (keylessContinued)", () => {
@@ -248,6 +338,16 @@ describe("413-16 at render: after scene 15, from it, told what it lends", () => 
     expect(varietyLanes(s)).toEqual(["from:15"]);
   });
 
+  it("a pass keeps its answers only while it reads the film; a call after it reads the film afresh", () => {
+    const b = job413();
+    attachMemory(b, []);
+    expect(memoryView(b[2])).toBe(REDRAW_CAMERAS[0]);
+    b[2].showSubject = b[2].visualPrompt = "a dog asleep on the porch steps";
+    expect(keylessContinued(b, b[2])).toBeUndefined();
+    attachMemory(b, []);
+    expect(memoryView(b[2])).toBeUndefined();
+  });
+
   it("drawn with nobody in it, the clause takes the things alone and no person from the reference", () => {
     const s = {
       ...job413()[2],
@@ -265,8 +365,9 @@ describe("413-16 at render: after scene 15, from it, told what it lends", () => 
 
   it("405-17: a partner that is no memory of it is waited for too — only while the near-copy check runs", async () => {
     // "a tabby cat's white-socked paw stepping across the bed sheets" (the cat's paws) is marked to
-    // continue past the list item before it to scene 13, the wide bedroom: a picture of another key
-    // thing, so no memory of it — only the near-copy check lays the two side by side.
+    // continue, and its words are closer to the list item right before it (tabby, cat, bed) than to
+    // scene 13, the wide bedroom (cat, bed): it continues the item, a picture of another key thing, so
+    // no memory of it — only the near-copy check lays the two side by side.
     const run = async (variety: boolean) => {
       if (variety) delete process.env.PICTURE_VARIETY;
       else process.env.PICTURE_VARIETY = "0";
@@ -280,14 +381,14 @@ describe("413-16 at render: after scene 15, from it, told what it lends", () => 
       ];
       attachMemory(b, b);
       expect(memorySourcesFor(b, b[2])).toEqual([]);
-      expect(nearCopyPartner(b[2])).toBe(b[0]);
+      expect(nearCopyPartner(b[2])).toBe(b[1]);
       let done = false;
       const waiting = memoryFor(b[2], 5_000).then(m => ((done = true), m));
       await new Promise(r => setTimeout(r, 20));
       const before = done;
-      b[0].pictureUrl = "https://r2/405/still-src-13.png";
-      pictureSettled(b[0]);
+      b[1].pictureUrl = "https://r2/405/still-src-16.png";
       pictureSettled(b[1]);
+      pictureSettled(b[0]);
       expect((await waiting).urls).toEqual([]);
       return before;
     };

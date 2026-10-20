@@ -7896,4 +7896,27 @@ describe("round 14: a continuation knows what it continues (jobs 413 and 412)", 
     expect(keylessContinued(b, b[2])).toBeUndefined();
     expect(memorySourcesFor(b, b[2])).toEqual([]);
   });
+
+  it("352: a continuation about the list's last item carries on from it — the bark edge after 'or a little wane,'", async () => {
+    // The other side of the 412 case: "which is bark edge left along the side" is described as nearly the
+    // same close-up as the wane item before it is. Paired with the cull bins before the list, a copy
+    // would go unchecked; its words share more with the item than with the bins.
+    const { continuedPicture, nearCopyPartnerFor } = await import("./pictureMemory");
+    const board = "rough-sawn board";
+    const b = [
+      row(165, "culls and shorts bins at the end of the lumber yard racks", { keyThing: "culls and shorts bins" }),
+      row(169, "close-up of one long edge of a rough oak board where a strip of rough brown-grey bark replaces the square corner", {
+        keyThing: board,
+        partOf: board,
+        listCut: true,
+      }),
+      row(170, "close-up of a rough oak board's side edge with a strip of rough brown-grey bark and rounded log surface left along it in place of a square corner", {
+        keyThing: board,
+        partOf: board,
+        sameShot: true,
+      }),
+    ];
+    expect(continuedPicture(b, b[2])?.index).toBe(169);
+    expect(nearCopyPartnerFor(b, b[2])?.index).toBe(169);
+  });
 });

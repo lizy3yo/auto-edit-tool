@@ -25,6 +25,7 @@ import {
   repeatsTopic,
   sameSubject,
   showsScreen,
+  topicWords,
   viewIndexOf,
   withoutPersonLines,
 } from "./shotList";
@@ -146,16 +147,62 @@ export function memorySourcesFor(
  * walk back skips the list's items and its group picture (`listSet`), and an operator's image or a book
  * cover set in between; it stops at a host take or a split screen, where a topic ends
  * (`breakTopicsAtHostTakes`). A list item keeps the picture right before it: items are never inserts in
- * their own list. Undefined when what it reaches is not a drawn full-frame picture. Pure.
+ * their own list.
+ * The list's LAST ITEM is still what it continues when the picture's words are about that item, not
+ * the picture before the list (`sharedWords`: no fewer of its words). Job 352 scene 170 ("…a rough oak
+ * board's side edge with a strip of rough brown-grey bark…", "which is bark edge left along the side")
+ * carries on from the item "or a little wane," described as nearly the same close-up; paired with
+ * the cull bins before the list, the one copy a viewer could see would go unchecked — so would job 352
+ * scene 117 after the end-grain close-up, and job 392 scene 32 after the necklace held to the window.
+ * Scene 8 shares five words with scene 3 and two with the "ribs" close-up. With no picture before the
+ * list to continue, the last item is it, as before. Undefined when what it reaches is not a drawn
+ * full-frame picture. Pure.
  */
 export function topicPictureBefore(scenes: StoryboardScene[], s: StoryboardScene): StoryboardScene | undefined {
   const i = scenes.indexOf(s);
   if (i <= 0) return undefined;
   let j = i - 1;
+  let item: StoryboardScene | undefined;
   if (!s.listCut)
-    while (j >= 0 && (scenes[j].listCut || scenes[j].listSet || scenes[j].assetImageUrl || scenes[j].coverHero)) j--;
+    while (j >= 0 && (scenes[j].listCut || scenes[j].listSet || scenes[j].assetImageUrl || scenes[j].coverHero)) {
+      if (!item && scenes[j].listCut && source(scenes[j])) item = scenes[j];
+      j--;
+    }
   const x = j >= 0 ? scenes[j] : undefined;
-  return x && source(x) ? x : undefined;
+  const topic = x && source(x) ? x : undefined;
+  if (!item) return topic;
+  return topic && sharedWords(topic, s) > sharedWords(item, s) ? topic : item;
+}
+
+/** Words that say nothing of what a picture is about: framing, and the little words. */
+const FRAMING_WORDS = new Set(
+  (
+    "a an the of in on at to by for from into onto with and or its it his her their this that one " +
+    "up close closer view wide seen shot picture frame filling detail"
+  ).split(" ")
+);
+
+/** A description's subject words, any view taken off, each cut to its stem ("walking" = "walk"). */
+const subjectStems = (text: string): Set<string> =>
+  new Set(
+    topicWords(text)
+      .toLowerCase()
+      .replace(/['’]s\b/g, "")
+      .replace(/[^a-z0-9]+/g, " ")
+      .split(" ")
+      .filter(w => w && !FRAMING_WORDS.has(w))
+      .map(w => {
+        const stem = w.replace(/(?:ing|ed|s)$/, "");
+        return stem.length >= 3 ? stem : w;
+      })
+  );
+
+/** How many of `s`'s subject words picture `x`'s description shares too (`subjectStems`). Pure. */
+export function sharedWords(x: StoryboardScene, s: StoryboardScene): number {
+  const theirs = subjectStems(pictureWords(x));
+  let n = 0;
+  subjectStems(pictureWords(s)).forEach(w => theirs.has(w) && n++);
+  return n;
 }
 
 /**
@@ -179,6 +226,23 @@ export function topicPictureBefore(scenes: StoryboardScene[], s: StoryboardScene
  * ANOTHER of its kind (`othersOfKind`): a wild cat is never drawn from the pet's picture. Pure.
  */
 export function keylessContinued(scenes: StoryboardScene[], s: StoryboardScene): StoryboardScene | undefined {
+  const memo = keylessMemo?.scenes === scenes ? keylessMemo.of : undefined;
+  if (memo?.has(s)) return memo.get(s);
+  const out = findKeylessContinued(scenes, s);
+  memo?.set(s, out);
+  return out;
+}
+
+/**
+ * `keylessContinued`'s answers while one `attachMemory` pass reads its film. Its sources, camera,
+ * partner and own memory each ask again, and every answer is a walk back over the whole film: on a
+ * 496-picture film of no key things (job 159) one pass blocked the server for 3.5-4 s where it had
+ * taken 0.9 s (1.3 s with this). Read only inside that pass, whose film does not change while it
+ * runs; cleared after.
+ */
+let keylessMemo: { scenes: StoryboardScene[]; of: Map<StoryboardScene, StoryboardScene | undefined> } | undefined;
+
+function findKeylessContinued(scenes: StoryboardScene[], s: StoryboardScene): StoryboardScene | undefined {
   const i = scenes.indexOf(s);
   if (i <= 0 || s.keyThing || s.listCut || !source(s) || isScreen(s)) return undefined;
   const backdrop = !!s.qrHero && !s.coverHero && !s.assetImageUrl && !s.hostPresent;
@@ -195,9 +259,10 @@ export function keylessContinued(scenes: StoryboardScene[], s: StoryboardScene):
     samePeople(x, s) &&
     !another.some(t => shows(x, t));
   const words = pictureWords(s);
+  // The words first: nearly every picture fails there, before the patterns `lends` reads.
   for (let j = i - 1; j >= 0; j--) {
     const x = scenes[j];
-    if (lends(x) && repeatsTopic(pictureWords(x), words)) return x;
+    if (source(x) && repeatsTopic(pictureWords(x), words) && lends(x)) return x;
   }
   const chain = s.sameShot ? topicPictureBefore(scenes, s) : undefined;
   return chain && lends(chain) ? chain : undefined;
@@ -1788,6 +1853,31 @@ export function attachMemory(
   tagKeyThings(board, keyThings);
   // Whether the video makes something: the shot list stages only pictures of a thing being made.
   const makes = board.some(x => !!x.buildStage);
+  keylessMemo = { scenes: board, of: new Map() };
+  try {
+    attachEach(board, keyThings, home, makes);
+  } finally {
+    keylessMemo = undefined;
+  }
+  // A picture is COPIED when a later picture is drawn from it for the thing it is itself about — not
+  // a list's group picture its items are cut from, and not a picture lent only for a thing beside it.
+  for (const s of board) {
+    if (listSetFor(board, s)) continue;
+    const things = [s.keyThing, ...(s.otherKeyThings ?? [])];
+    for (const src of sourcesOf.get(s) ?? []) {
+      const own = ownKeyThing(src);
+      if (own && !lendsNoPicture(own) && things.includes(own)) copied.add(src);
+    }
+  }
+  for (const s of rendering) {
+    if (!source(s) || s.pictureUrl) continue;
+    pending.add(s);
+    gates.delete(s); // a fresh gate for this pass
+  }
+}
+
+/** `attachMemory`'s reading of each scene of `board`. */
+function attachEach(board: StoryboardScene[], keyThings: KeyThing[] | undefined, home: KeyThing | undefined, makes: boolean): void {
   for (const s of board) {
     const items = listItemsAround(board, s);
     if (items) s.listItems = items;
@@ -1816,21 +1906,6 @@ export function attachMemory(
     else continuesOf.delete(s);
     partnerOf.set(s, nearCopyPartnerFor(board, s, sources));
     copied.delete(s);
-  }
-  // A picture is COPIED when a later picture is drawn from it for the thing it is itself about — not
-  // a list's group picture its items are cut from, and not a picture lent only for a thing beside it.
-  for (const s of board) {
-    if (listSetFor(board, s)) continue;
-    const things = [s.keyThing, ...(s.otherKeyThings ?? [])];
-    for (const src of sourcesOf.get(s) ?? []) {
-      const own = ownKeyThing(src);
-      if (own && !lendsNoPicture(own) && things.includes(own)) copied.add(src);
-    }
-  }
-  for (const s of rendering) {
-    if (!source(s) || s.pictureUrl) continue;
-    pending.add(s);
-    gates.delete(s); // a fresh gate for this pass
   }
 }
 
