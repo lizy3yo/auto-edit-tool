@@ -23,6 +23,7 @@ import {
 } from "./pictureMemory";
 import {
   applyNamedLooks,
+  describeNamedLooks,
   namedLookClause,
   parseShownFacts,
   PART_VIEW,
@@ -95,6 +96,7 @@ import {
   markHostBroll,
   onTheBody,
   SHOWS_PERSON,
+  viewerAsk,
   withoutFaceAsks,
   WORN_ON_BODY,
 } from "./hostLook";
@@ -9658,5 +9660,68 @@ describe("round 15: the host's own 'I' is the host (job 417 scene 19)", () => {
     expect(story.otherPerson).toBe("a woman passenger");
     expect(story.otherPersonLooks).toEqual([STORY_WOMAN]);
     expect(sold.otherPerson).toBe("a buyer");
+  });
+});
+
+describe("round 15: the person the lines follow, and 'you', keep one look (jobs 415 and 417)", () => {
+  // 415: the story's one man wore a navy work jacket, an olive jacket and a grey sweater in 37 s —
+  // the props list wrote him a tan jacket over a plaid shirt ("man in pharmacy"), and no picture of
+  // "a man of sixty-four" got it. 417: "you", a passenger, was four different people in 100 s.
+  const PHARMACY_MAN = {
+    name: "man in pharmacy",
+    look: "A man in his sixties, average build, grey hair, wearing a tan jacket over a plaid shirt and dark trousers",
+  };
+  const pic = (scriptText: string, showSubject?: string, otherPerson?: string, over: Partial<StoryboardScene> = {}) =>
+    ({ index: 1, narration: "n", scriptText, showSubject, visualPrompt: showSubject, otherPerson, humanPresent: !!otherPerson || undefined, ...over }) as StoryboardScene;
+
+  it("415 (0:03-0:40): every picture of the man the story follows keeps his look; the ordinary places' older people stay strangers", () => {
+    const man = "a man of sixty-four";
+    const scenes = [
+      pic("There is a man standing in the greeting card aisle of", undefined, undefined, { hostPresent: true }),
+      pic("a pharmacy on a Tuesday morning, buying his third sympathy card since spring,", "man browsing sympathy cards in pharmacy card aisle", man),
+      pic("and doing a kind of arithmetic nobody ever taught him. He is counting backward. He is sixty-four.", "man browsing sympathy cards in pharmacy card aisle, a close-up of one detail of it filling the frame", man),
+      pic("His father made it to eighty-one. And somewhere between the sympathy cards and the cards for new grandbabies,", "man holding sympathy and birthday cards together in pharmacy aisle", man),
+      pic("he has quietly worked out that if the family average holds, he has about seventeen summers left.", "man holding sympathy and birthday cards together in pharmacy aisle, a close-up of one detail of it filling the frame", man),
+      pic("Seventeen. He pays, he walks out to the parking lot,", undefined, undefined, { hostPresent: true }),
+      pic("and the number rides home with him in the passenger seat.", "man sitting in car driving home, cards on passenger seat", man),
+      pic("Maybe you have done that arithmetic. Most people past sixty have — usually in silence, usually in some ordinary place,", "an older woman sitting silently alone on her front porch steps", "an older woman"),
+      pic("a waiting room,", "an older man sitting alone on a cushioned chair in a waiting room, seen from the side", "an older man"),
+      pic("a church pew,", "an older woman sitting alone in a polished wooden church pew, seen from behind", "an older woman"),
+      pic("the kitchen table at two in the morning when the house is too quiet.", "an older man sitting alone at a round wooden kitchen table at two in the morning", "an older man"),
+    ];
+    markHostBroll(scenes, { hostLook: "A man in his sixties with fair skin, grey hair, short beard", hostName: "Gideon Grant", recurringPeople: [PHARMACY_MAN] }, "https://x/host.png");
+    expect(scenes.map(s => (s.otherPersonLooks ? "his" : "-"))).toEqual(["-", "his", "his", "his", "his", "-", "his", "-", "-", "-", "-"]);
+    expect(buildStillPrompt(scenes[6])).toContain("tan jacket over a plaid shirt");
+  });
+
+  it("417 (0:46-2:28): with no VIEWER line, the pictures of 'you' as a passenger share the one look the named-things call writes", async () => {
+    const STORY_WOMAN = { name: "woman passenger", look: "an older woman, slender build, grey hair in a bob, wearing a beige cardigan and floral blouse" };
+    const ROW_14 = { name: "passenger in row fourteen", look: "a middle-aged man, average build, short dark hair, wearing a grey collared shirt, seated by the window" };
+    const YOU = { name: "the passenger", look: "a woman in her late sixties, short wavy silver hair, a soft teal cardigan over a cream top, dark grey trousers" };
+    const both = "a passenger and a flight attendant";
+    const scenes = [
+      pic("I'm Helena Hart, and I read the fine print so travelers like us can stop learning these things the hard way.", undefined, undefined, { hostPresent: true, hostIntro: true }),
+      pic("Today you're getting fourteen things flight attendants will quietly hand over for free, depending on the airline, the flight, and what's left in the galley.", "a flight attendant handing a water bottle to a older passenger in a seat row", "a flight attendant and an older passenger", { otherPeople: 2 }),
+      pic("On many of those carriers, you can have the whole thing just by asking.", "passenger in row fourteen asking flight attendant at cart for can", both, { otherPeople: 2 }),
+      pic("I figured that out much too late, after more flights than I care to count spent nursing a thimble of ginger ale.", "woman passenger holding small plastic cup with little ginger ale", "a woman passenger"),
+      pic('So when the cart reaches your row, speak up. "Could I keep the rest of the can, please?"', "passenger in row fourteen speaking to flight attendant beside cart", both, { otherPeople: 2 }),
+      pic("That takes care of your thirst. Now for the rumble that shows up somewhere over the middle of the country.", "a passenger by the window looking down at farmland far below, hand on stomach", "a passenger"),
+    ];
+    const params = { hostLook: "A slender woman in her forties, a navy blazer with a gold pin", hostName: "Helena Hart", recurringPeople: [ROW_14, STORY_WOMAN] };
+    const ask = viewerAsk(scenes, params, "https://x/host.png")!;
+    expect(ask.ids).toEqual([1, 2, 4, 5]);
+    const named = await describeNamedLooks(scenes, {
+      viewer: { ...ask, hostLook: params.hostLook, hostName: params.hostName, people: params.recurringPeople },
+      ask: async () => JSON.stringify({ kinds: [], pictures: [], viewer: YOU }),
+    });
+    markHostBroll(scenes, { ...params, viewerPerson: named.viewer }, "https://x/host.png");
+    expect(scenes.map(s => s.otherPersonLooks?.map(p => p.name).join() ?? "-")).toEqual([
+      "-",
+      "the passenger",
+      "the passenger",
+      "-", // the host's own "I": the host, never a passenger (round 15, scene 19)
+      "the passenger",
+      "the passenger",
+    ]);
   });
 });

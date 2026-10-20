@@ -690,6 +690,7 @@ import {
   namesSomeone,
   showsSomeoneElse,
   expressionAsBody,
+  viewerAsk,
 } from "./hostLook";
 import {
   assemblePerSceneFilm,
@@ -18928,12 +18929,34 @@ async function runUnifiedPipeline(
     const facts = await collectShownFacts(spokenScript);
     if (facts.length)
       console.log(`[Longform ${jobId}] shown on things: ${facts.map(f => `${f.thing} (${f.words.join(", ")})`).join("; ")}`);
+    // "YOU" WITH NO LOOK (job 417): the shot list and the line check drew "you" as someone the
+    // host's work serves — a passenger — but the props list wrote no VIEWER line, so each picture of
+    // "you" was a new stranger. The one look is asked on this call, made for every film anyway
+    // (`viewerAsk`), and `markHostBroll` gives it to every picture of "you".
+    const askViewer = viewerAsk(scenes, params, hostFaces(params)[0]);
     const named = await describeNamedLooks(scenes, {
       keyThings: params.keyThings,
       subject: params.videoSubject,
       script: spokenScript,
       facts,
+      viewer: askViewer && {
+        ...askViewer,
+        hostLook: params.hostLook,
+        hostName: params.hostName,
+        people: params.recurringPeople,
+      },
     });
+    if (named.viewer) {
+      params.viewerPerson = named.viewer;
+      console.log(
+        `[Longform ${jobId}] "you" had no look: ${askViewer!.ids.length} picture(s) show "you" as ` +
+          `${named.viewer.name} — one look for every one (${named.viewer.look})`
+      );
+    } else if (askViewer)
+      console.log(
+        `[Longform ${jobId}] "you": ${askViewer.ids.length} picture(s) show "you" as someone else ` +
+          `(${askViewer.roles.join(", ")}) and no look was written — each is drawn on its own`
+      );
     // A BODY PART IS ALWAYS ON THE BODY: the last word on every description, after every writer.
     const onBody = keepBodyPartsOnBody(scenes);
     if (onBody > 0)

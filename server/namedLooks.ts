@@ -24,12 +24,21 @@
  * for one job fell between the two, so no exact look was written and the checker held the picture to
  * its own wrong words. Such a tool now gets its look here as it is really built, by its parts.
  */
-import type { KeyThing, StoryboardScene } from "@shared/types";
+import type { KeyThing, RecurringPerson, StoryboardScene } from "@shared/types";
 import { invokeClaude } from "./claude";
 import { NOTHING_CUT_OPEN_RULE, withoutCutaway } from "./cutOpen";
+import { lookGaps } from "./followedPeople";
 import { safeParseJSON } from "./jsonRepair";
-import { showsPerson } from "./hostLook";
-import { blurredPrint, matchKeyThing, planningEffort, settleVideoKind, TOOL_SHAPE_NOT_VERB } from "./shotList";
+import { namedPeople, personKey, showsPerson } from "./hostLook";
+import {
+  blurredPrint,
+  matchKeyThing,
+  parseViewerPerson,
+  PERSON_LOOK_RULE,
+  planningEffort,
+  settleVideoKind,
+  TOOL_SHAPE_NOT_VERB,
+} from "./shotList";
 
 const NAMED_LOOK_MODEL = () => process.env.NAMED_LOOK_MODEL || "claude-opus-5-5";
 
@@ -40,6 +49,21 @@ export interface NamedKind {
 export interface NamedLookAnswer {
   kinds: NamedKind[];
   pictures: { id: number; kind?: string; partOf?: string; show?: string; text?: string }[];
+  /** The look written for "you" when the message asked for one (`ViewerLookAsk`), as answered. */
+  viewer?: { name: string; look: string };
+}
+
+/**
+ * "You" drawn as someone else with no look yet (`viewerAsk` in hostLook.ts, job 417): the pictures
+ * that show it, the roles they give "you", and what the look must differ from — so this call, made
+ * for every film anyway, writes the one look instead of a call of its own.
+ */
+export interface ViewerLookAsk {
+  ids: number[];
+  roles: string[];
+  hostLook?: string;
+  hostName?: string;
+  people?: RecurringPerson[];
 }
 
 /** What the script says is shown on a thing: "the box's label: Photoelectric, 10-Year Sealed Battery…". */
@@ -153,9 +177,57 @@ list: it is part_of a key thing only when it is a physical PART of that one thin
 quilt, one drawer of the dresser); items that are separate things of their own (a board, a sign, a
 box — even when the key thing names them as a group or pile) are never part_of anything.
 
+5. THE VIEWER — only when the message has a THE VIEWER block. The pictures it lists are on lines
+spoken to "you" and show someone other than the host. When "you" — the viewer the lines speak to —
+is one of the people they show, as someone the host's work serves (a passenger, a patient, a guest),
+add "viewer": {"name": the plain role those pictures give "you" (the passenger), "look": …} — the
+look is the person every picture of "you" shows: ${PERSON_LOOK_RULE}Everyday clothes for that role,
+never the host's uniform, badge or work clothes, and clearly different from THE HOST and from every
+person already written. Leave viewer out when "you" does the host's own kind of work, or when the
+people shown are ones "you" serves, sells to or deals with.
+
 Answer with JSON only:
 {"kinds":[{"name":"…","look":"…"}],"pictures":[{"id":<number>,"kind":"<a kind's name or omit>","part_of":"<a key thing or omit>","show":"…","text":"<exact script words or omit>"}]}
-{"kinds":[],"pictures":[]} when nothing applies.`;
+{"kinds":[],"pictures":[]} when nothing applies. With a THE VIEWER block, "viewer":{"name":"…","look":"…"} beside them, or no viewer key.`;
+
+/**
+ * The THE VIEWER block of the message (`ViewerLookAsk`): which pictures show "you", who is in them,
+ * and the host and the people already written, whom the look must not repeat. Pure.
+ */
+export function viewerLookBlock(scenes: StoryboardScene[], ask: ViewerLookAsk): string {
+  const shown = ask.ids
+    .filter(i => scenes[i]?.otherPerson)
+    .map(i => `#${i} ${scenes[i].otherPerson}`)
+    .join("; ");
+  return (
+    `THE VIEWER: these pictures are on lines spoken to "you" and show someone other than the host — ${shown}. ` +
+    `"You" has no look yet; the roles they give "you": ${ask.roles.join(", ")}.\n` +
+    (ask.hostLook?.trim() ? `THE HOST (never "you"): ${ask.hostLook.trim()}\n` : "") +
+    (ask.people?.length ? `PEOPLE ALREADY WRITTEN: ${ask.people.map(p => `${p.name}: ${p.look}`).join(" | ")}\n` : "")
+  );
+}
+
+/**
+ * The look written for "you" (`NamedLookAnswer.viewer`), kept only when it can be one person in every
+ * picture of "you": a name the props list's VIEWER rules accept (`parseViewerPerson`: not the host,
+ * not a group, a look of three words or more) whose role is one the pictures gave "you" (`ask.roles`)
+ * and is nobody already written, and a look that says man or woman and leaves out at most one of an
+ * age and the hair (`lookGaps`). Undefined otherwise — "you" is then drawn as before. Pure.
+ */
+export function acceptViewerLook(
+  answer: NamedLookAnswer["viewer"],
+  ask: ViewerLookAsk
+): RecurringPerson | undefined {
+  if (!answer?.name || !answer.look) return undefined;
+  const viewer = parseViewerPerson(`VIEWER ${answer.name}: ${answer.look}`, { hostName: ask.hostName });
+  if (!viewer) return undefined;
+  const role = namedPeople(viewer.name)?.people.find(p => p.kind === "role")?.noun;
+  if (!role || !ask.roles.includes(role)) return undefined;
+  if ((ask.people ?? []).some(p => personKey(p.name) === personKey(viewer.name))) return undefined;
+  const gaps = lookGaps(viewer.look);
+  if (gaps.includes("man or woman") || gaps.length > 1) return undefined;
+  return viewer;
+}
 
 /** The pictures the step reads: every drawn cutaway (not the host, a cover or an operator's asset). */
 export function namedLookCandidates(scenes: StoryboardScene[]): number[] {
@@ -184,7 +256,12 @@ export function parseNamedLooks(text: string): NamedLookAnswer | null {
       text: p?.text ? String(p.text).trim() : undefined,
     }))
     .filter(p => Number.isInteger(p.id));
-  return { kinds, pictures };
+  const v = (d as { viewer?: { name?: unknown; look?: unknown } }).viewer;
+  const viewer =
+    v && typeof v === "object" && String(v.name ?? "").trim() && String(v.look ?? "").trim()
+      ? { name: String(v.name).trim(), look: String(v.look).trim() }
+      : undefined;
+  return { kinds, pictures, ...(viewer ? { viewer } : {}) };
 }
 
 /**
@@ -259,9 +336,14 @@ export async function describeNamedLooks(
     /** The whole script: what it says is shown on things, and the check on every picture's text. */
     script?: string;
     facts?: ShownFact[];
+    /**
+     * "You" drawn as someone else with no look (`viewerAsk`): asked in the first batch holding one of
+     * those pictures, and in each later one until a look is accepted (`acceptViewerLook`).
+     */
+    viewer?: ViewerLookAsk;
     ask?: (system: string, user: string) => Promise<string>;
   } = {}
-): Promise<{ kinds: number; pictures: number; parts: number }> {
+): Promise<{ kinds: number; pictures: number; parts: number; viewer?: RecurringPerson }> {
   const ask =
     opts.ask ??
     (async (system: string, user: string) =>
@@ -270,6 +352,7 @@ export async function describeNamedLooks(
   const BATCH = 150;
   let kinds = 0;
   let pictures = 0;
+  let viewer: RecurringPerson | undefined;
   for (let from = 0; from < all.length; from += BATCH) {
     const ids = all.slice(from, from + BATCH);
     const lines = ids.map(i => {
@@ -277,6 +360,8 @@ export async function describeNamedLooks(
       const said = (s.scriptText ?? "").trim().replace(/\s+/g, " ");
       return `#${i}${s.listCut ? " (list item)" : ""}: said "${said}" | shows: ${s.showSubject ?? s.visualPrompt ?? ""}`;
     });
+    const asking = !viewer && opts.viewer ? opts.viewer.ids.filter(i => ids.includes(i)) : [];
+    const askViewer = asking.length ? { ...opts.viewer!, ids: asking } : undefined;
     try {
       const answer = parseNamedLooks(
         await ask(
@@ -286,17 +371,19 @@ export async function describeNamedLooks(
             (opts.facts?.length
               ? `WHAT THE SCRIPT SAYS IS SHOWN: ${opts.facts.map(f => `${f.thing}: ${f.words.map(w => `"${w}"`).join(", ")}`).join(" | ")}\n`
               : "") +
+            (askViewer ? viewerLookBlock(scenes, askViewer) : "") +
             `\n${lines.join("\n")}\n\nJSON:`
         )
       );
       if (!answer) continue;
+      if (askViewer) viewer = acceptViewerLook(answer.viewer, askViewer);
       kinds += answer.kinds.length;
       pictures += applyNamedLooks(scenes, ids, answer, opts.keyThings, opts.script);
     } catch {
       /* a failed call changes nothing */
     }
   }
-  return { kinds, pictures, parts: scenes.filter(s => s.partOf).length };
+  return { kinds, pictures, parts: scenes.filter(s => s.partOf).length, ...(viewer ? { viewer } : {}) };
 }
 
 /**

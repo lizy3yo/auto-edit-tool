@@ -962,7 +962,8 @@ export function matchRecurringPeople(
   who: string | undefined,
   count: number | undefined,
   people: RecurringPerson[] | undefined,
-  viewer?: RecurringPerson
+  viewer?: RecurringPerson,
+  opts: { viewerLine?: boolean } = {}
 ): RecurringPerson[] {
   if (!who?.trim() || (!people?.length && !viewer)) return [];
   const factOf = (person: RecurringPerson) => {
@@ -1034,7 +1035,13 @@ export function matchRecurringPeople(
             : sexed.length === 1
               ? take(sexed[0])
               : false;
-    if (!took && you && !fits.length && fitsOf([you]).length > 0) take(you);
+    // The viewer by role when no recurring person fits — or, on a line that speaks to "you" and of no
+    // "he" or "she" (`opts.viewerLine`), when two or more fit by the role alone and nothing tells
+    // which (2026-10-20, job 417: "an older passenger" under "Today you're getting fourteen things
+    // flight attendants will quietly hand over" fits the story's two passengers and "you" alike; the
+    // line follows neither story passenger, so the one it is about is "you" — never a guess between
+    // the two). With no such line it is still no one: "fits all three: no guess".
+    if (!took && you && !exacts.length && (!fits.length || opts.viewerLine) && fitsOf([you]).length > 0) take(you);
   }
   // The label IS the name (the planner was given the names and copied one), or holds a proper one.
   for (const f of facts)
@@ -2026,6 +2033,340 @@ export function narratorPictured(
   return { noun: person.noun };
 }
 
+// ─── "You", when no look was written ─────────────────────────────────────────────────────
+
+/**
+ * The pictures that show "you" as SOMEONE ELSE in a video with no viewer look, and the roles they
+ * give "you" (2026-10-20, job 417): the host's work serves the viewer — a flight attendant's tips to
+ * passengers — but the props call wrote no `VIEWER` line (no host title, a look that never named the
+ * job), so the shot list and the line check drew each "you" as a passenger of its own, and "you" was
+ * a curly white-haired woman in a cable knit (scene 15), a grey-haired woman in a cream knit (20), a
+ * blonde-grey bob in a mauve tee (25) and an older man in an olive sweater (31), within 100 s. The
+ * models had already said who "you" is in those pictures; only the one look was missing. Read here,
+ * before anyone is drawn, so that one look can be asked for on a call already made for the film
+ * (`describeNamedLooks`): a picture of someone else (`otherPerson`), on a sentence spoken to "you"
+ * (what someone says inside quotes aside) that never speaks of "I", "me" or "my", nor of a "he" or
+ * "she" in a story, whose label names one person of a ROLE — never a role the host gives themself,
+ * a relative or a child, a recurring person by name, or a role the lines put after "your" ("your
+ * customers": someone "you" deal with, never "you"). Undefined unless a role is in two or more such
+ * pictures, when the video already has its viewer, or with no host on camera. Pure.
+ */
+export function viewerAsk(
+  scenes: StoryboardScene[],
+  params: Pick<
+    LongformInputParams,
+    "hostLook" | "brollOnly" | "hostName" | "hostTitle" | "recurringPeople" | "viewerPerson"
+  >,
+  hostPhotoUrl: string | undefined
+): { ids: number[]; roles: string[] } | undefined {
+  if (params.viewerPerson || !params.hostLook?.trim() || !hostPhotoUrl || params.brollOnly) return undefined;
+  const intro = scenes
+    .filter((s, i) => s.hostIntro || i < 3)
+    .map(s => s.scriptText ?? "")
+    .join(" ");
+  const selfRoles = selfRolesOf(intro, params.hostTitle, params.hostName);
+  const named = new Set((params.recurringPeople ?? []).map(p => personKey(p.name)));
+  const byRole = new Map<string, number[]>();
+  const yours = new Set<string>();
+  scenes.forEach((s, i) => {
+    if (!s.otherPerson || s.hostPresent || s.splitVisual || s.coverHero || s.assetImageUrl || s.qrHero || s.showsBook) return;
+    const line = withoutQuotedSpeech(sentenceAround(scenes, i));
+    if (!spokenToViewer(line) || HE_WORDS.test(line) || SHE_WORDS.test(line)) return;
+    // "your customers", "your regular buyer": a person noun within three words after "your".
+    const words = line.toLowerCase().match(/[a-z]+(?:[-'’][a-z]+)*/g) ?? [];
+    words.forEach((w, k) => {
+      if (w !== "your") return;
+      for (const next of words.slice(k + 1, k + 4)) {
+        const e = PERSON_NOUN.get(next);
+        if (e) {
+          yours.add(e.lemma);
+          break;
+        }
+      }
+    });
+    for (const p of namedPeople(s.otherPerson)?.people ?? []) {
+      if (p.count !== 1 || p.kind !== "role" || selfRoles.includes(p.noun) || RELATIVES.has(p.noun)) continue;
+      if (named.has(personKey(p.phrase))) continue;
+      const ids = byRole.get(p.noun) ?? [];
+      if (!ids.includes(i)) ids.push(i);
+      byRole.set(p.noun, ids);
+    }
+  });
+  const roles = Array.from(byRole.entries())
+    .filter(([role, ids]) => ids.length >= 2 && !yours.has(role))
+    .sort((a, b) => b[1].length - a[1].length)
+    .map(([role]) => role);
+  if (!roles.length) return undefined;
+  const ids = Array.from(new Set(roles.flatMap(r => byRole.get(r)!))).sort((a, b) => a - b);
+  return { ids, roles };
+}
+
+// ─── The person the lines follow ─────────────────────────────────────────────────────────
+
+const AGE_UNITS: Record<string, number> = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9 };
+const AGE_TENS: Record<string, number> = { twenty: 20, thirty: 30, forty: 40, fifty: 50, sixty: 60, seventy: 70, eighty: 80, ninety: 90 };
+const AGE_DECADES: Record<string, number> = {
+  twenties: 20, thirties: 30, forties: 40, fifties: 50, sixties: 60, seventies: 70, eighties: 80, nineties: 90,
+  "20s": 20, "30s": 30, "40s": 40, "50s": 50, "60s": 60, "70s": 70, "80s": 80, "90s": 90,
+};
+const SAID_AGE = String.raw`(\d{1,3}|(?:${Object.keys(AGE_TENS).join("|")})(?:[- ](?:${Object.keys(AGE_UNITS).join("|")}))?)`;
+/** An age said outright: "aged 64", "a 64-year-old", "sixty-four years old" ("a man of 64" is read off the noun). */
+const AGE_SAID = new RegExp(String.raw`\baged\s+${SAID_AGE}\b|\b${SAID_AGE}[- ]years?[- ]old\b`);
+/** "a man of sixty-four", "a woman of 70": the age right after a person noun. */
+const AGE_OF = new RegExp(String.raw`\b([a-z]+)\s+of\s+${SAID_AGE}\b`, "g");
+/** "in his sixties", "in her late fifties", "early 70s". */
+const AGE_DECADE = new RegExp(
+  String.raw`\b(?:in\s+(?:his|her|their|the)\s+(?:(early|mid|late)[- ])?|(early|mid|late)[- ])(${Object.keys(AGE_DECADES).join("|")})\b`
+);
+/** Age words, most telling first: the first that matches gives the range. */
+const AGE_WORDS: [RegExp, [number, number]][] = [
+  [/\bmiddle[- ]aged\b/, [40, 60]],
+  [/\b(?:baby|infant|toddler)\b/, [0, 3]],
+  [/\b(?:child|kid|boy|girl)\b/, [3, 17]],
+  [/\b(?:teen|teens|teenage|teenaged|teenager)\b/, [13, 19]],
+  [/\b(?:young|younger|youthful)\b/, [16, 35]],
+  [/\b(?:elderly|senior|aged)\b/, [65, 100]],
+  [/\bretired\b/, [58, 100]],
+  [/\b(?:older|old)\b/, [50, 100]],
+];
+
+function ageNumber(said: string): number | undefined {
+  if (/^\d+$/.test(said)) return Number(said);
+  const [tens, unit] = said.split(/[- ]/);
+  const n = (AGE_TENS[tens] ?? NaN) + (unit ? (AGE_UNITS[unit] ?? NaN) : 0);
+  return Number.isFinite(n) ? n : undefined;
+}
+
+/**
+ * The AGE a person's label or look gives, as a range of years — "a man of sixty-four" [64, 64], "in
+ * his sixties" [60, 69], "in her late fifties" [56, 59], "middle-aged" [40, 60], "an older man"
+ * [50, 100], "a young man" [16, 35] — or undefined when it says none. An age said outright beats a
+ * decade, which beats an age word ("an older man in his sixties" is in his sixties). Pure.
+ */
+export function ageRangeOf(text: string | undefined): [number, number] | undefined {
+  const t = (text ?? "").toLowerCase().replace(/[‐‑‒–—]/g, "-");
+  if (!t.trim()) return undefined;
+  const said = t.match(AGE_SAID);
+  const saidAge = said ? ageNumber(said[1] ?? said[2]) : undefined;
+  if (saidAge != null && saidAge > 0 && saidAge <= 110) return [saidAge, saidAge];
+  for (const m of Array.from(t.matchAll(AGE_OF))) {
+    if (!PERSON_NOUN.has(m[1])) continue;
+    const n = ageNumber(m[2]);
+    if (n != null && n > 0 && n <= 110) return [n, n];
+  }
+  const decade = t.match(AGE_DECADE);
+  if (decade) {
+    const d = AGE_DECADES[decade[3]];
+    const part = decade[1] ?? decade[2];
+    return part === "early" ? [d, d + 3] : part === "mid" ? [d + 3, d + 7] : part === "late" ? [d + 6, d + 9] : [d, d + 9];
+  }
+  return AGE_WORDS.find(([re]) => re.test(t))?.[1];
+}
+
+/** Whether two ages can be the same person's (a few years either way); an unsaid age fits any. Pure. */
+export function agesFit(a: [number, number] | undefined, b: [number, number] | undefined): boolean {
+  return !a || !b || (a[0] <= b[1] + 3 && b[0] <= a[1] + 3);
+}
+
+/** Joining words in a person's name: "man IN pharmacy", "the woman AT the counter". */
+const NAME_JOINERS = new Set(
+  ("in at on of with by from near for to and or who whose that which into onto inside outside beside behind " +
+    "next across under over another other second third first last new different same one").split(" ")
+);
+/** Words of a name that say an age or a sex, never where the person is ("the older neighbour"). */
+const NAME_AGE_OR_SEX = /^(?:older|old|elderly|young|younger|youthful|middle|aged|retired|senior|teenage|male|female)$/;
+
+/**
+ * The words of a recurring person's NAME that say WHERE or IN WHAT SITUATION the story has them —
+ * "man in pharmacy" → pharmacy, "passenger in row fourteen" → row, fourteen — never a person word,
+ * an age, a sex or a joining word. "woman passenger" has none. Pure.
+ */
+export function settingWordsOf(name: string | undefined): string[] {
+  const words = (name ?? "").toLowerCase().match(/[a-z0-9]+/g) ?? [];
+  return Array.from(
+    new Set(
+      words.filter(
+        w =>
+          !NAME_FILLER.has(w) &&
+          !NAME_JOINERS.has(w) &&
+          !PERSON_NOUN.has(w) &&
+          !FEMALE.has(w) &&
+          !MALE.has(w) &&
+          !NAME_AGE_OR_SEX.test(w) &&
+          (w.length >= 3 || /\d/.test(w))
+      )
+    )
+  );
+}
+
+/** Whether every one of `words` is in `text`, a plural or singular form counting ("aisles" for "aisle"). */
+function holdsAllWords(text: string, words: string[]): boolean {
+  const have = new Set((text.toLowerCase().match(/[a-z0-9]+/g) ?? []).map(w => w.replace(/(?:es|s)$/, "")));
+  return words.length > 0 && words.every(w => have.has(w.replace(/(?:es|s)$/, "")));
+}
+
+const HE_WORDS = /\b(?:he|him|his|himself)\b/i;
+const SHE_WORDS = /\b(?:she|her|hers|herself)\b/i;
+/** The plain words for a man or a woman, which name the person a story follows as often as anyone else. */
+const PLAIN_SEX_WORDS = new Set("man men woman women lady ladies gentleman gentlemen guy guys male female".split(" "));
+const DAYS_AND_MONTHS =
+  /^(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday|January|February|March|April|May|June|July|August|September|October|November|December)$/;
+
+/** Whether a line speaks of a person of that sex: by pronoun ("he", "her") or by a word ("a man", "his father"). */
+function speaksOfSex(line: string, sex: "f" | "m"): boolean {
+  if ((sex === "m" ? HE_WORDS : SHE_WORDS).test(line)) return true;
+  const sexed = sex === "m" ? MALE : FEMALE;
+  return (line.toLowerCase().match(/[a-z]+/g) ?? []).some(w => sexed.has(w));
+}
+
+/** "a man", "an older woman", "another guy": someone brought in, not someone already followed. */
+const BRINGS_IN = new Set("a an another one".split(" "));
+
+/**
+ * Whether a line names SOMEONE ELSE of that sex beside the person a story follows, so its "he" or
+ * "she", or a picture of a man or a woman on it, may be them: a relation or role of that sex the
+ * person's own name does not hold ("His father made it to eighty-one", "a monk"), a name inside a
+ * clause ("…to a man named Paulinus"; a day or a month is no one), or a plain "a man" brought in
+ * AFTER the line's "he" already has someone ("He walked past a man stocking the shelves"). A plain
+ * "a man" before any "he" is how a story brings its own man in ("There is a man standing in the
+ * greeting card aisle … buying his third sympathy card") and is not counted.
+ */
+function namesAnotherOfSex(line: string, sex: "f" | "m", person: RecurringPerson): boolean {
+  const own = new Set(personKey(person.name).split(" "));
+  const sexed = sex === "m" ? MALE : FEMALE;
+  const pronoun = sex === "m" ? HE_WORDS : SHE_WORDS;
+  const tokens = tokensOf(line);
+  let followed = false;
+  for (let k = 0; k < tokens.length; k++) {
+    const t = tokens[k];
+    if (!isWord(t)) continue;
+    const w = bare(t);
+    if (pronoun.test(t)) followed = true;
+    if (sexed.has(w) && !PLAIN_SEX_WORDS.has(w) && !own.has(w)) return true;
+    if (followed && sexed.has(w) && tokens.slice(Math.max(0, k - 3), k).some(b => BRINGS_IN.has(b.toLowerCase())))
+      return true;
+    const opensClause = k === 0 || /^[.!?:;—–("“]$/.test(tokens[k - 1]);
+    if (/^[A-Z][a-z]{2,}/.test(t) && !opensClause && !DAYS_AND_MONTHS.test(t.replace(/['’]s?$/, "")) && !own.has(w)) return true;
+  }
+  return false;
+}
+
+/** Whether an age falls inside a person's (a few years either way): an age said for them, not a guess. */
+function pinsAge(age: [number, number] | undefined, theirs: [number, number] | undefined): boolean {
+  return !!age && !!theirs && age[0] >= theirs[0] - 3 && age[1] <= theirs[1] + 3;
+}
+
+/**
+ * THE PERSON THE LINES FOLLOW keeps their one look (2026-10-20, job 415 scenes 2-5 and 7). The story
+ * follows one man: "There is a man standing in the greeting card aisle of a pharmacy … He is counting
+ * backward. He is sixty-four. … He pays, he walks out to the parking lot, and the number rides home
+ * with him in the passenger seat." The props list wrote him one look, `PERSON man in pharmacy: … a tan
+ * jacket over a plaid shirt`, but every picture of him was labelled "a man of sixty-four", which no
+ * name, head phrase or role of "man in pharmacy" matches (`matchRecurringPeople`, rightly: a bare "a
+ * man" is not "the man in the card aisle") — so no picture got the look, and he wore a navy work
+ * jacket, then an olive one, then a grey sweater, in 37 seconds. A picture whose someone-else is ONE
+ * person and is still nobody's now takes a recurring person's look when its label is a plain man or
+ * woman (or a role that two recurring people share), of that person's sex and an age that fits them
+ * (`ageRangeOf`, `agesFit`), and one of two things says it is them:
+ *   - THE SETTING: every word of the person's name that says where the story has them ("pharmacy",
+ *     "row fourteen", `settingWordsOf`) is in the picture's own words, on a line that speaks of a
+ *     person of their sex;
+ *   - THE STORY: its line follows them by pronoun ("…rides home with him…") and the stretch of lines
+ *     around it that keeps that pronoun going holds pictures of them and of no one else of their sex.
+ * A line that names a second person of their sex (`namesAnotherOfSex`: "His father made it to
+ * eighty-one", "a man named Paulinus", "he walked past a man…") links only a label whose own age is
+ * theirs ("a man of sixty-four", `pinsAge`) — "an older man" there could be the father. Exactly one
+ * recurring person must fit: a bare "a passenger" between two passengers, an "older man" on a line
+ * that speaks of nobody ("Most people past sixty have — … a waiting room"), a "young man" in an old
+ * man's story, "another man", a name, two people in one label and the viewer all stay as they were.
+ * Replayed over the 355 local storyboards (28,815 pictures): job 415's five pictures of the man change,
+ * nothing else. Pure apart from mutating `scenes`; returns how many pictures it linked.
+ */
+export function linkFollowedPeople(
+  scenes: StoryboardScene[],
+  people: RecurringPerson[] | undefined,
+  opts: { viewer?: RecurringPerson } = {}
+): number {
+  if (!people?.length) return 0;
+  const facts = people.map(p => ({
+    person: p,
+    sex: namedPeople(p.name)?.sex ?? sexOfLook(p.look),
+    age: ageRangeOf(p.look) ?? ageRangeOf(p.name),
+    setting: settingWordsOf(p.name),
+    roles: (namedPeople(p.name)?.people ?? []).filter(x => x.kind === "role").map(x => x.noun),
+  }));
+  type Fact = (typeof facts)[number];
+  const lines = scenes.map((_, i) => withoutQuotedSpeech(sentenceAround(scenes, i)));
+  const viewerKey = opts.viewer ? personKey(opts.viewer.name) : undefined;
+  // Each picture this rule may give a look: ONE plain or shared-role person nobody has linked yet.
+  const targets: { i: number; sex: "f" | "m"; age?: [number, number]; cands: Fact[] }[] = [];
+  scenes.forEach((s, i) => {
+    if (!s.otherPerson || s.otherPersonLooks?.length || s.hostPresent || s.splitVisual) return;
+    if (viewerKey && personKey(s.otherPerson) === viewerKey) return;
+    // "a man of sixty-four" is a man: the noun phrase reader stops at "of" (a name of nobody, for it).
+    const label = namedPeople(s.otherPerson) ?? namedPeople(s.otherPerson.replace(/\s+(?:of|aged)\s+[\w -]+$/i, ""));
+    const part = label && label.count === 1 && label.people.length === 1 ? label.people[0] : undefined;
+    if (!part || ANOTHER_ONE.test(s.otherPerson) || elseWordsFor(s.otherPerson, part.noun).length) return;
+    // The label's sex, or the line's when it follows only one ("a seated passenger" under "she …").
+    const he = HE_WORDS.test(lines[i]);
+    const she = SHE_WORDS.test(lines[i]);
+    const sex = part.sex ?? (he !== she ? (he ? "m" : "f") : undefined);
+    if (!sex) return;
+    const age = ageRangeOf(s.otherPerson) ?? ageRangeOf(s.showSubject);
+    const fitting = (f: Fact) => f.sex === sex && agesFit(age, f.age);
+    // A role two recurring people share is the only role left undecided (one that fits a single
+    // person was matched already); a plain man or woman may be any of them.
+    const cands =
+      part.kind === "generic"
+        ? facts.filter(fitting)
+        : part.kind === "role" && facts.filter(f => f.roles.includes(part.noun)).length >= 2
+          ? facts.filter(f => f.roles.includes(part.noun) && fitting(f))
+          : [];
+    if (cands.length) targets.push({ i, sex, age, cands });
+  });
+  // A line naming a second man (or woman) beside the one followed — "His father made it to
+  // eighty-one" over 415's card aisle — leaves a picture of "a man" open to either: only a label whose
+  // own age is the followed person's ("a man of sixty-four") is still theirs.
+  const clearFor = (t: (typeof targets)[number], f: Fact) =>
+    !namesAnotherOfSex(lines[t.i], t.sex, f.person) || pinsAge(t.age, f.age);
+  const linkedTo = (k: number, sex: "f" | "m") =>
+    (scenes[k].otherPersonLooks ?? []).filter(p => {
+      const f = facts.find(x => x.person === p);
+      return !!f && f.sex === sex;
+    });
+  let n = 0;
+  const give = (i: number, f: Fact) => {
+    scenes[i].otherPersonLooks = [f.person];
+    n++;
+  };
+  // THE SETTING first: those pictures are the anchors the story is followed from.
+  const left: typeof targets = [];
+  for (const t of targets) {
+    const s = scenes[t.i];
+    const words = `${s.otherPerson ?? ""} ${s.showSubject ?? ""} ${s.visualPrompt ?? ""}`;
+    const bySetting = speaksOfSex(lines[t.i], t.sex) ? t.cands.filter(f => holdsAllWords(words, f.setting)) : [];
+    if (bySetting.length === 1 && clearFor(t, bySetting[0])) give(t.i, bySetting[0]);
+    else if (bySetting.length !== 1) left.push(t);
+  }
+  // THE STORY: the stretch around the picture whose lines keep the pronoun going.
+  for (const t of left) {
+    const pronoun = t.sex === "m" ? HE_WORDS : SHE_WORDS;
+    if (!pronoun.test(lines[t.i])) continue;
+    let a = t.i;
+    while (a > 0 && pronoun.test(lines[a - 1])) a--;
+    let b = t.i;
+    while (b < scenes.length - 1 && pronoun.test(lines[b + 1])) b++;
+    const followed = new Set<RecurringPerson>();
+    for (let k = a; k <= b; k++) if (k !== t.i) linkedTo(k, t.sex).forEach(p => followed.add(p));
+    if (followed.size !== 1) continue;
+    const only = Array.from(followed)[0];
+    const f = t.cands.find(c => c.person === only);
+    if (!f || !clearFor(t, f)) continue;
+    give(t.i, f);
+  }
+  return n;
+}
+
 /**
  * Mark the pictures that show someone doing the work as the HOST (see the file comment), and the
  * ones that show SOMEONE ELSE as that person (`otherPerson`, `otherPeople`) — never the host photo.
@@ -2134,7 +2475,13 @@ export function markHostBroll(
       // Someone the story comes back to keeps one look in every picture of them (job 399: the same
       // passenger was three different women in scenes 2, 4 and 5) — `matchRecurringPeople` — and
       // so does the viewer ("you") when the host's job serves them.
-      const looks = matchRecurringPeople(other.who, other.count, params.recurringPeople, aboutYou ? viewer : undefined);
+      // A line that speaks to "you" and follows no "he" or "she" is the viewer's: a role the story's
+      // people share no longer leaves "you" a stranger there (job 417, `viewerLine`).
+      const said = aboutYou ? withoutQuotedSpeech(sentenceAround(scenes, i)) : "";
+      const viewerLine = aboutYou && SPOKEN_TO_YOU.test(said) && !HE_WORDS.test(said) && !SHE_WORDS.test(said);
+      const looks = matchRecurringPeople(other.who, other.count, params.recurringPeople, aboutYou ? viewer : undefined, {
+        viewerLine,
+      });
       s.otherPersonLooks = looks.length ? looks : undefined;
       s.humanPresent = true;
       s.brollHostLook = undefined;
@@ -2190,5 +2537,9 @@ export function markHostBroll(
       s.hostFaceShown = undefined;
     }
   }
+  // The person the lines follow, labelled only by sex and age ("a man of sixty-four", job 415):
+  // once every picture's own match is in, the ones still nobody's are read against the setting the
+  // story gives that person and the pictures of them around it (`linkFollowedPeople`).
+  linkFollowedPeople(scenes, params.recurringPeople, { viewer });
   return n;
 }
