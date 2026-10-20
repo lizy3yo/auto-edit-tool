@@ -408,13 +408,47 @@ describe("a bare role word between two people is never picked blindly (job 417)"
 });
 
 describe("viewerAsk — 'you' drawn as someone else with no look (job 417)", () => {
-  it("417: the pictures of 'you' as a passenger are found, with the roles they give 'you'", () => {
+  it("417: the pictures of 'you' as a passenger are found, and 'you' can only be the passenger", () => {
     const ask = viewerAsk(film417(), params417, PHOTO);
-    expect(ask?.roles.sort()).toEqual(["attendant", "passenger"]);
-    for (const id of YOU_PICTURES) expect(ask?.ids).toContain(id);
+    // "Today you're getting fourteen things flight attendants will quietly hand over", "the flight
+    // attendant pours your soda": the lines name the crew as someone else, so "you" is never crew —
+    // the host's own work — however many pictures of "you" have an attendant in them.
+    expect(ask?.roles).toEqual(["passenger"]);
+    expect(ask?.ids).toEqual(YOU_PICTURES);
     // the host's own "I … nursing a thimble of ginger ale" and the story's "she" are never "you"
     expect(ask?.ids).not.toContain(18);
     expect(ask?.ids).not.toContain(8);
+    // …nor a picture of the crew alone ("the flight attendant pours your soda", the snack basket)
+    expect(ask?.ids).not.toContain(16);
+    expect(ask?.ids).not.toContain(25);
+  });
+
+  it("a role the lines put beside 'you' as someone else is never 'you'; one the lines say 'you' are, or a seat, still is", () => {
+    const pics = (lines: string[]) =>
+      board(
+        lines.map(scriptText => ({
+          scriptText,
+          showSubject: "a guest at a hotel front desk",
+          otherPerson: "a guest",
+          humanPresent: true,
+        }))
+      );
+    const host = { hostLook: HELENA, hostName: "Helena Hart" };
+    // "you" work the desk: the guest is someone "you" look after, never "you"
+    expect(
+      viewerAsk(pics(["When a guest asks for towels, you bring them up.", "Smile before you pick up the phone."]), host, PHOTO)
+    ).toBeUndefined();
+    // "you" ARE the guest: "as a guest", "guests like you"
+    expect(
+      viewerAsk(pics(["As a guest, you can ask for a late checkout.", "Guests like you get the quiet rooms first."]), host, PHOTO)
+        ?.roles
+    ).toEqual(["guest"]);
+    // a passenger seat is no one: a line with it still lets "you" be the passenger
+    const seat = board([
+      { scriptText: "Slide your bag under the passenger seat in front of you.", showSubject: "a passenger stowing a bag", otherPerson: "a passenger", humanPresent: true },
+      { scriptText: "Then you can stretch your legs.", showSubject: "a passenger stretching in an aisle seat", otherPerson: "a passenger", humanPresent: true },
+    ]);
+    expect(viewerAsk(seat, host, PHOTO)?.roles).toEqual(["passenger"]);
   });
 
   it("nothing is asked with a viewer already written, with no host on camera, or with one picture only", () => {
@@ -456,6 +490,8 @@ describe("the viewer's one look rides the named-things call (job 417)", () => {
     expect(calls).toHaveLength(1);
     expect(calls[0]).toContain('THE VIEWER: these pictures are on lines spoken to "you"');
     expect(calls[0]).toContain("#24 a passenger");
+    // the crew beside "you" is shown, but never offered as a role "you" may take
+    expect(calls[0]).toContain('in these pictures "you" can only be: passenger.');
     expect(calls[0]).toContain(`THE HOST (never "you"): ${HELENA}`);
     expect(calls[0]).toContain("PEOPLE ALREADY WRITTEN: passenger in row fourteen:");
     expect(out.viewer).toEqual(YOU);
@@ -491,6 +527,8 @@ describe("the viewer's one look rides the named-things call (job 417)", () => {
     expect(acceptViewerLook({ name: "the patient", look: YOU.look }, ask)).toBeUndefined();
     expect(acceptViewerLook({ name: "woman passenger", look: YOU.look }, ask)).toBeUndefined();
     expect(acceptViewerLook({ name: "the host", look: YOU.look }, ask)).toBeUndefined();
+    // the crew the lines name beside "you" — the host's own work — is never "you", whatever the answer
+    expect(acceptViewerLook({ name: "the flight attendant", look: YOU.look }, ask)).toBeUndefined();
     expect(acceptViewerLook({ name: "the passenger", look: YOU.look }, ask)).toEqual(YOU);
   });
 

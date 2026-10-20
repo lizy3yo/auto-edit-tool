@@ -2035,6 +2035,44 @@ export function narratorPictured(
 
 // ─── "You", when no look was written ─────────────────────────────────────────────────────
 
+/** "You" ARE the role the line names: "as a passenger", "you're a nurse", "you, the client". */
+const YOU_ARE_ROLE_BEFORE =
+  /(?:\bas|\byou['’]re|\byou\s+are|\byou\s+were|\byou['’]ve\s+been|\byou['’]ll\s+be|\bbeing|\byou\s*,)\s+(?:an?|the|one)\s+(?:[a-z'’-]+\s+)?$/i;
+/** …or "passengers like you", "guests like us". */
+const YOU_ARE_ROLE_AFTER = /^\s+like\s+(?:you|us|yourself|yourselves)\b/i;
+/** A role word naming a thing, not a person: "the passenger seat", "a guest room", "customer service". */
+const ROLE_AS_THING =
+  /^\s+(?:seats?|side|doors?|windows?|rooms?|lounges?|areas?|lists?|files?|records?|charts?|portals?|services?|entrances?|lanes?)\b/i;
+/** "your customers", "your regular buyer": a person noun at most two words after "your". */
+const AFTER_YOUR = /\byour\s+(?:[a-z'’-]+\s+){0,2}$/i;
+
+/**
+ * The person words a line spoken to "you" names as SOMEONE ELSE, never "you" (2026-10-20, job 417):
+ * a role put after "your" ("your customers": someone "you" deal with), and a role named beside "you"
+ * in the third person — "Today you're getting fourteen things flight attendants will quietly hand
+ * over", "the flight attendant pours your soda". A line that says "you" ARE one ("as a passenger",
+ * "passengers like you") and a role word naming a thing ("the passenger seat") name no one else.
+ * Singular forms. Pure.
+ */
+function rolesBesideYou(line: string): string[] {
+  const out: string[] = [];
+  for (const m of Array.from(line.matchAll(/[A-Za-z]+(?:[-'’][A-Za-z]+)*/g))) {
+    const e = PERSON_NOUN.get(m[0].toLowerCase());
+    if (!e) continue;
+    const before = line.slice(0, m.index);
+    const after = line.slice((m.index ?? 0) + m[0].length);
+    if (AFTER_YOUR.test(before)) out.push(e.lemma);
+    else if (
+      e.kind === "role" &&
+      !ROLE_AS_THING.test(after) &&
+      !YOU_ARE_ROLE_BEFORE.test(before) &&
+      !YOU_ARE_ROLE_AFTER.test(after)
+    )
+      out.push(e.lemma);
+  }
+  return out;
+}
+
 /**
  * The pictures that show "you" as SOMEONE ELSE in a video with no viewer look, and the roles they
  * give "you" (2026-10-20, job 417): the host's work serves the viewer — a flight attendant's tips to
@@ -2047,8 +2085,11 @@ export function narratorPictured(
  * (`describeNamedLooks`): a picture of someone else (`otherPerson`), on a sentence spoken to "you"
  * (what someone says inside quotes aside) that never speaks of "I", "me" or "my", nor of a "he" or
  * "she" in a story, whose label names one person of a ROLE — never a role the host gives themself,
- * a relative or a child, a recurring person by name, or a role the lines put after "your" ("your
- * customers": someone "you" deal with, never "you"). Undefined unless a role is in two or more such
+ * a relative or a child, a recurring person by name, or a role a line spoken to "you" names as
+ * someone else (`rolesBesideYou`: "your customers", "the flight attendant pours your soda"). The
+ * roles are the only ones "you" may be given (`acceptViewerLook`): 417's pictures of "you" are "a
+ * passenger and a flight attendant", and offering "attendant" too let a wrong answer give the crew —
+ * the host's own work — one stranger's look as "you". Undefined unless a role is in two or more such
  * pictures, when the video already has its viewer, or with no host on camera. Pure.
  */
 export function viewerAsk(
@@ -2067,23 +2108,15 @@ export function viewerAsk(
   const selfRoles = selfRolesOf(intro, params.hostTitle, params.hostName);
   const named = new Set((params.recurringPeople ?? []).map(p => personKey(p.name)));
   const byRole = new Map<string, number[]>();
-  const yours = new Set<string>();
+  const lines = scenes.map((_, i) => withoutQuotedSpeech(sentenceAround(scenes, i)));
+  // Every line of the film that says "you", host takes included: a role it names as someone else is
+  // never "you", wherever the picture of it sits.
+  const notYou = new Set<string>();
+  for (const line of Array.from(new Set(lines))) if (SPOKEN_TO_YOU.test(line)) rolesBesideYou(line).forEach(r => notYou.add(r));
   scenes.forEach((s, i) => {
     if (!s.otherPerson || s.hostPresent || s.splitVisual || s.coverHero || s.assetImageUrl || s.qrHero || s.showsBook) return;
-    const line = withoutQuotedSpeech(sentenceAround(scenes, i));
+    const line = lines[i];
     if (!spokenToViewer(line) || HE_WORDS.test(line) || SHE_WORDS.test(line)) return;
-    // "your customers", "your regular buyer": a person noun within three words after "your".
-    const words = line.toLowerCase().match(/[a-z]+(?:[-'’][a-z]+)*/g) ?? [];
-    words.forEach((w, k) => {
-      if (w !== "your") return;
-      for (const next of words.slice(k + 1, k + 4)) {
-        const e = PERSON_NOUN.get(next);
-        if (e) {
-          yours.add(e.lemma);
-          break;
-        }
-      }
-    });
     for (const p of namedPeople(s.otherPerson)?.people ?? []) {
       if (p.count !== 1 || p.kind !== "role" || selfRoles.includes(p.noun) || RELATIVES.has(p.noun)) continue;
       if (named.has(personKey(p.phrase))) continue;
@@ -2093,7 +2126,7 @@ export function viewerAsk(
     }
   });
   const roles = Array.from(byRole.entries())
-    .filter(([role, ids]) => ids.length >= 2 && !yours.has(role))
+    .filter(([role, ids]) => ids.length >= 2 && !notYou.has(role))
     .sort((a, b) => b[1].length - a[1].length)
     .map(([role]) => role);
   if (!roles.length) return undefined;

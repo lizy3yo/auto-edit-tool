@@ -55,8 +55,8 @@ export interface NamedLookAnswer {
 
 /**
  * "You" drawn as someone else with no look yet (`viewerAsk` in hostLook.ts, job 417): the pictures
- * that show it, the roles they give "you", and what the look must differ from — so this call, made
- * for every film anyway, writes the one look instead of a call of its own.
+ * that show it, the roles "you" can be in them, and what the look must differ from — so this call,
+ * made for every film anyway, writes the one look instead of a call of its own.
  */
 export interface ViewerLookAsk {
   ids: number[];
@@ -201,7 +201,9 @@ export function viewerLookBlock(scenes: StoryboardScene[], ask: ViewerLookAsk): 
     .join("; ");
   return (
     `THE VIEWER: these pictures are on lines spoken to "you" and show someone other than the host — ${shown}. ` +
-    `"You" has no look yet; the roles they give "you": ${ask.roles.join(", ")}.\n` +
+    // Only the roles no line names as someone else (`viewerAsk`): the crew beside "you" in 417's
+    // pictures is listed above, and must never read as a role "you" may take.
+    `"You" has no look yet; in these pictures "you" can only be: ${ask.roles.join(", ")}.\n` +
     (ask.hostLook?.trim() ? `THE HOST (never "you"): ${ask.hostLook.trim()}\n` : "") +
     (ask.people?.length ? `PEOPLE ALREADY WRITTEN: ${ask.people.map(p => `${p.name}: ${p.look}`).join(" | ")}\n` : "")
   );
@@ -210,9 +212,10 @@ export function viewerLookBlock(scenes: StoryboardScene[], ask: ViewerLookAsk): 
 /**
  * The look written for "you" (`NamedLookAnswer.viewer`), kept only when it can be one person in every
  * picture of "you": a name the props list's VIEWER rules accept (`parseViewerPerson`: not the host,
- * not a group, a look of three words or more) whose role is one the pictures gave "you" (`ask.roles`)
- * and is nobody already written, and a look that says man or woman and leaves out at most one of an
- * age and the hair (`lookGaps`). Undefined otherwise — "you" is then drawn as before. Pure.
+ * not a group, a look of three words or more) whose role is one "you" can be (`ask.roles`, never one
+ * a line names as someone else — 417's crew) and is nobody already written, and a look that says man
+ * or woman and leaves out at most one of an age and the hair (`lookGaps`). Undefined otherwise —
+ * "you" is then drawn as before. Pure.
  */
 export function acceptViewerLook(
   answer: NamedLookAnswer["viewer"],

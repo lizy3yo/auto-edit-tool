@@ -9710,6 +9710,9 @@ describe("round 15: the person the lines follow, and 'you', keep one look (jobs 
     const params = { hostLook: "A slender woman in her forties, a navy blazer with a gold pin", hostName: "Helena Hart", recurringPeople: [ROW_14, STORY_WOMAN] };
     const ask = viewerAsk(scenes, params, "https://x/host.png")!;
     expect(ask.ids).toEqual([1, 2, 4, 5]);
+    // "flight attendants will quietly hand over": the crew the lines name is never "you" — only the
+    // passenger is offered, and a model answering "the flight attendant" would be refused.
+    expect(ask.roles).toEqual(["passenger"]);
     const named = await describeNamedLooks(scenes, {
       viewer: { ...ask, hostLook: params.hostLook, hostName: params.hostName, people: params.recurringPeople },
       ask: async () => JSON.stringify({ kinds: [], pictures: [], viewer: YOU }),
