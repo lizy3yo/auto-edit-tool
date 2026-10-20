@@ -978,6 +978,28 @@ Express · tRPC · Drizzle · MySQL.
   job 418's "log restorer" drawn as an empty cabin). KNOWN LIMIT: a froe's blade sunk IN the wood
   failed three rounds although every rule says it — an image-model limit, not a missing rule.
   Details: `graphics-lab/out/review4/round15-*.json`.
+- **The seating cases round 15 left** (round 16, 2026-10-20, Helena's job 421 on the round-15 code:
+  8 of 9 seated pictures right; two left). (a) A WRITTEN LOOK CARRIES NO STATE (`lookWithoutState` in
+  pictureMemory.ts, in `keyThingLookFor`, `otherThingLookFor`, `placeLooksFor` and `sheetWithoutLight`,
+  and the props-call rule): empty/full, who sits in it, contents, open/shut, lit, clean, wet, stowed and
+  any absence are cut — only the state, never the thing it was said of; what is built that way stays
+  (an open-top crate, a fold-down tray table). A thing named for a state keeps its name for matching
+  and is called by what it is (`stateFreeName`: "empty row" → "row"). Job 421 #2 had sent "no
+  passengers seated" into a picture of a woman sitting in that row, and the row came back front-on
+  beside her. (b) THE WRITERS NEVER PLACE THE ROOM BEHIND A PERSON (`server/peoplePlaced.ts`,
+  `PEOPLE_PLACED_RULE` in the shot list rule 6c, the line check and panel pass, the same-topic groups
+  and the prompt writer): a person picture says what they do and where they are, never a wall, aisle,
+  row or counter "behind/ahead of/in front of" someone seated or working, and never "seen from behind"
+  of people who talk or hand something over; the camera is the picture rules' job. Backstop
+  `personPlacedWords` removes such phrases before the prompt and the check; a room part saying where
+  someone IS ("the seat behind her") stays (`ROOM_IS_WHERE`). (c) THE STILL CHECK SEES WHICH WAY A
+  SEAT FACES: a seat or row facing another way than its rows, a person facing their own seat back, a
+  body through its seat — told by what hides what, never by a seat's padded side; seats built to face
+  each other (a booth, a train's facing pairs, chairs round a room) are right; its redraw is told
+  `SEAT_FACING_FIX` / `SEATED_PERSON_FIX` inside the existing budget. 421 #29 turned out to be a right
+  seat misread by the reviewer, and the line now says how not to misread it. Left open: the cutaway
+  writer still reduces a two-person picture to "a pair of bare hands" (421 #28's galley talk).
+  Details: `graphics-lab/out/review4/round16-seating.json`.
 - `server/hostPlate.ts` — **provider-independent**. The lip-sync model animates the image it
   is handed and never changes the setting, so `HOST_PLATES=1` generates a 16:9 plate of the host
   IN each beat's setting (host photo as identity reference) and syncs from that instead of the
