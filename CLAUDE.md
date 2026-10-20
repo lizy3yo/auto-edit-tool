@@ -942,6 +942,42 @@ Express · tRPC · Drizzle · MySQL.
   time counts from when a graphic's words appear (`shownAt`), and the number pair, MYTH stamp and
   chapter label move to the allowed corner covering least of the picture's subject. Details:
   `graphics-lab/out/round14-docs.json`.
+- **A person is in a natural pose; what the targeted checks found** (round 15, 2026-10-20). The
+  operator on Helena's job 417: "they aren't even seated properly … an unnatural type of event the
+  person is doing, in every action" — two passengers sat BACKWARDS in forward-facing airline seats.
+  Cause: the no-face rules placed the camera relative to the PERSON ("from behind or the side") while
+  descriptions placed it relative to the ROOM ("aisle visible behind them"); in a row of fixed seats
+  the model turned the people round. A survey of 203 person pictures (jobs 399-417) found 4 such cabin
+  faults, conversations drawn as two backs, a sleeper flipped face-down and a toilet held one-handed.
+  (a) NATURAL POSE: every person picture carries `NATURAL_POSE_BODY_CLAUSE` (the body sits, stands,
+  lies and works as a real person does, facing the way its seat or work faces) and, where its framing
+  allows, `NATURAL_POSE_CAMERA_CLAUSE` (the CAMERA moves to keep the face out — beside, behind over a
+  seat back, below the chin — never the body); a chin-line host takes the body half only, anonymous
+  hands take `NATURAL_HANDS_POSE_CLAUSE`; two people talking face each other
+  (`FACING_EACH_OTHER_CLAUSE`); the turned-away redraw clauses move the camera. The still check's
+  broken question names an unnatural pose, and that fault's redraw is told `NATURAL_POSE_FIX` inside
+  the existing budget (`POSE_FAULT`). Person prompts grow ~12%; no new call. The targeted checks of the
+  verification films (jobs 415-419, `graphics-lab/out/review4/`) then gave: (b) THE HOST'S OWN "I" IS
+  THE HOST (`narratorOwnLine`, `narratorPictured`) — "I spent flights nursing a ginger ale" was drawn
+  as a story's passenger. (c) THE PERSON THE LINES FOLLOW, AND "YOU", KEEP ONE LOOK
+  (`linkFollowedPeople`: same sex, an age that fits, the person's place words or the he/she the lines
+  follow, exactly one fit; `viewerAsk` asks the one look for "you" on the named-things call already
+  made, never a role the lines name as someone else). (d) A PUSHED THING NEVER MOVES BY ITSELF (a cart,
+  stroller, luggage, a door — `SELF_MOVING_SYSTEM`, backup `pushedThingMoves`). (e) A FULL STOP THAT
+  ENDS NO SENTENCE (`shared/sentenceEnds.ts`: "U. S.", "Dr.", "a.m.", web addresses — one test for
+  every splitter; job 417's cut inside "U.S."). (f) THE SPLIT PANEL'S BOOK GUARD follows round 13's
+  cutaway guard: only the video's own book, from the panel's own words, never a neighbour's prompt
+  (job 416's field-guide panel was the coast picture again). (g) A season or hour the PICTURE'S own
+  words name is held too (`seasonHourClause` reads `showSubject` first; job 416's spring robin in
+  snow). (h) A THING THE PICTURE SAYS IS NOT THERE IS NOT IN IT (`saysAbsent`): never filed under it,
+  checked for it or its memory (job 416's empty lawn had become the robin's memory). (i) A steps list
+  told of another time carries that time (`listSetting`; job 418's chainsaw in a hand-roofing
+  passage). (j) A TOOL NOBODY HOLDS IS PUT DOWN (`UNHELD_TOOL_CLAUSE`): on a surface or in its holder,
+  in the work only where a real one stays, never hung or propped (job 418's froe on a wire hook).
+  (k) A PERSON NAMED BY WHAT THEY DO is a person on a person's sign (`agentAt`, guard `NOT_AN_AGENT`;
+  job 418's "log restorer" drawn as an empty cabin). KNOWN LIMIT: a froe's blade sunk IN the wood
+  failed three rounds although every rule says it — an image-model limit, not a missing rule.
+  Details: `graphics-lab/out/review4/round15-*.json`.
 - `server/hostPlate.ts` — **provider-independent**. The lip-sync model animates the image it
   is handed and never changes the setting, so `HOST_PLATES=1` generates a 16:9 plate of the host
   IN each beat's setting (host photo as identity reference) and syncs from that instead of the
