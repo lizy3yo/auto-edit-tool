@@ -100,28 +100,33 @@ const clauseBefore = (text: string, at: number) => {
 };
 
 /**
- * The outdoor scene a season word stands before in a picture's OWN words, which are a noun phrase and
- * say the season as a describing word: "above a green summer lawn" (job 411 scene 21's own words), "a
- * spring garden", "fall leaves on the path". Read only there (`pictureSeason`) — in a spoken line a
- * season before a noun is read as a thing named after it, and round 14's lines stay as they were.
+ * The outdoor scene, or the light or time of day, a season word stands before in a picture's OWN
+ * words, which are a noun phrase and say the season as a describing word: "above a green summer lawn"
+ * (job 411 scene 21's own words), "a spring garden", "fall leaves on the path" — and "outdoors under
+ * pale early-spring light" (job 332 scenes 14 and 26, each drawn from two references, whose spring
+ * went unsaid when only an outdoor scene counted), "on a spring morning", "summer daylight". Read
+ * only there (`pictureSeason`) — in a spoken line a season before a noun is read as a thing named
+ * after it, and round 14's lines stay as they were.
  */
 const SEASON_SCENERY = new Set(
   (
     "lawn lawns garden gardens yard yards backyard meadow meadows field fields pasture pastures grass " +
-    "leaves foliage trees woods forest orchard landscape countryside rain shower showers storm storms " +
-    "breeze bloom blooms blossom blossoms flowers"
+    "leaves foliage greenery trees woods forest orchard landscape countryside rain shower showers storm " +
+    "storms breeze bloom blooms blossom blossoms flowers " +
+    "light daylight sunlight sunshine sun sky skies air weather morning mornings afternoon afternoons " +
+    "evening evenings day days night nights"
   ).split(" ")
 );
 
 /**
  * The season `text` sets what it shows in (`held`), or none: the first one it names, with its "early"
  * / "late" / "mid" ("late winter"), when every season it names agrees — two that contrast, or "all
- * year", hold none. With `scenery`, a season said as a describing word before an outdoor scene ("a
- * green summer lawn") counts too — for a picture's own words. `notNow` is every season it names as
- * ANOTHER time than its moment — one it gets ready for, waits for or sets the moment against
- * ("expecting in the spring", "ready for spring", "since spring", "unlike summer"). A season only ruled
- * out ("never mow it short in summer") is not in it: that is still the moment, with an act ruled out.
- * Pure.
+ * year", hold none. With `scenery`, a season said as a describing word before an outdoor scene, its
+ * light or its time of day ("a green summer lawn", "pale spring light") counts too — for a picture's
+ * own words. `notNow` is every season it names as ANOTHER time than its moment — one it gets ready
+ * for, waits for or sets the moment against ("expecting in the spring", "ready for spring", "since
+ * spring", "unlike summer"). A season only ruled out ("never mow it short in summer") is not in it:
+ * that is still the moment, with an act ruled out. Pure.
  */
 function readSeasons(text: string | undefined, scenery: boolean): { held?: HeldSeason; notNow: Set<Season> } {
   const notNow = new Set<Season>();
@@ -136,8 +141,8 @@ function readSeasons(text: string | undefined, scenery: boolean): { held?: HeldS
     const after = text.slice(at + m[0].length);
     // A thing named after a season ("a winter coat", "summer squash", "spring steel").
     const next = /^\s+([a-z'’-]+)/i.exec(after)?.[1]?.toLowerCase().replace(/['’]/g, "");
-    const outdoors = scenery && !!next && SEASON_SCENERY.has(next);
-    if (!m[2] && next && !/^[,.;:!?—)]/.test(after) && !STILL_A_TIME.has(next) && !outdoors) continue;
+    const described = scenery && !!next && SEASON_SCENERY.has(next);
+    if (!m[2] && next && !/^[,.;:!?—)]/.test(after) && !STILL_A_TIME.has(next) && !described) continue;
     const season = seasonOf(word);
     const tumble = /^fall$/i.test(word) && TUMBLE.test(sentenceAt(text, at));
     // Read before the frame: "until spring", "ready for spring" need none to be the season waited for.
@@ -146,7 +151,7 @@ function readSeasons(text: string | undefined, scenery: boolean): { held?: HeldS
       continue;
     }
     const ambiguous = /^(?:spring|fall)$/i.test(word) && !m[2];
-    if (ambiguous && !outdoors && !SEASON_FRAME_BEFORE.test(before) && !SEASON_FRAME_AFTER.test(after)) continue;
+    if (ambiguous && !described && !SEASON_FRAME_BEFORE.test(before) && !SEASON_FRAME_AFTER.test(after)) continue;
     if (tumble) continue;
     if (RULED_OUT.test(clauseBefore(text, at))) continue;
     const q = QUALIFIER.exec(before)?.[1]?.toLowerCase();
@@ -167,7 +172,8 @@ export function lineSeason(text: string | undefined): HeldSeason | undefined {
 /**
  * The season a picture's OWN words (`showSubject`, `visualPrompt`) set it in: every exclusion a line
  * has — a fall that is a tumble, "of the spring" the coil, a season only planned for, a name — and a
- * season said as a describing word before an outdoor scene too ("a green summer lawn"). Pure.
+ * season said as a describing word before an outdoor scene, its light or its time of day too ("a green
+ * summer lawn", "under pale early-spring light", "a spring morning"). Pure.
  */
 export function pictureSeason(words: string | undefined): HeldSeason | undefined {
   return readSeasons(words, true).held;

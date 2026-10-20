@@ -312,6 +312,30 @@ describe("the season a picture's own words set it in (pictureSeason)", () => {
     expect(lineSeason("The spring garden club meets at the library.")).toBeUndefined();
   });
 
+  it("and before the light or the time of day it is seen in (job 332 scenes 14 and 26, job 401 scene 33)", () => {
+    // Job 332 scene 14's own words, drawn from two references.
+    expect(
+      pictureSeason(
+        "A foot-square pale pine grid with equal square openings, standing upright on a folding table draped in plain dark cloth outdoors under pale early-spring light."
+      )
+    ).toEqual({ season: "spring", said: "early spring" });
+    expect(pictureSeason("Neat rows of small charred cedar blocks on a dark-cloth-draped folding table outdoors in pale spring light.")?.season).toBe("spring");
+    expect(pictureSeason("Plain cream card resting on a wooden desk in a quiet study, late-spring light from a nearby window.")).toEqual({
+      season: "spring",
+      said: "late spring",
+    });
+    expect(pictureSeason("a robin on a fence post on a spring morning")?.season).toBe("spring");
+    expect(pictureSeason("a market table in even summer daylight")?.season).toBe("summer");
+    expect(pictureSeason("finished coasters on the bench in soft fall light")?.season).toBe("autumn");
+    // A spoken line reads it as before.
+    expect(lineSeason("It was a spring morning like any other.")).toBeUndefined();
+    // Never the coil or a tumble beside the light or the hour.
+    expect(pictureSeason("the tension of the spring in the morning light")).toBeUndefined();
+    expect(pictureSeason("a coiled spring beside the light switch")).toBeUndefined();
+    expect(pictureSeason("a spring-loaded light switch on the wall")).toBeUndefined();
+    expect(pictureSeason("a fall day at the foot of the stairs where she slipped")).toBeUndefined();
+  });
+
   it("with every one of a line's exclusions: a tumble, the coil, a season planned for, a thing named after one, a name", () => {
     expect(pictureSeason("an aluminium ladder lying at the foot of the stairs after the fall")).toBeUndefined();
     expect(pictureSeason("a grab bar beside the tub where she landed in the fall")).toBeUndefined();
@@ -359,6 +383,26 @@ describe("a picture drawn from references is told the season and hour its OWN wo
     expect(seasonHourClause(drawnFrom(job411()[2]))).toBe(
       ` THIS PICTURE IS IN SUMMER (no snow, frost or ice on anything), AS ITS OWN WORDS SAY ${SAY}`
     );
+  });
+
+  it("a season said of the light (job 332 scene 14, job 401 scene 33's rewrite)", () => {
+    const grid = pic(
+      14,
+      "I figured 2 hours. It took 6. It sells for $90 to $130, but once you take out the lumber, that's about $14 for every hour I stood at the bench.",
+      "A foot-square pale pine grid with equal square openings, standing upright on a folding table draped in plain dark cloth outdoors under pale early-spring light.",
+      { keyThing: "kumiko lattice panel" }
+    );
+    expect(seasonHourClause(drawnFrom(grid))).toBe(
+      ` THIS PICTURE IS IN EARLY SPRING (no snow, frost or ice on anything), AS ITS OWN WORDS SAY ${SAY}`
+    );
+    // What it must show names no season: the rewrite's is held.
+    const card = pic(33, "Then he turns the whole thing over in a single motion: life is not short.", "a cream sympathy card resting on the wooden desk in the study", {
+      visualPrompt: "Plain cream sympathy card with simple embossed border resting on a wooden desk in a quiet study, late-spring light from a nearby window.",
+      keyThing: "sympathy card",
+    });
+    expect(seasonHourClause(drawnFrom(card))).toBe(` THIS PICTURE IS IN LATE SPRING (no snow, frost or ice on anything), AS ITS OWN WORDS SAY ${SAY}`);
+    // Fall light in its own words keeps a spring line unsaid: its own words beat the line.
+    expect(seasonHourClause(drawnFrom(pic(5, "In the spring I set the hens' feeder out by the run.", "the feeder by the coop in soft fall light")))).toBe("");
   });
 
   it("an hour only the picture names (job 405 scene 20: the night visit, read from the cat's side)", () => {

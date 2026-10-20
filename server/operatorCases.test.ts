@@ -9726,4 +9726,21 @@ describe("a season or an hour the picture's OWN words name is held like its line
     const porch = robin(97, "or a neighbor two doors down expecting in the spring.", "the neighbor's front porch in spring");
     expect(seasonHourClause({ ...porch, ...refs })).toBe("");
   });
+
+  it("a season said of the light is the picture's too (job 332 scene 14, drawn from two references)", async () => {
+    const { seasonHourClause } = await import("./lineSeason");
+    const { MEMORY_VIEWS } = await import("./pictureMemory");
+    const grid = {
+      index: 14,
+      scriptText: "I figured 2 hours. It took 6. It sells for $90 to $130, but once you take out the lumber, that's about $14 for every hour I stood at the bench.",
+      showSubject:
+        "A foot-square pale pine grid with equal square openings, standing upright on a folding table draped in plain dark cloth outdoors under pale early-spring light.",
+      keyThing: "kumiko lattice panel",
+      memoryView: MEMORY_VIEWS[2],
+      memoryRefUrls: ["https://r2/332/still-src-3.png", "https://r2/332/still-src-9.png"],
+    } as StoryboardScene;
+    expect(seasonHourClause(grid)).toContain("THIS PICTURE IS IN EARLY SPRING (no snow, frost or ice on anything), AS ITS OWN WORDS SAY");
+    // The coil beside the light is never a season.
+    expect(seasonHourClause({ ...grid, showSubject: "the tension of the spring in the morning light" })).toBe("");
+  });
 });
