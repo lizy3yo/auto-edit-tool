@@ -240,6 +240,35 @@ export function numberWords(n: number): string[] {
     .map(d => ONES[+d]);
 }
 
+/** The words a number spelled out in the script can END on: the number itself, or what it counts. */
+const SPELLED_NUMBER_END = new Set([
+  ...ONES,
+  ...TENS,
+  "hundred",
+  "thousand",
+  "million",
+  "billion",
+  "dollar",
+  "dollars",
+  "cent",
+  "cents",
+  "percent",
+]);
+
+/**
+ * Whether a SCRIPT word can be the last word of a number spelled out ("seventy-five", "dollars.",
+ * "hundred,"). The transcriber writes the whole amount as ONE numeral ("$75.", "300,"), so such a
+ * word is never heard as itself, and a cut looked up by it finds nothing. Pure — unit-tested.
+ */
+export function endsSpelledNumber(word: string | undefined): boolean {
+  const parts = (word ?? "")
+    .toLowerCase()
+    .replace(/[^a-z-]+/g, "")
+    .split("-")
+    .filter(Boolean);
+  return parts.length > 0 && parts.every(p => SPELLED_NUMBER_END.has(p));
+}
+
 /**
  * Normalized MATCH tokens for one word: pure digits expand to their spoken form so a numeric
  * transcript aligns with a spelled-out script and vice versa ("$17" ⇄ "seventeen dollars",

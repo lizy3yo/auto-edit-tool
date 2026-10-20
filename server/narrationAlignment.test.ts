@@ -10,6 +10,7 @@ import {
   keepOwnWords,
   retimeSpokenNumbers,
   numberBreakPause,
+  endsSpelledNumber,
 } from "./narrationAlignment";
 import { auditStoryboardTimeline } from "./alignmentHeal";
 import type { WhisperWord } from "./_core/voiceTranscription";
@@ -1134,5 +1135,18 @@ describe("a sentence break beside a spoken number is cut in the real pause, what
     const meets = [null, [5.173, 5.473], [6.753, 7.013], null] as const;
     expect(keepOwnWords(aligned, snapped, meets)).toEqual(aligned);
     expect(keepOwnWords(aligned, snapped, meets, [false, true, false, false])).toEqual(snapped);
+  });
+});
+
+describe("a word that ends a number the script spells out (the gate's anchor for '…seventy-five dollars.')", () => {
+  it("the last word of an amount, a count or a price is one, with its punctuation", () => {
+    // Job 413's script against what was heard: "seventy-five dollars." ⇄ "$75.", "eighty-four." ⇄
+    // "84.", "five hundred dollars," ⇄ "$500,", "Number one." ⇄ "1." (job 411).
+    for (const w of ["dollars.", "eighty-four.", "dollars,", "one.", "hundred", "seventy-five", "percent.", "Fourteen,"])
+      expect(endsSpelledNumber(w)).toBe(true);
+  });
+  it("any other word is not — a word that only holds a number word, or mixes one in, included", () => {
+    for (const w of ["run.", "pages,", "backward.", "anyone.", "one-on-one.", "ten-year", "often.", "", undefined])
+      expect(endsSpelledNumber(w)).toBe(false);
   });
 });

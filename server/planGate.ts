@@ -26,7 +26,7 @@
 import type { StoryboardScene, LongformInputParams } from "../shared/types";
 import { sceneHoldPlan } from "../shared/filmTimeline";
 import type { SilenceInterval } from "./videoAssembly";
-import { numberBreakPause, retimeSpokenNumbers } from "./narrationAlignment";
+import { endsSpelledNumber, numberBreakPause, retimeSpokenNumbers } from "./narrationAlignment";
 import { SHOWS_PERSON, showsSomeoneElse } from "./hostLook";
 import { namesHostBefore } from "./hostIntro";
 import {
@@ -599,6 +599,8 @@ const endMark = (w: string | undefined) =>
  * 400's pitch that put the share three words past "…people, and more." — inside the next sentence.
  */
 const ANCHOR_WINDOW_WORDS = 6;
+/** A heard word written with a digit — how the transcriber writes every spoken number. */
+const SPOKEN_NUMERAL = /\d/;
 
 /**
  * The cut before the word `share` of the way through the span [from, to], placed in the REAL gap
@@ -606,8 +608,9 @@ const ANCHOR_WINDOW_WORDS = 6;
  * share is found, and the cut goes in a pause inside the gap before it when there is one, else in
  * the middle of the gap. When the script word the cut follows (`after`) was HEARD nearby, the cut
  * goes right after it instead — the nearest one, preferring the one heard ending the same way (a
- * full stop for a sentence). After a sentence end with no pause in the heard gap, the cut goes in
- * the longest real pause the two heard words reach, even one the transcript stretched a word over —
+ * full stop for a sentence); a number the script spells out is found as the numeral heard in its
+ * place. After a sentence end with no pause in the heard gap, the cut goes in the longest real
+ * pause the two heard words reach, even one the transcript stretched a word over —
  * and beside a spoken number, in the longest one reaching the word before as well
  * (`numberBreakPause`), whatever the heard gap holds.
  * Null without enough words to go on. Pure — unit-tested via the gate.
@@ -639,6 +642,25 @@ function gapBeforeWord(
       if (best < 0 || score > bestScore) {
         best = j;
         bestScore = score;
+      }
+    }
+    // A number the script spells out is heard as ONE numeral ("…seventy-five dollars." ⇄ "$75."), so
+    // its last word is never heard as itself and the word share alone placed the cut — a word or more
+    // off, the numeral counting once: job 413 (2:03), "…priced twenty-five to seventy-five dollars. |
+    // Nine times out of ten", put it after "Nine" (the host back on "times"), or, from a span starting
+    // a scene earlier, between "to" and "$75.", inside the price. The nearest numeral heard ending the
+    // same way stands in for the word; where the cut then goes is the pause's call
+    // (`numberBreakPause` below), never the numeral's own time. After a comma it is the heard gap's,
+    // as for any word: "…under five hundred dollars, | most of them" no longer cuts inside "most of".
+    if (best < 0 && endsSpelledNumber(after)) {
+      for (
+        let j = Math.max(1, k - ANCHOR_WINDOW_WORDS);
+        j <= Math.min(inSpan.length - 1, k + ANCHOR_WINDOW_WORDS);
+        j++
+      ) {
+        const heard = inSpan[j - 1].word ?? "";
+        if (!SPOKEN_NUMERAL.test(heard) || endMark(heard) !== endMark(after)) continue;
+        if (best < 0 || Math.abs(j - k) < Math.abs(best - k)) best = j;
       }
     }
     if (best > 0) k = best;

@@ -1371,6 +1371,65 @@ describe("the host comes back after the book cover in the pause, even with the w
     expect(cover.narrationEndSec!).toBeLessThanOrEqual(179.958);
     expect(host.narrationStartSec).toBeCloseTo(cover.narrationEndSec!, 5);
   });
+
+  describe("a sentence that ENDS on a number the script spells out (job 413 at 2:03)", () => {
+    // "…priced twenty-five to seventy-five dollars. | Nine times out of ten…": the script spells the
+    // price, the transcriber heard "$75.", so the gate never found "dollars." among the heard words
+    // and the word share alone placed the cut — a word off: after "Nine", 125.23, so the cover kept
+    // "Nine" and the host came back on "times" (from a span starting a scene earlier, between "to" and
+    // "$75.", inside the price). The film's own words and pauses, laid out as a book cover finishing
+    // its sentence before the host comes back.
+    const HEARD_203 =
+      "flipping.@116.259-116.639 Every@117.34-117.56 spring,@117.6-118 Marketplace@118.22-118.801 fills@118.881-119.181 up@119.261-119.341 with@119.401-119.521 mowers@119.601-119.942 listed@120.022-120.322 as@120.442-120.562 ran@120.822-121.083 last@121.143-121.423 season,@121.463-121.863 priced@122.103-122.704 $25@122.744-123.064 to@123.124-123.204 $75.@123.284-123.865 Nine@125.026-125.206 times@125.246-125.486 out@125.546-125.646 of@125.686-125.726 ten,@125.806-126.127 the@126.187-126.267 crime@126.307-126.567 is@126.627-126.707 stale@126.767-127.107 fuel@127.187-127.528 and@127.568-127.648 a@127.668-127.708 gummed@127.768-128.028 up@128.068-128.188 carburetor,@128.228-128.849 an@129.269-129.329 afternoon@129.429-129.809 of@129.849-129.91 cleaning,@129.97-130.39 and@130.45-130.55 a@130.57-130.61 $2@130.83-131.11 gasket.@131.151-131.591";
+    const heard203 = () =>
+      HEARD_203.split(" ").map(tok => {
+        const [, word, start, end] = /^(.*)@([\d.]+)-([\d.]+)$/.exec(tok)!;
+        return { word, start: Number(start), end: Number(end) };
+      });
+    const pauses203 = [
+      [116.101, 116.237], [116.472, 117.211], [117.943, 118.098], [118.721, 118.848], [120.444, 120.692],
+      [121.695, 122.028], [122.94, 123.069], [124.064, 124.902], [127.001, 127.151], [128.703, 129.165],
+      [131.215, 131.359], [131.423, 132.171],
+    ].map(([start, end]) => ({ start, end }));
+    const PRICE = "priced twenty-five to seventy-five dollars.";
+    const block203 = (price = PRICE) => [
+      beat(1, "H", 110, 117.211, "Three businesses in, and you can already see the pattern: the money lives in the math."),
+      beat(2, "B", 117.211, 122.028, "Every spring, Marketplace fills up with mowers listed as ran-last-season,"),
+      beat(
+        3,
+        "H",
+        122.028,
+        132.171,
+        `${price} Nine times out of ten the crime is stale fuel and a gummed-up carburetor — an afternoon of cleaning and a two-dollar gasket.`
+      ),
+      beat(4, "Q", 132.171, 140, "There’s a QR code on your screen — aim your phone’s camera at it, and the page opens on its own."),
+    ];
+
+    it("the cover finishes the price and the host comes back in the pause after it", () => {
+      const r = enforcePlanRules(block203(), params, { words: heard203(), silences: pauses203 });
+      const cover = r.scenes.find(s => s.coverHero)!;
+      const host = r.scenes[r.scenes.indexOf(cover) + 1];
+      expect(cover.scriptText).toMatch(/seventy-five dollars\.$/);
+      expect(host.scriptText).toMatch(/^Nine times out of ten/);
+      expect(cover.narrationEndSec!).toBeGreaterThanOrEqual(124.064);
+      expect(cover.narrationEndSec!).toBeLessThanOrEqual(124.902);
+      expect(host.narrationStartSec).toBeCloseTo(cover.narrationEndSec!, 5);
+    });
+
+    it("unchanged: a sentence ending on a word heard as itself is found by that word", () => {
+      // The same line ending on a plain word: "dollars." is replaced by "bucks." in the script and in
+      // what was heard, so the word itself anchors the cut — in the same pause.
+      const words = heard203().map(x => (x.word === "$75." ? { ...x, word: "bucks." } : x));
+      const r = enforcePlanRules(block203("priced twenty-five to seventy-five bucks."), params, {
+        words,
+        silences: pauses203,
+      });
+      const cover = r.scenes.find(s => s.coverHero)!;
+      expect(cover.scriptText).toMatch(/seventy-five bucks\.$/);
+      expect(cover.narrationEndSec!).toBeGreaterThanOrEqual(124.064);
+      expect(cover.narrationEndSec!).toBeLessThanOrEqual(124.902);
+    });
+  });
 });
 
 describe("the film never ends on a host shot under a second (the audit's last open item)", () => {

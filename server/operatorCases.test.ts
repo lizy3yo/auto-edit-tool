@@ -7821,3 +7821,52 @@ describe("a cut at a sentence break beside a spoken number goes in the real paus
     expect(ranges[0].endSec + 98).toBeCloseTo(100.675, 3);
   });
 });
+
+describe("a sentence that ends on a number the script spells out is cut in the pause after it (job 413 at 2:03)", () => {
+  // "…priced twenty-five to seventy-five dollars. | Nine times out of ten…": the transcriber wrote
+  // the price as "$75.", so the gate's cut never found the script's "dollars." among the heard words
+  // and the word share alone placed it a word off — after "Nine" (125.23), the host back on "times".
+  // The numeral heard in the word's place now finds the sentence end, and the pause after the price
+  // (124.064-124.902) takes the cut.
+  const words = "priced@122.103-122.704 $25@122.744-123.064 to@123.124-123.204 $75.@123.284-123.865 Nine@125.026-125.206 times@125.246-125.486 out@125.546-125.646 of@125.686-125.726 ten,@125.806-126.127 the@126.187-126.267 crime@126.307-126.567 is@126.627-126.707 stale@126.767-127.107 fuel@127.187-127.528 and@127.568-127.648 a@127.668-127.708 gummed@127.768-128.028 up@128.068-128.188 carburetor,@128.228-128.849 an@129.269-129.329 afternoon@129.429-129.809 of@129.849-129.91 cleaning,@129.97-130.39 and@130.45-130.55 a@130.57-130.61 $2@130.83-131.11 gasket.@131.151-131.591"
+    .split(" ")
+    .map(tok => {
+      const [, word, start, end] = /^(.*)@([\d.]+)-([\d.]+)$/.exec(tok)!;
+      return { word, start: Number(start), end: Number(end) };
+    });
+  const silences = [
+    [121.695, 122.028], [122.94, 123.069], [124.064, 124.902], [127.001, 127.151], [128.703, 129.165],
+    [131.215, 131.359], [131.423, 132.171],
+  ].map(([start, end]) => ({ start, end }));
+  const cta = (s: StoryboardScene, from: number, to: number) =>
+    Object.assign(s, { cta: true, ctaIndex: 0, narrationStartSec: from, narrationEndSec: to, audioDuration: to - from });
+
+  it("the book cover finishes the price, the host comes back on 'Nine', in the pause", async () => {
+    const { enforcePlanRules } = await import("./planGate");
+    const scenes = [
+      cta(host(1, "Three businesses in, and you can already see the pattern.", { qrCorner: true, hostProtected: true }), 110, 117.211),
+      cta(
+        pic(2, "Every spring, Marketplace fills up with mowers listed as ran-last-season,", "the book", { coverHero: true, stillImage: true }),
+        117.211,
+        122.028
+      ),
+      cta(
+        host(
+          3,
+          "priced twenty-five to seventy-five dollars. Nine times out of ten the crime is stale fuel and a gummed-up carburetor — an afternoon of cleaning and a two-dollar gasket.",
+          { qrCorner: true, hostProtected: true }
+        ),
+        122.028,
+        132.171
+      ),
+      cta(pic(4, "There’s a QR code on your screen — aim your phone’s camera at it.", "a garage bench", { qrHero: true, qrTail: true, stillImage: true }), 132.171, 140),
+    ];
+    const r = enforcePlanRules(scenes, { faceImageUrl: "https://example.com/host.jpg" } as any, { words, silences });
+    const cover = r.scenes.find(s => s.coverHero)!;
+    const back = r.scenes[r.scenes.indexOf(cover) + 1];
+    expect(cover.scriptText).toMatch(/seventy-five dollars\.$/);
+    expect(back.scriptText).toMatch(/^Nine times out of ten/);
+    expect(cover.narrationEndSec!).toBeGreaterThanOrEqual(124.064);
+    expect(cover.narrationEndSec!).toBeLessThanOrEqual(124.902);
+  });
+});
