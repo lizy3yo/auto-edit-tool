@@ -9787,4 +9787,15 @@ describe("round 15: a picture that says a thing is NOT there is never its memory
     Object.assign(b[0], { showSubject: "a quiet backyard lawn at morning, one robin by the fence", visualPrompt: undefined });
     expect(memorySourcesFor(b, b[1])).toEqual([b[0]]);
   });
+
+  it("a negated DOING keeps its thing: the lawn no robins are working is still the lawn, the light a robin won't touch is there", async () => {
+    const { keyThingsIn } = await import("./shotList");
+    const things: KeyThing[] = ["robin", "backyard lawn", "porch light"].map(name => ({ name, look: "" }));
+    expect(keyThingsIn("the backyard lawn at dawn, no robins working the backyard lawn yet", things).map(t => t.name)).toEqual([
+      "backyard lawn",
+    ]);
+    const b = board();
+    const shy = { ...b[2], showSubject: "a robin by the back door that won't touch the porch light", otherKeyThings: ["porch light"] };
+    expect(requiredThingsFor(shy)).toEqual(["robin", "porch light"]);
+  });
 });

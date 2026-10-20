@@ -2944,7 +2944,11 @@ export function othersOfKindIn(
  * post, no other robins around" still shows the robin, and "not only robins" and "no more than three
  * robins" show robins, as "nearly empty of" and "almost no" leave some there. "Empty" alone describes the
  * thing it is said of ("an empty feeder" is the feeder): only "empty of" says what is not there.
- * "Nobody" names no thing — a key thing is never a person. Replayed over the 355 stored storyboards
+ * A negated DOING never is: "a hen that won't touch the feeder", "pecking without touching the
+ * feeder", "no robins working the lawn" — the feeder and the lawn are there (`absentAt`: "not",
+ * "never" and an "-n't" word reach a name only over an article, a count or a word like "show"; a
+ * word before the article is another phrase). "Nobody" names no thing — a key thing is never a
+ * person. Replayed over the 355 stored storyboards
  * (28,815 pictures), 4 pictures in 4 films lose a filing their words rule out — 416's empty lawn (the
  * robin), job 368 scene 23's "coop … with no feeder present" (the feeder, whose first picture it was
  * drawn from too), job 278's "smoke alarm … with no battery door" (the battery) and job 335's alarm "on a
@@ -2981,6 +2985,14 @@ const ABSENT_LINK = new Set("is are was were now already all long completely ent
 const NOT_SEEN = /^(?:visible|there|here|present|shown|seen|pictured|showing)$/;
 /** Where a picture's frame is: "out of frame", "not in sight". */
 const FRAME = /^(?:frame|sight|view|shot|picture)$/;
+
+/**
+ * Words for what a picture holds, which a negation before them says is not in it: "doesn't show a
+ * cup", "does not include the lid", "doesn't have a collar". Any other word after "not", "never" or an
+ * "-n't" word is a negated DOING — "a hen that won't touch the feeder" — and the feeder is there.
+ */
+const HOLDS =
+  /^(?:show|shows|showing|include|includes|including|contain|contains|containing|have|has|having|hold|holds|holding|feature|features|featuring)$/;
 
 /** A negation: "no", "not", "without" …, or an "-n't" word ("isn't", "doesn't"). */
 const negates = (w: string) => ABSENT_BEFORE.has(w) || /n't$/.test(w);
@@ -3020,12 +3032,14 @@ function absentAfter(ws: PhraseWord[], at: number): boolean {
  * Whether the name at `at` (its head word) is said as NOT THERE: a negation right before it, across
  * its own words, articles and up to two describing words ("no robins", "not a single robin", "doesn't
  * show a cup"), "empty of / free of / instead of / none of …", "no sign of …", "rather than …", or the
- * words after it (`absentAfter`). Never past a comma or a preposition; "not only", "not just" and "no
- * more than" say it IS there. Pure.
+ * words after it (`absentAfter`). Never past a comma or a preposition, never past a describing word
+ * that comes before an article (a doing: "won't touch the feeder"), never past "except"; "not only",
+ * "not just" and "no more than" say it IS there. Pure.
  */
 function absentAt(ws: PhraseWord[], at: number, own: Set<string>): boolean {
   if (absentAfter(ws, at)) return true;
   let describing = 0;
+  let article = false;
   for (let j = at - 1; j >= 0; j--) {
     const w = ws[j];
     if (w.endsClause || !w.bare) return false;
@@ -3033,7 +3047,15 @@ function absentAt(ws: PhraseWord[], at: number, own: Set<string>): boolean {
     if (negates(w.bare)) {
       const next = ws[j + 1]?.bare ?? "";
       if (someLeft(ws, j) || (w.bare === "not" && /^(?:only|just|merely|simply)$/.test(next))) return false;
-      return !(/^(?:more|less|fewer)$/.test(next) && ws[j + 2]?.bare === "than");
+      if (/^(?:more|less|fewer)$/.test(next) && ws[j + 2]?.bare === "than") return false;
+      // "No" says what is missing whatever describes it ("no wooden spoon"); "not", "never", "nor" and
+      // an "-n't" word say a THING is not there only right before the name, an article or a count, or
+      // a word for what a picture holds (`HOLDS`) — "without" also before a describing word ("without
+      // wooden handles") — never before a doing: "a hen that won't touch feed", "pecking the ground
+      // without touching feed" — the feed is there.
+      if (j + 1 === at || own.has(next) || w.bare === "no" || w.bare === "none") return true;
+      if (ABSENT_FILLER.has(next) || HOLDS.test(next)) return true;
+      return w.bare === "without" && !/ing$/.test(next);
     }
     if (w.bare === "of" && j > 0 && !ws[j - 1].endsClause) {
       const by = ws[j - 1].bare;
@@ -3042,9 +3064,19 @@ function absentAt(ws: PhraseWord[], at: number, own: Set<string>): boolean {
       return false;
     }
     if (w.bare === "than") return j > 0 && ws[j - 1].bare === "rather" && !ws[j - 1].endsClause;
-    if (ABSENT_FILLER.has(w.bare)) continue;
-    if (PHRASE_STOP.has(w.bare)) return false;
-    if (++describing > 2) return false;
+    if (ABSENT_FILLER.has(w.bare)) {
+      article = true;
+      continue;
+    }
+    // "doesn't show a cup", "does not include the lid": what the picture holds, said as not held.
+    if (HOLDS.test(w.bare) && j > 0 && !ws[j - 1].endsClause && negates(ws[j - 1].bare)) continue;
+    // "no birds except a robin", "nothing besides the cup": the exception is there — and "not the whole
+    // quilt", "not a full jar" say PART of it is (a close view of one block is a part of the quilt).
+    if (PHRASE_STOP.has(w.bare) || /^(?:except|besides|whole|entire|full|complete)$/.test(w.bare)) return false;
+    // Describing words sit between an article and the name ("no other wooden spoons"); a word BEFORE
+    // the article is another phrase — a doing the negation is about, and the thing after it is there:
+    // "no robins working the lawn" (the lawn is the picture), "a cat that does not see the bird".
+    if (article || ++describing > 2) return false;
   }
   return false;
 }

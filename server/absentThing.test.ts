@@ -144,6 +144,12 @@ describe("saysAbsent: a name the picture's words say only as NOT THERE", () => {
       ["the counter with the cup out of frame", "cup"],
       ["the empty branch, the bird no longer there", "bird"],
       ["a dog bed by the stove, no puppies in it", "puppy"],
+      // What a picture holds, said as not held, and a negation over an article, a count or a describing word.
+      ["the shelf in plain daylight, the picture doesn't show a cup", "cup"],
+      ["a dog by the gate that doesn't have a collar", "collar"],
+      ["a wooden crate without wooden handles", "handle"],
+      ["the drying rack, not a single wooden spoon on it", "spoon"],
+      ["a quilt folded on the bed, never a blanket", "blanket"],
     ];
     for (const [text, name] of absent) expect(saysAbsent(text, name), `${name}: ${text}`).toBe(true);
   });
@@ -179,6 +185,20 @@ describe("saysAbsent: a name the picture's words say only as NOT THERE", () => {
       ["a cozy no-sew fleece blanket on the couch", "blanket"],
       // A name the words never say is not "absent" either.
       ["an empty backyard lawn at dawn", "robin"],
+      // A negated DOING is about the doing: the thing after it is there. "Not", "never" and an "-n't"
+      // word say a thing is missing only right before it, an article or a count; a word before the
+      // article belongs to another phrase.
+      ["a hen pecking the ground without touching the feeder", "feeder"],
+      ["hens scratching the dirt that won't touch the feeder", "feeder"],
+      ["a cat on the sill that does not see the robin", "robin"],
+      ["a hen that never leaves the coop, perched by the door", "coop"],
+      ["a robin not eating the berries on the branch", "berry"],
+      ["a cat that won't use litter", "litter"],
+      ["no robins working the backyard lawn yet", "backyard lawn"],
+      ["no hens pecking the feeder", "feeder"],
+      // …and an exception is there, and so is the thing a part close-up is a part of.
+      ["no birds except a robin on the fence", "robin"],
+      ["a close view of one pieced block, not the whole quilt", "quilt"],
     ];
     for (const [text, name] of there) expect(saysAbsent(text, name), `${name}: ${text}`).toBe(false);
   });
@@ -196,6 +216,15 @@ describe("a thing the words say is not there is never filed under it (job 416 sc
         .sort()
     ).toEqual(["backyard lawn", "robin"]);
     expect(plannedKeyThing("robin", "an American robin on a thawing, snow-patched backyard lawn", K416)?.name).toBe("robin");
+    // The robins are not there, and the lawn they are not working is: a negated doing keeps its thing.
+    expect(keyThingsIn("the backyard lawn at dawn, no robins working the backyard lawn yet", K416).map(t => t.name)).toEqual([
+      "backyard lawn",
+    ]);
+    expect(
+      keyThingsIn("a robin on the fence that won't touch the porch light", K416)
+        .map(t => t.name)
+        .sort()
+    ).toEqual(["porch light", "robin"]);
   });
 
   it("a thing said only as not there is no other one of its kind either", () => {
@@ -221,6 +250,18 @@ describe("a thing the words say is not there is never filed under it (job 416 sc
     tagKeyThings(filed, K416);
     expect(at(filed, 2).keyThing).toBe("backyard lawn");
     expect(at(filed, 2).buildStage).toBeUndefined();
+  });
+
+  it("a part close-up that says it is 'not the whole' thing keeps its thing and its part", () => {
+    const things: KeyThing[] = [{ name: "quilt", look: "a pieced cotton quilt of red and cream blocks", main: true }];
+    const board = [
+      { index: 1, showSubject: "a pieced cotton quilt spread over a bed", keyThing: "quilt", pictureUrl: "u1" },
+      { index: 2, showSubject: "a close view of one pieced block, not the whole quilt", keyThing: "quilt", partOf: "quilt" },
+    ].map(s => ({ narration: "n", ...s }) as StoryboardScene);
+    tagKeyThings(board, things);
+    expect(board[1].keyThing).toBe("quilt");
+    expect(board[1].partOf).toBe("quilt");
+    expect(memorySourcesFor(board, board[1])).toEqual([board[0]]);
   });
 
   it("a later picture filed under the robin whose words rule it out is neither drawn from the robin nor given its camera", () => {
