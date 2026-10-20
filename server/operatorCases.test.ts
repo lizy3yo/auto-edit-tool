@@ -9744,3 +9744,47 @@ describe("a season or an hour the picture's OWN words name is held like its line
     expect(seasonHourClause({ ...grid, showSubject: "the tension of the spring in the morning light" })).toBe("");
   });
 });
+
+describe("round 15: a picture that says a thing is NOT there is never its memory (job 416 scenes 2, 5, 13, 16)", () => {
+  // Walter Wren's robins film: the same yard from the same camera spot four times. Scene 2, the EMPTY
+  // lawn under "nobody sees another robin until spring" ("no robins visible"), was filed with the robin
+  // beside it, and with no earlier picture about the robin it was the robin's memory — scene 5 was drawn
+  // from it, and every later robin picture from scene 5. Its first check had also held it to a robin.
+  const show = "empty backyard lawn at quiet morning, no robins visible";
+  const robin = (index: number, words: string, over: Partial<StoryboardScene> = {}) =>
+    ({
+      index,
+      narration: "n",
+      showSubject: words,
+      visualPrompt: words,
+      keyThing: "robin",
+      pictureUrl: `u${index}`,
+      ...over,
+    }) as StoryboardScene;
+  const board = () => [
+    robin(2, show, { keyThing: "backyard lawn", otherKeyThings: ["robin"] }),
+    robin(5, "an American robin on a thawing, snow-patched backyard lawn in early March", { otherKeyThings: ["backyard lawn"] }),
+    robin(7, "a robin perched in the backyard, close view, alert"),
+    robin(13, "an American robin on a snow-patched backyard lawn in January", { otherKeyThings: ["backyard lawn"] }),
+  ];
+
+  it("416-5 is the robin's first picture (drawn from its written look), and the later ones follow IT, not the empty lawn", () => {
+    const b = board();
+    expect(memorySourcesFor(b, b[1])).toEqual([]);
+    expect(memoryViewFor(b, b[1])).toBeUndefined();
+    expect(memorySourcesFor(b, b[2])).toEqual([b[1]]);
+    expect(memorySourcesFor(b, b[3])).toEqual([b[1], b[2]]);
+  });
+
+  it("416-2 is checked for the lawn alone, and a planner's filing under the robin gives way", () => {
+    const b = board();
+    expect(requiredThingsFor(b[0])).toEqual(["backyard lawn"]);
+    expect(ownKeyThing({ ...b[0], keyThing: "robin" })).toBeUndefined();
+  });
+
+  it("a robin said plainly beside the lawn still lends it — only 'not there' does not", () => {
+    const b = board();
+    Object.assign(b[0], { showSubject: "a quiet backyard lawn at morning, one robin by the fence", visualPrompt: undefined });
+    expect(memorySourcesFor(b, b[1])).toEqual([b[0]]);
+  });
+});

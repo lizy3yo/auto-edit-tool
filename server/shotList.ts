@@ -2678,7 +2678,8 @@ export function keyThingIn(text: string | undefined, things: KeyThing[] | undefi
 export function keyThingsIn(text: string | undefined, things: KeyThing[] | undefined): KeyThing[] {
   const hits = wordsOfKeyThingsIn(text, things)
     // ANOTHER OF ITS KIND IS NOT THE KEY THING (`anotherOfItsKind`): job 412's wild cat.
-    .filter(t => !anotherOfItsKind(text, t))
+    // …nor is one the words say is NOT THERE (`saysAbsent`): job 416's "no robins visible".
+    .filter(t => !anotherOfItsKind(text, t) && !saysAbsent(text, t.name))
     .sort((a, b) => b.name.length - a.name.length);
   const words = (t: KeyThing) => keyName(t.name).split(" ");
   return hits.filter(
@@ -2915,16 +2916,168 @@ export function othersOfKindIn(
   text: string | undefined,
   things: KeyThing[] | undefined
 ): { name: string; said: string }[] {
+  // A thing said only as NOT THERE ("no other cats in the room") is no other one of its kind either:
+  // told the cat here is "not the one shown before", the picture maker would draw a cat.
   return wordsOfKeyThingsIn(text, things).flatMap(t => {
-    const said = anotherOfItsKind(text, t);
+    const said = saysAbsent(text, t.name) ? undefined : anotherOfItsKind(text, t);
     return said ? [{ name: t.name, said }] : [];
   });
+}
+
+/*
+ * A THING THE PICTURE SAYS IS NOT THERE IS NOT IN IT (round 15, the verification film 416, scenes 2,
+ * 5, 13 and 16). "…the grass sits empty in the mornings, and nobody sees another robin until spring."
+ * was planned as "empty backyard lawn at quiet morning, no robins visible", and `keyThingsIn` counted
+ * the robin as named because the word "robins" is in "no robins visible". So the empty lawn was filed
+ * with the robin beside it (`otherKeyThings`); the picture check held it to the robin it must not show
+ * (its first check said "missing"); and, no earlier picture being about the robin, the empty lawn was
+ * the robin's MEMORY: scene 5 was drawn from it as "this exact robin", every later robin picture from
+ * scene 5 — one yard from one camera spot four times, the robin added. A name the words say only as
+ * ABSENT — "no robins", "not a single robin", "without a lid", "isn't a cup", "none of the jars", "no
+ * sign of the cat", "a shelf empty of jars", "a crow instead of a robin", "the robins gone", "the lid
+ * nowhere in sight", "the cup out of frame", "the kettle not visible" — names a thing that is not in the
+ * picture: never filed under it (`keyThingsIn`, `plannedKeyThing`), never another of its kind
+ * (`othersOfKindIn`), never a picture that shows it (`pictureMemory`'s `shows`), so never its memory,
+ * its look or its check. Read like `anotherOfItsKind`: only the words right before the name (its own
+ * words, articles and up to two describing words, never across a comma or a preposition) or right
+ * after it, and only when EVERY place the words say the name is such a one — "a robin on the fence
+ * post, no other robins around" still shows the robin, and "not only robins" and "no more than three
+ * robins" show robins, as "nearly empty of" and "almost no" leave some there. "Empty" alone describes the
+ * thing it is said of ("an empty feeder" is the feeder): only "empty of" says what is not there.
+ * "Nobody" names no thing — a key thing is never a person. Replayed over the 355 stored storyboards
+ * (28,815 pictures), 4 pictures in 4 films lose a filing their words rule out — 416's empty lawn (the
+ * robin), job 368 scene 23's "coop … with no feeder present" (the feeder, whose first picture it was
+ * drawn from too), job 278's "smoke alarm … with no battery door" (the battery) and job 335's alarm "on a
+ * bedroom ceiling … with no battery access door" (a bedroom door) — and 4 pictures in 3 films lose a
+ * reference: 416's scenes 4 and 5 (the empty lawn), 368's coop and 278's alarm. 416's later robin
+ * pictures keep scene 5 and the rest; only their camera turn moves on by one. Every other picture is as
+ * before.
+ */
+
+/** Words that say the thing right after them is not there: "no robins", "without a lid", "isn't a cup". */
+const ABSENT_BEFORE = new Set(["no", "not", "without", "never", "nor", "none", "cannot"]);
+/** Words a negation reaches across to the name: "not a single robin", "no other jars", "not even a cup". */
+const ABSENT_FILLER = new Set(
+  "a an any the single one other more longer even its their his her this that these those my your our".split(" ")
+);
+/**
+ * "<word> of" before a name says it is not there: "empty of jars", "free of snow", "instead of a robin".
+ * Never "clear of": a chain "rests over and clear of a cream turtleneck sweater" (job 387 scene 22)
+ * shows the sweater.
+ */
+const ABSENT_OF = new Set(["empty", "free", "devoid", "bare", "instead", "none"]);
+/**
+ * Words before a negation that leave some there: "nearly empty of charred cedar incense holders …, a
+ * few finished black blocks remain" (job 260 scene 24), "almost no crumbs on the dirt" (job 360 scene 22).
+ */
+const SOME_LEFT = /^(?:almost|nearly|mostly|practically|virtually|largely|half)$/;
+/** Whether the word before index `j` leaves some there (`SOME_LEFT`), in the same phrase. */
+const someLeft = (ws: PhraseWord[], j: number) => j > 0 && !ws[j - 1].endsClause && SOME_LEFT.test(ws[j - 1].bare);
+/** "no sign of the cat", "without a trace of it". */
+const SIGN_OF = new Set(["sign", "signs", "trace", "traces", "hint"]);
+/** After a name, linking words before what says it is gone: "the robins (are all) gone". */
+const ABSENT_LINK = new Set("is are was were now already all long completely entirely still".split(" "));
+/** What "not" / "no longer" after a name says it is not: "not visible", "no longer there". */
+const NOT_SEEN = /^(?:visible|there|here|present|shown|seen|pictured|showing)$/;
+/** Where a picture's frame is: "out of frame", "not in sight". */
+const FRAME = /^(?:frame|sight|view|shot|picture)$/;
+
+/** A negation: "no", "not", "without" …, or an "-n't" word ("isn't", "doesn't"). */
+const negates = (w: string) => ABSENT_BEFORE.has(w) || /n't$/.test(w);
+
+/**
+ * Whether the words right AFTER the name at `at` say it is not there: "the robins gone", "the lid
+ * nowhere in sight", "the cup out of frame", "the kettle not visible", "the bird no longer there". Gone,
+ * absent and missing only at the end of their phrase or before where to: "a robin missing its tail" and
+ * "the robin gone quiet" are there. Pure.
+ */
+function absentAfter(ws: PhraseWord[], at: number): boolean {
+  if (ws[at].endsClause) return false;
+  let j = at + 1;
+  while (j < ws.length && ABSENT_LINK.has(ws[j].bare) && !ws[j - 1].endsClause) j++;
+  const w = ws[j];
+  if (!w || ws[j - 1].endsClause) return false;
+  // "nowhere in sight", "nowhere to be seen" — never "nowhere near the feeder", which is there.
+  if (w.bare === "nowhere")
+    return w.endsClause || !ws[j + 1] || /^(?:in|to|visible|seen|around)$/.test(ws[j + 1].bare);
+  if (/^(?:gone|absent|missing)$/.test(w.bare))
+    return w.endsClause || !ws[j + 1] || /^(?:from|for|away|south|north|now|until)$/.test(ws[j + 1].bare);
+  const inFrame = (k: number) =>
+    !!ws[k] &&
+    (ws[k].bare === "in" || ws[k].bare === "of") &&
+    !ws[k].endsClause &&
+    (FRAME.test(ws[k + 1]?.bare ?? "") || (ws[k + 1]?.bare === "the" && FRAME.test(ws[k + 2]?.bare ?? "")));
+  if (w.bare === "out" && !w.endsClause) return inFrame(j + 1);
+  if (w.bare === "not" || /n't$/.test(w.bare) || (w.bare === "no" && ws[j + 1]?.bare === "longer")) {
+    if (w.endsClause) return false;
+    const k = w.bare === "no" ? j + 2 : j + 1;
+    return NOT_SEEN.test(ws[k]?.bare ?? "") || inFrame(k);
+  }
+  return false;
+}
+
+/**
+ * Whether the name at `at` (its head word) is said as NOT THERE: a negation right before it, across
+ * its own words, articles and up to two describing words ("no robins", "not a single robin", "doesn't
+ * show a cup"), "empty of / free of / instead of / none of …", "no sign of …", "rather than …", or the
+ * words after it (`absentAfter`). Never past a comma or a preposition; "not only", "not just" and "no
+ * more than" say it IS there. Pure.
+ */
+function absentAt(ws: PhraseWord[], at: number, own: Set<string>): boolean {
+  if (absentAfter(ws, at)) return true;
+  let describing = 0;
+  for (let j = at - 1; j >= 0; j--) {
+    const w = ws[j];
+    if (w.endsClause || !w.bare) return false;
+    if (own.has(w.bare)) continue;
+    if (negates(w.bare)) {
+      const next = ws[j + 1]?.bare ?? "";
+      if (someLeft(ws, j) || (w.bare === "not" && /^(?:only|just|merely|simply)$/.test(next))) return false;
+      return !(/^(?:more|less|fewer)$/.test(next) && ws[j + 2]?.bare === "than");
+    }
+    if (w.bare === "of" && j > 0 && !ws[j - 1].endsClause) {
+      const by = ws[j - 1].bare;
+      if (ABSENT_OF.has(by)) return !someLeft(ws, j - 1);
+      if (SIGN_OF.has(by)) return j > 1 && !ws[j - 2].endsClause && negates(ws[j - 2].bare);
+      return false;
+    }
+    if (w.bare === "than") return j > 0 && ws[j - 1].bare === "rather" && !ws[j - 1].endsClause;
+    if (ABSENT_FILLER.has(w.bare)) continue;
+    if (PHRASE_STOP.has(w.bare)) return false;
+    if (++describing > 2) return false;
+  }
+  return false;
+}
+
+/**
+ * Whether `text` says key thing `name` only as NOT THERE — every place it says the name's head word
+ * (singular or plural) is such a one (`absentAt`) — see the note above. False when it never says the
+ * head word. Pure.
+ */
+export function saysAbsent(text: string | undefined, name: string): boolean {
+  if (!text?.trim()) return false;
+  const words = nameWordsOf(name);
+  const head = words[words.length - 1]?.bare;
+  if (!head) return false;
+  const own = new Set(words.map(w => w.bare));
+  const plural = head.endsWith("y") ? `${head.slice(0, -1)}ies` : undefined;
+  const isHead = (w: string) => w === head || w === `${head}s` || w === `${head}es` || w === plural;
+  const ws = phraseWords(text);
+  let seen = false;
+  for (let k = 0; k < ws.length; k++) {
+    if (!isHead(ws[k].bare)) continue;
+    if (!absentAt(ws, k, own)) return false;
+    seen = true;
+  }
+  return seen;
 }
 
 /**
  * The key thing a planner or the line check named for a picture (`matchKeyThing`) — unless the
  * picture's own words `show` name it only as another one of its kind (`anotherOfItsKind`): a planner
- * that files "a stray cat on the fence" under the video's cat would hand it the cat's pictures. Pure.
+ * that files "a stray cat on the fence" under the video's cat would hand it the cat's pictures — or
+ * only as NOT THERE (`saysAbsent`): one that files "an empty lawn, no robins visible" under the robin
+ * would hand the empty lawn the robin's pictures and its check. Pure.
  */
 export function plannedKeyThing(
   name: string | undefined,
@@ -2932,7 +3085,7 @@ export function plannedKeyThing(
   things: KeyThing[] | undefined
 ): KeyThing | null {
   const t = name ? matchKeyThing(name, things ?? []) : null;
-  return t && !anotherOfItsKind(show, t) ? t : null;
+  return t && !anotherOfItsKind(show, t) && !saysAbsent(show, t.name) ? t : null;
 }
 
 // ─── Does each picture show what its line is about? ─────────────────────────────────────
