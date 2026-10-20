@@ -39,6 +39,7 @@ import {
 } from "./hostLook";
 import { hostNameRanges, namesHostBefore } from "./hostIntro";
 import { SEASON_HOUR_RULE } from "./lineSeason";
+import { SETTING_TURN_RULE, settingMove, settingNote } from "./lineSetting";
 import {
   followedPeople,
   hostOwnWords,
@@ -1663,6 +1664,10 @@ export const SHOT_LIST_SYSTEM =
   "or a place the script already has, caught doing something that fits the thought (the neighbour " +
   "from the story back at her own kitchen sink, a writer the script names at work), or the host at " +
   "work. Someone who is not the host is shown as rule 6a says, with other set to who they are. " +
+  // Job 413 scene 10: "Here's tonight's deal:" was planned as the host pulling a stool up to the
+  // bench — the stool of "Pull up a stool." 9 s later, which then played over another picture.
+  "Never a thing a LATER line names (\"Here's the plan:\" before \"Put the kettle on.\" is not the " +
+  "kettle): shown before its words, it is gone by the time it is said. " +
   // Job 409 scene 33: "Then he turns the whole thing over in a single motion: life is not short" —
   // the writer of the story reversing his argument — was planned as "the host turning a page slowly
   // at the desk": the wrong person, and the idiom drawn as its literal verb.
@@ -1707,6 +1712,9 @@ export const SHOT_LIST_SYSTEM =
   "longer shots are better than many quick ones; a shot may run 10 seconds or more when nothing " +
   'new is named. The ONE exception is a spoken list: one quick shot per item ("a needle, a spool ' +
   'of thread, and a pair of shears" = three shots, list: true).\n' +
+  // Job 412 scene 26: "…she inherited that schedule… Indoor life softens it, …house cats…" stayed one
+  // shot of the wild hunter in the desert — the same idea, so the same shot.
+  `2b. ${SETTING_TURN_RULE} A new shot starts on that sentence's first words.\n` +
   "3. SAME AS BEFORE. When a beat's FIRST shot shows the same thing as the shot before it (the " +
   "previous beat is still on that subject), set same: true — it continues that picture instead of " +
   "starting a new one. Use it whenever the context has not changed.\n" +
@@ -3004,6 +3012,11 @@ picture showed (the same thing in the same place), the later one is WRONG — gi
 A picture marked "continues" keeps the moment of the line right before it going and is not a repeat.
 A line that speaks of a thing by its quality, price, count or time is not one of these: it shows the
 thing.
+A THING BEFORE ITS WORDS. A picture that shows a thing its own line does not name or point at, which
+a LATER line names, shows it too early: by the time it is said, the picture is gone. It is WRONG —
+give it what its own line is about (A LINE WITH NOTHING TO SEE), and the thing is shown on the line
+that names it. Not when that later line's picture is marked "continues": the same picture plays on
+under it.
 A SOUND. A line about a sound — a song, a call, a noise, a hum, a sound that has stopped — is about
 what makes it: the picture shows that source in the moment the line describes, where it is, quiet
 when the line says it has gone quiet. It is WRONG when it shows only a window, a door or a room the
@@ -3025,6 +3038,14 @@ today, is WRONG: rewrite it naming the time and place, its people dressed for it
 passage about a medieval town = a medieval baker in a linen tunic at a brick oven, never a baker of
 today). A picture marked "inside a passage set in …" is in such a stretch. The stretch ends where the
 words come back to today or to the host's own life; a line inside it about today is today.
+THE LINE'S SETTING. ${SETTING_TURN_RULE} A picture is WRONG when it is set where or when its line is
+not — a line about life indoors over a picture out in the wild, a line about today over a picture of
+long ago — even when it shows the right thing or the right idea: rewrite it in the line's own setting.
+Judge where and when the TALK is, never only where one thing in it is put or kept ("and the kids get
+sent inside" in a line about work in the yard is still the yard). A line that starts in one setting
+and moves to another in a later sentence gets a new picture where that sentence starts: SPLIT there
+(ONE PICTURE, ONE SUBJECT), each part's picture set where its own words are. A picture marked "its
+words turn to another setting at …" has such a sentence: split it there, from = those words.
 
 WHAT NOT TO DO. A sentence RULES SOMETHING OUT when it says not to do something ("never…", "don't…"),
 says what something is NOT ("I don't mean…", "no, not the…"), what to use INSTEAD ("…instead of the
@@ -3074,9 +3095,14 @@ fountain, then the farmers' trucks) — gets a new picture where that sentence s
 from = the exact first 2-5 words of that sentence. Then about, shows_it and show answer for the words
 BEFORE the split only, and the split's show for the sentence it starts: when the picture fits only
 the later sentence, write show for the earlier words and give the split the picture as it already is. Split only when each part
-runs at least 3 seconds (its share of the picture's seconds) and is at least 4 words. Never split
-sentences that stay on the same thing — more said about it, the same thing from another side, an
-idea about it. A picture marked "joined" may be split this way, where a sentence starts.
+runs at least 3 seconds (its share of the picture's seconds) and is at least 4 words — except the words
+BEFORE the split when they only FINISH a sentence the picture before started (the line opens in the
+middle of a sentence, as right after a list): those may be short, and they go back to that picture,
+so split there all the same. Never split
+sentences that stay on the same thing in the same setting — more said about it, the same thing from
+another side, an idea about it. A later sentence that moves to ANOTHER SETTING is split all the same,
+however much it stays on the same thing or idea (THE LINE'S SETTING).
+A picture marked "joined" may be split this way, where a sentence starts.
 
 ONE IDEA, ONE PICTURE. A picture marked "same sentence" continues a sentence the picture before it
 started. When the two parts are ONE idea about one thing — the thing and where, how or what it is
@@ -3555,6 +3581,8 @@ export function ownTypedPanel(s: StoryboardScene, typed: string, things: KeyThin
 
 /** A line that ends a sentence (so the next picture starts a new one). */
 const endsSentence = (t: string | undefined) => /[.!?]["')\]]?\s*$/.test((t ?? "").trim());
+/** A sentence's end at the end of a trimmed text, a closing quote or bracket of any kind allowed. */
+const SENTENCE_END = /[.!?]["'’”)\]]*$/;
 
 /**
  * ONE IDEA, ONE PICTURE (2026-10-02, the operator: whether two pictures of one sentence become one
@@ -3653,17 +3681,38 @@ function startsSentenceAt(text: string, spans: TokenSpan[], at: number): boolean
  * sentence — only where a new one starts — and a split that draws the picture before it again (the
  * check writing the old picture into the split without rewriting the part before) shows nothing new
  * and is dropped.
+ *
+ * A SHORT LEAD GOES BACK (2026-10-20, job 413 scene 33). After the steps "drain it outside, | store
+ * it sealed," the picture of the sealed can ran 9.7 s over "nowhere near a spark. The downside is
+ * real: some mowers are just done, and you'll eat a couple of corpses learning to tell the
+ * difference." — 8 s about dead mowers that never showed one. The split at "The downside is real"
+ * was refused because the part before it, the step's last 4 words, ran ~1.5 s, under
+ * `SPLIT_PART_MIN_SEC`; the whole line then kept the can. When only that LEADING part is too short,
+ * and it only FINISHES the sentence the picture before it was saying (that picture ends mid-sentence,
+ * the split starts the next sentence), those words go to the picture before — the step's own picture
+ * ("store it sealed, nowhere near a spark.") — and the rest gets its own picture. Never when the
+ * lead is a sentence of its own ("Pull up a stool." after a sentence ended, job 413 scene 15: its
+ * words do not belong to the picture before) or HOLDS one after the end it finishes ("…on its hook.
+ * Pull up a stool." would put the stool under the picture before), never to the host, a CTA, cover,
+ * asset, split or a list's group picture (`fitCandidate`), and never past the picture before's limit
+ * (`maxAt`).
  */
 export function applyPictureSplits(
   scenes: StoryboardScene[],
   fixes: PictureFix[],
   things: KeyThing[] | undefined,
   /** A picture's length, when known — no part may run under `SPLIT_PART_MIN_SEC`. */
-  sec?: (s: StoryboardScene) => number
+  sec?: (s: StoryboardScene) => number,
+  /** The longest a picture may stay where it sits — a lead handed back never takes it past. */
+  maxAt?: (s: StoryboardScene) => number
 ): { scenes: StoryboardScene[]; split: number } {
   const byId = new Map(fixes.filter(f => f.split?.length).map(f => [f.id, f.split!]));
   if (!byId.size) return { scenes, split: 0 };
   const out: StoryboardScene[] = [];
+  // The seconds of each picture this pass makes (its share of the line it came from), so a lead
+  // handed back to one of them is held to its limit too.
+  const madeSec = new Map<StoryboardScene, number>();
+  const secOf = (x: StoryboardScene) => madeSec.get(x) ?? sec?.(x) ?? 0;
   let split = 0;
   scenes.forEach((s, id) => {
     const cuts = byId.get(id);
@@ -3692,20 +3741,48 @@ export function applyPictureSplits(
     // Each part must run long enough to be its own picture (`SPLIT_PART_MIN_SEC`), judged by its
     // share of the words when the picture's length is known.
     const total = sec?.(s) ?? 0;
+    const shareSec = (words: number) => (total > 0 ? (words / spans.length) * total : 0);
     const tooShort = (b: number, k: number) =>
       k > 0 &&
-      (b - bounds[k - 1] < 4 ||
-        (total > 0 && ((b - bounds[k - 1]) / spans.length) * total < SPLIT_PART_MIN_SEC));
-    if (starts.length === 0 || bounds.some(tooShort)) {
+      (b - bounds[k - 1] < 4 || (total > 0 && shareSec(b - bounds[k - 1]) < SPLIT_PART_MIN_SEC));
+    if (starts.length === 0 || bounds.some((b, k) => k > 1 && tooShort(b, k))) {
       out.push(s);
       return;
+    }
+    // Only the leading part is too short: it goes back to the picture before when it finishes that
+    // picture's sentence (see above); else the line keeps its picture, as before.
+    let handBack = false;
+    if (tooShort(bounds[1], 1)) {
+      const prev = out[out.length - 1];
+      const lead = text.slice(0, spans[bounds[1]].start).trim();
+      const leadSec = shareSec(bounds[1]);
+      const limit = prev && maxAt ? (movingPicture(prev) ? Math.min(maxAt(prev), MOVING_PICTURE_MAX_SEC) : maxAt(prev)) : Infinity;
+      handBack =
+        !!prev &&
+        fitCandidate(prev) &&
+        !!(prev.scriptText ?? "").trim() &&
+        !SENTENCE_END.test((prev.scriptText ?? "").trim()) &&
+        startsSentenceAt(text, spans, bounds[1]) &&
+        // Only the end of that sentence: no sentence of its own starts inside the lead.
+        !spans.slice(1, bounds[1]).some((_, j) => startsSentenceAt(text, spans, j + 1)) &&
+        secOf(prev) + leadSec <= limit;
+      if (!handBack) {
+        out.push(s);
+        return;
+      }
+      const joined = `${(prev.scriptText ?? "").trim()} ${lead}`;
+      const back = { ...prev, ...FRESH, scriptText: joined, narration: firstWords(joined, 8) } as StoryboardScene;
+      out[out.length - 1] = back;
+      madeSec.set(back, secOf(prev) + leadSec);
     }
     bounds.slice(0, -1).forEach((b, k) => {
       const from = spans[b].start;
       const to = k + 1 < bounds.length - 1 ? spans[bounds[k + 1]].start : text.length;
       const slice = text.slice(from, to).trim();
       if (k === 0) {
+        if (handBack) return;
         out.push({ ...s, ...FRESH, scriptText: slice, narration: firstWords(slice, 8) } as StoryboardScene);
+        if (total > 0) madeSec.set(out[out.length - 1], shareSec(bounds[k + 1] - b));
         return;
       }
       const cut = starts[k - 1].cut;
@@ -3755,6 +3832,7 @@ export function applyPictureSplits(
         joinedLine: undefined,
         wordCut: true,
       } as StoryboardScene);
+      if (total > 0) madeSec.set(out[out.length - 1], shareSec(bounds[k + 1] - b));
       split++;
     });
   });
@@ -3776,6 +3854,12 @@ export function applyPictureSplits(
  * Opus reads every picture with the lines around it, so it — not a word list, which fired on "just
  * don't count on it" in five channels — says what each such picture must not show (`forbids`); the
  * picture check then asks only those pictures about it.
+ *
+ * THE LINE'S SETTING (2026-10-20, job 412 scene 26): the check also judges whether a picture is set
+ * where and when its line is, and splits a line whose later sentence moves to another setting even
+ * when it stays on the same idea — "…she inherited that schedule… | Indoor life softens it, …house
+ * cats…" ran 7.4 s over the wild hunter in the desert, read as "an idea about" the same schedule.
+ * Where the words make the turn plain, the picture is marked with it (`settingNote`).
  */
 export async function fitPicturesToLines(
   scenes: StoryboardScene[],
@@ -3817,8 +3901,10 @@ export async function fitPicturesToLines(
       any = true;
       // The thing the line closes on, when the picture's words leave it out (`closingThing`).
       const closing = closingThing(said, s.showSubject ?? s.visualPrompt);
+      // Where the line turns to a setting the picture is not in (`settingNote`, job 412 scene 26).
+      const setting = settingNote(said, s.showSubject ?? s.visualPrompt);
       lines.push(
-        `#${i} PICTURE${secs}${s.sameShot ? " (continues)" : ""}${s.joinedLine ? " (joined)" : ""}${sameSentence ? " (same sentence)" : ""}${i === firstMain ? " (FIRST of the MAIN thing)" : ""}${fitPictureNotes(s)}${closing ? ` (ends on "${closing}")` : ""}: said "${said}" | shows: ${s.showSubject ?? s.visualPrompt ?? ""}`
+        `#${i} PICTURE${secs}${s.sameShot ? " (continues)" : ""}${s.joinedLine ? " (joined)" : ""}${sameSentence ? " (same sentence)" : ""}${i === firstMain ? " (FIRST of the MAIN thing)" : ""}${fitPictureNotes(s)}${closing ? ` (ends on "${closing}")` : ""}${setting}: said "${said}" | shows: ${s.showSubject ?? s.visualPrompt ?? ""}`
       );
     }
     if (!any) continue;
@@ -3857,7 +3943,13 @@ export async function fitPicturesToLines(
     const into = merged.scenes[merged.remap.get(id) ?? -1];
     if (into) lenOf.set(into, (lenOf.get(into) ?? 0) + (s.audioDuration ?? 0));
   });
-  const cut = applyPictureSplits(merged.scenes, moved, opts.keyThings, s => lenOf.get(s) ?? s.audioDuration ?? 0);
+  const cut = applyPictureSplits(
+    merged.scenes,
+    moved,
+    opts.keyThings,
+    s => lenOf.get(s) ?? s.audioDuration ?? 0,
+    opts.maxAt
+  );
   return { scenes: cut.scenes, fixed, split: cut.split, joined: merged.joined };
 }
 
@@ -4862,6 +4954,118 @@ export function joinShortSplits(
   return { scenes: out, changed };
 }
 
+/** The most words of a sentence's start that move on to the picture of that sentence. */
+export const SENTENCE_START_MAX_WORDS = 4;
+/** …and the longest they may run: on the voice when the word timeline knows, else their share of the picture. */
+export const SENTENCE_START_MAX_SEC = 1.5;
+/** Short forms whose full stop ends no sentence ("Mr. Hale", "St. Louis", "saws, drills, etc. and"). */
+const SHORT_FORM = /^(?:mr|mrs|ms|dr|st|mt|ft|jr|sr|vs|etc|no|approx|lt|capt|gen|prof|rev|ave|rd|inc|co|ltd)$/;
+
+/**
+ * A SENTENCE STARTS ON ITS OWN PICTURE (2026-10-20, job 414 scenes 28-29). The storyboard cuts the
+ * script into beats by word count, and one beat ended three words into a sentence: "…and tall,
+ * straight tulip poplar was a favorite. Green wood splits | and shifts as it dries, so a new wall
+ * opens small cracks its first year." — "Green wood splits" (1.2 s) played over the standing trees and
+ * the cracked wall arrived on "and shifts", late, partway into its sentence. The shot list cuts pieces
+ * only inside a beat, and the joins move only whole pieces, so nothing moved a beat's cut onto the
+ * sentence start. When a picture ends on the first words of a sentence the next picture goes on with —
+ * at most `SENTENCE_START_MAX_WORDS` words and `SENTENCE_START_MAX_SEC` — those words go to the next
+ * picture, so it comes up as the sentence begins. Only between two drawn pictures of DIFFERENT beats:
+ * a cut the shot list placed inside one beat is its choice (a shot starts on the word that names its
+ * thing). Never the host (a host take hands over mid-sentence on purpose, and a take that starts
+ * mid-sentence is the plan gate's), a list item or a list's group picture (the lists keep their own
+ * cuts), a split, CTA, cover, asset or QR beat; never when the picture before would be left under
+ * `SPLIT_PART_MIN_SEC` or 4 words, and never past the next picture's limit (`maxAt`). Run on the final
+ * lengths; the caller re-cuts the ranges. Pure — returns a new list and how many moved.
+ */
+export function carrySentenceStarts(
+  scenes: StoryboardScene[],
+  sec: (s: StoryboardScene) => number,
+  maxAt: (s: StoryboardScene) => number = () => MAX_PICTURE_SEC,
+  /**
+   * How long a picture's last `n` words run on the voice, when the word timeline knows
+   * (`lastWordsSec`). A share of the picture's seconds spreads its pauses over every word: job 414's
+   * "Green wood splits" ran 1.21 s on the voice and its share of the 11.6 s picture reads 1.40 s,
+   * while a few words drawn out read shorter by share than they run.
+   */
+  tailSecOf?: (s: StoryboardScene, n: number) => number | undefined
+): { scenes: StoryboardScene[]; moved: number } {
+  const out = [...scenes];
+  const movable = (s: StoryboardScene | undefined): s is StoryboardScene =>
+    !!s &&
+    !s.hostPresent &&
+    !s.listCut &&
+    !s.listSet &&
+    !s.splitVisual &&
+    !s.coverHero &&
+    !s.assetImageUrl &&
+    !s.showsBook &&
+    !s.cta &&
+    !s.qrHero;
+  const len = out.map(sec);
+  let moved = 0;
+  for (let i = 1; i < out.length; i++) {
+    const a = out[i - 1];
+    const b = out[i];
+    if (!movable(a) || !movable(b)) continue;
+    // The shot list's own cut inside one beat.
+    if (a.shotGroup !== undefined && a.shotGroup === b.shotGroup) continue;
+    const text = (a.scriptText ?? "").trim();
+    if (!text || SENTENCE_END.test(text)) continue;
+    const spans = tokenSpans(text);
+    let at = -1;
+    // A title's or a place's short form ends on a full stop and is no sentence end: "…down to St.
+    // Louis" would hand "Louis" to the next picture.
+    for (let k = spans.length - 1; k > 0 && spans.length - k <= SENTENCE_START_MAX_WORDS; k--)
+      if (startsSentenceAt(text, spans, k) && !SHORT_FORM.test(spans[k - 1].tok)) {
+        at = k;
+        break;
+      }
+    if (at < 0) continue;
+    // The sentence's words from the space after its full stop (an opening quote goes with them).
+    const gap = text.slice(spans[at - 1].end, spans[at].start);
+    const from = spans[at - 1].end + gap.search(/\s/);
+    const lead = text.slice(from).trim();
+    // A sentence opens on a capital or a number — "approx. two" is no new one.
+    if (!/^[^A-Za-z0-9]*[A-Z0-9]/.test(lead)) continue;
+    const aSec = len[i - 1];
+    if (!(aSec > 0)) continue;
+    const heard = a === scenes[i - 1] ? tailSecOf?.(a, spans.length - at) : undefined;
+    const leadSec = heard !== undefined && heard > 0 ? heard : ((spans.length - at) / spans.length) * aSec;
+    if (leadSec > SENTENCE_START_MAX_SEC) continue;
+    if (at < 4 || aSec - leadSec < SPLIT_PART_MIN_SEC) continue;
+    const limit = movingPicture(b) ? Math.min(maxAt(b), MOVING_PICTURE_MAX_SEC) : maxAt(b);
+    if (len[i] + leadSec > limit) continue;
+    const head = text.slice(0, from).trim();
+    const tail = `${lead} ${(b.scriptText ?? "").trim()}`.trim();
+    out[i - 1] = { ...a, ...FRESH, scriptText: head, narration: firstWords(head, 8) } as StoryboardScene;
+    out[i] = { ...b, ...FRESH, scriptText: tail, narration: firstWords(tail, 8) } as StoryboardScene;
+    len[i - 1] = aSec - leadSec;
+    len[i] += leadSec;
+    moved++;
+  }
+  out.forEach((s, k) => (s.index = k + 1));
+  return { scenes: out, moved };
+}
+
+/**
+ * How long a range's last `n` words run on the voice: from where the `n`-th word from its end begins
+ * (of the words heard starting inside it) to the range's end. Undefined when the timeline holds no
+ * more than `n` words there — too few to tell which are the last. A number written in digits is one
+ * word heard for several said ("$1,500"), which only reaches further back and reads longer: never a
+ * lead let through for being shorter than it is. Pure.
+ */
+export function lastWordsSec(
+  words: readonly { start: number; end: number }[] | null | undefined,
+  range: { startSec: number; endSec: number } | undefined,
+  n: number
+): number | undefined {
+  if (!words?.length || !range || n < 1) return undefined;
+  const inside = words.filter(w => w.start >= range.startSec - 0.05 && w.start < range.endSec);
+  if (inside.length <= n) return undefined;
+  return range.endSec - inside[inside.length - n].start;
+}
+
 /**
  * SAME TOPIC, SAME PICTURE (2026-09-28, the operator: "if the context is still the same no need to
  * change the shots"). The shot list plans 12 beats at a time and only JOINS two pictures when it
@@ -4900,9 +5104,13 @@ Lines that COMPARE are never one group: one place, time or way set against anoth
 kitchens… in a camper…", "whereas", "unlike", "instead,", "while in…"), or a line saying a place is
 empty or has none next to a line where the thing is there ("the shelf is bare… a jar stands there").
 One still shows only one side, and that side under the other side's words gives the point away.
+${SETTING_TURN_RULE} A line that moves to another setting is never in a group with the lines before
+it, and a line that starts in one setting and moves to another in a later sentence is in no group.
 
 The group's picture must fit the FIRST line of the group above all: it is what plays when the
-picture appears.
+picture appears. A thing a line names stays with that line: a short lead-in line that names a thing
+you can see ("Grab a pencil.", "Put the kettle on.") is never given the picture of the line after it —
+when the group's picture would not show what a line names, that line is not in the group.
 
 For each group of 2 or more consecutive pictures that share a context, write ONE picture that fits
 every line in it: plain words, what is literally in the frame, like a snapshot caption. It is ONE
@@ -4961,8 +5169,9 @@ export type ContextGroup = { ids: number[]; show: string };
 
 /**
  * The model's groups, kept only when they are real: 2+ consecutive ids inside ONE run, not
- * overlapping another group, with a picture description, and not spanning a comparison
- * (`contrastAcross`). Anything else is dropped. Pure.
+ * overlapping another group, with a picture description, not spanning a comparison
+ * (`contrastAcross`), and never past a line that moves the talk to a setting the group's picture is not
+ * in (`settingMove`). Anything else is dropped. Pure.
  */
 export function parseContextGroups(
   text: string,
@@ -5004,10 +5213,36 @@ export function parseContextGroups(
     // group is cut where the two meet (Hank's job 332: "Now the winner. Charred cedar incense
     // holders… the can by the trash bin… why not drill a hole in one" became ONE 17 s picture of the
     // drilling, because the last line's hands had to stay in the group's picture).
+    // And a picture of a thing its own line names keeps it when the group's picture leaves it out
+    // (`losesNamedThing`, job 413: "Pull up a stool." under the phone call of the line after it).
+    // And a line that moves the talk to a setting the group's picture is not in keeps its own picture
+    // (`settingMove`, job 412 scenes 23-26: "…she inherited that schedule… Indoor life softens it, …
+    // house cats…" under the wild hunter in the desert brush, the same idea so the same topic). When a
+    // line before it was in the group, or the line itself started where the group is and turned, the
+    // talk has MOVED to that setting: the group ends there, and no line after it takes the old
+    // setting's picture either, even one naming no setting of its own — it is still where the talk
+    // went. Only where the talk goes: a place a thing is kept in, inside a sentence the line did not
+    // open, never cuts (jobs 190/192: "cloth that was already sitting in our house" in the feed
+    // sacks' one picture).
     const runsOf: number[][] = [[]];
+    let held = false;
+    let ended = false;
     ids.forEach((id, k) => {
+      if (ended) return;
+      const opens = id > 0 ? endsSentence(saidOf?.(id - 1)) : /^\W*[A-Z0-9]/.test(saidOf?.(id) ?? "");
+      const move = saidOf && settingMove(saidOf(id), show, opens);
+      if (move) {
+        if (held || move.turn) ended = true;
+        else runsOf.push([]);
+        return;
+      }
+      held = true;
       const turns = !!atWorkOf && k > 0 && atWorkOf(id) !== atWorkOf(ids[k - 1]);
-      if (showOf && namesSomethingElse(showOf(id), show)) runsOf.push([]);
+      if (
+        showOf &&
+        (namesSomethingElse(showOf(id), show) || (!!saidOf && losesNamedThing(showOf(id), saidOf(id), show)))
+      )
+        runsOf.push([]);
       else if (turns) runsOf.push([id]);
       else runsOf[runsOf.length - 1].push(id);
     });
@@ -5041,6 +5276,64 @@ export function namesSomethingElse(own: string | undefined, group: string): bool
   const inGroup = new Set(words(group));
   const missing = thing.filter(w => !inGroup.has(w) && !inGroup.has(w.replace(/s$/, ""))).length;
   return missing / thing.length > 0.5;
+}
+
+/** Words that name no thing of the line's own: people, and the words every picture shares. */
+const NOT_A_NAMED_THING = new Set([
+  "the", "and", "with", "its", "his", "her", "their", "some", "one", "two", "three", "this", "that", "these", "those",
+  "your", "our", "out", "off", "over", "into", "onto", "from", "for", "about", "just", "very", "all", "each", "every",
+  "down", "back", "around", "away", "here", "there", "now", "then", "still", "under", "first", "last", "next",
+  "more", "most", "less", "much", "many", "few", "other", "same", "whole", "good", "best", "you", "they", "them",
+  "host", "hand", "hands", "man", "woman", "person", "people", "someone", "fingers", "arm", "arms",
+  "thing", "things", "way", "kind", "lot", "bit", "part", "piece", "time", "day", "year", "place", "side", "view",
+  "close", "detail", "frame", "picture", "shot", "photo",
+  // "the host at work" is in every picture of someone working, and "that works" names no thing.
+  "work", "works",
+]);
+/** A word with its singular forms ("kettles" → kettle, "glasses" → glass, "berries" → berry). */
+const nameForms = (w: string): string[] => [w, w.replace(/s$/, ""), w.replace(/es$/, ""), w.replace(/ies$/, "y")];
+/** A word that opens a thing's name in a spoken line: "a stool", "the kettle", "your city office". */
+const THING_OPENER = /^(?:a|an|the|this|that|these|those|my|your|our|his|her|their|its|some|each|every|another)$/;
+
+/**
+ * A THING A LINE NAMES STAYS WITH THAT LINE (2026-10-20, job 413 scenes 10 and 15). The same-topic
+ * call can hand a short lead-in line the NEXT line's picture: "Pull up a stool. One piece of
+ * housekeeping first: license rules change town by town," played over the phone call of "…spend two
+ * minutes on the phone with your city office.", while the stool was drawn 9 s earlier over "Here's
+ * tonight's deal:". `namesSomethingElse` reads only the words before where a thing is or what it does
+ * (`shownThing`), so "the host on a stool at the workbench" reads as "the host" — in every picture of
+ * the host at work, the phone call's too. So: when the picture's own words draw a thing its LINE names
+ * (said there in a noun phrase — "a stool", "the kettle", "your city office" — never a describing or
+ * doing word, never a person) and more than half of those things are missing from the group's
+ * picture, the line keeps its own picture. Pure.
+ */
+export function losesNamedThing(own: string | undefined, said: string | undefined, group: string): boolean {
+  const words = (t: string) =>
+    t
+      .toLowerCase()
+      .replace(/[’']s\b/g, "")
+      .replace(/[^a-z0-9]+/g, " ")
+      .split(" ")
+      .filter(w => w.length > 2 && !NOT_A_NAMED_THING.has(w));
+  // A word meets its singular or plural in any spelling: one stem that cut "es" off every word read
+  // "kettles" as "kettl" beside "kettle", and refused a group whose picture had two kettles in it.
+  const meets = (w: string, set: Set<string>) => nameForms(w).some(f => set.has(f));
+  // The things the line names: the two words after "a", "the", "your"… ("Pull up a stool" = stool).
+  const toks = tokenSpans(said ?? "").map(t => t.tok.replace(/'s$/, ""));
+  const inLine = new Set<string>();
+  toks.forEach((t, k) => {
+    if (!THING_OPENER.test(t)) return;
+    for (const w of toks.slice(k + 1, k + 3))
+      if (w.length > 2 && !NOT_A_NAMED_THING.has(w)) nameForms(w).forEach(f => inLine.add(f));
+  });
+  // A thing's own name: never a describing word (a colour, a material, a size) or a doing word.
+  const named = words(topicWords(own)).filter(
+    w => meets(w, inLine) && !describesTheName(w) && !/(?:ing|ed|ly)$/.test(w)
+  );
+  if (named.length === 0) return false;
+  const inGroup = new Set(words(group).flatMap(nameForms));
+  const missing = named.filter(w => !meets(w, inGroup)).length;
+  return missing / named.length > 0.5;
 }
 
 /**

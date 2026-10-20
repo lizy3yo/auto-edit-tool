@@ -380,7 +380,10 @@ describe("Diane's job 309, Lance's job 311, Pearl's job 310", () => {
     ];
     const out = markCtaQrBlock(scenes, { qrImageUrl: "q.png", bookTitle: "Pearl's Knitting Companion", bookCoverImageUrl: "c.png" } as any, true);
     const order = out.filter(s => s.cta).map(s => (s.qrHero ? "Q" : s.coverHero ? "B" : "H")).join("");
-    expect(order).toBe("HBHQ");
+    // The cover starts on the clause that names the book (jobs 411/412), so "It's the know-how … kitchen
+    // tables," stays a host beat before it — joined to the host before by `joinBackToBackHostTakes`.
+    expect(order).toBe("HHBHQ");
+    expect(out.find(s => s.coverHero)?.scriptText).toBe("and I put it together in a digital book called Pearl's Knitting Companion.");
     expect(out.find(s => s.qrHero)?.scriptText).toMatch(/^To get it, use the link/);
   });
 });
@@ -2670,7 +2673,10 @@ describe("the book cover lands on the line that says the title, never on one wor
       cta(2, "and I collected a hundred and one fixes like it into a digital book called The Locksmith Way."),
     ];
     const out = markCoverReveal(scenes, { bookTitle: "The Locksmith Way", bookCoverImageUrl: "c.png" } as any);
-    expect(out.filter(s => s.coverHero).map(s => s.index)).toEqual([2]);
+    // …from where the book is named: the ten words before "a digital book" stay before it (jobs 411/412).
+    expect(out.filter(s => s.coverHero).map(s => [s.index, s.scriptText])).toEqual([
+      [3, "a digital book called The Locksmith Way."],
+    ]);
   });
 });
 
@@ -8820,5 +8826,401 @@ describe("a split panel is built from its line, and keeps the tool its line name
         "knock the chunks out, and pare it flat with the chisel, same rule as before, board clamped down and both hands behind the edge. When you hang it, screw a hidden cleat on the back into a wall stud,"
       )
     ).toBe(CLEAT);
+  });
+});
+
+describe("the book cover comes up when the host names the book (jobs 411 and 412)", () => {
+  // Round-12 verification films: the cover took the whole beat that said the title, so it came up
+  // 4-7 s before the book was mentioned — 411 on "What bird scientists and patient window-watchers
+  // have learned over the years," ("one digital book" 5.6 s later), 412 on "along with what
+  // behaviorists and lifelong cat people have worked out," ("my book" 4.2 s later).
+  const cta = (index: number, scriptText: string, hostPresent = true) =>
+    ({ index, scriptText, hostPresent, cta: true, ctaIndex: 0, showSubject: "x" }) as StoryboardScene;
+  const run = (title: string, scenes: StoryboardScene[]) =>
+    markCtaQrBlock(scenes, { ctaBooks: [{ ctaIndex: 0, bookId: 0, title, coverImageUrl: "c.png" }] } as any, true);
+  const shape = (out: StoryboardScene[]) =>
+    out.filter(s => s.cta).map(s => [s.qrHero ? "Q" : s.coverHero ? "B" : "H", s.scriptText?.split(" ").slice(0, 4).join(" ")]);
+
+  it("411: the words before 'I boiled down into one digital book' stay before the cover", () => {
+    const out = run("The Backyard Birder", [
+      host(1, "And that’s easy to miss with the storm windows shut.", { hostOpener: true }),
+      cta(2, "While the robins work on that holly, here’s something to help you name everything else out there."),
+      cta(3, "What bird scientists and patient window-watchers have learned over the years, I boiled down into one digital book, The Backyard Birder.", false),
+      cta(4, "It covers more than thirty birds over nine chapters, and every bird’s profile runs the same six parts."),
+      cta(5, "If your phone’s within reach, point its camera at the code in this video, and when a link shows on the phone, tap it."),
+    ]);
+    expect(shape(out)).toEqual([
+      ["H", "While the robins work"],
+      ["H", "What bird scientists and"],
+      ["B", "I boiled down into"],
+      ["H", "It covers more than"],
+      ["Q", "If your phone’s within"],
+    ]);
+  });
+
+  it("412: the cover from 'into my book', not from 'along with what behaviorists'", () => {
+    const out = run("Everything Your Cat Can't Tell You", [
+      host(1, "Hello.", { hostOpener: true }),
+      cta(2, "Freeze that picture for a minute, because a cat training a person is exactly the kind of signal I’ve gathered,"),
+      cta(3, "along with what behaviorists and lifelong cat people have worked out, into my book, Everything Your Cat Can’t Tell You.", false),
+      cta(4, "It’s a digital download, five hundred and ninety-two pages. Getting it is simple."),
+      cta(5, "Aim your phone’s camera at the code on your screen, hold steady, and tap the message that appears."),
+    ]);
+    expect(out.find(s => s.coverHero)?.scriptText).toBe("into my book, Everything Your Cat Can’t Tell You.");
+    expect(out.find(s => s.scriptText?.startsWith("along with"))?.coverHero).toBeFalsy();
+  });
+
+  it("unchanged: a beat that opens on the title keeps the whole beat as the cover", () => {
+    const out = run("The Kitchen Table Crochet Book", [
+      host(1, "Hello.", { hostOpener: true }),
+      cta(2, "And when you're ready for more after these, here is where it all lives."),
+      cta(3, "The Kitchen Table Crochet Book is a digital book with ten chapters, each one a project that sells."),
+      cta(4, "Hold your phone up to the screen and tap the link that appears."),
+    ]);
+    expect(shape(out).map(([k]) => k).join("")).toBe("HBQ");
+    expect(out.find(s => s.coverHero)?.scriptText).toMatch(/^The Kitchen Table Crochet Book is a digital book/);
+  });
+
+  it("unchanged: a block that OPENS on a short lead-in to the book keeps the cover on the whole beat", () => {
+    // Nothing before it in its block for those words to join (no fold or join crosses a marked CTA
+    // edge), so alone they would be held to the host floor: a frozen face over silence before the book.
+    const out = run("Everything Your Cat Can't Tell You", [
+      host(1, "Hello.", { hostOpener: true }),
+      cta(2, "along with what behaviorists and lifelong cat people have worked out, into my book, Everything Your Cat Can’t Tell You.", false),
+      cta(3, "It’s a digital download, five hundred and ninety-two pages. Getting it is simple."),
+      cta(4, "Aim your phone’s camera at the code on your screen, hold steady, and tap the message that appears."),
+    ]);
+    expect(shape(out).map(([k]) => k).join("")).toBe("BHQ");
+    expect(out.find(s => s.coverHero)?.scriptText).toMatch(/^along with what behaviorists/);
+  });
+});
+
+describe("a cut at a sentence break beside a spoken number goes in the real pause (job 413 #35 → #36)", () => {
+  // Gary's verification film at 2:59, the job 406 fix in: the voice says "…working people actually
+  // run." — a 0.81 s pause (179.146-179.958) — "Three hundred seventy pages". The transcriber heard
+  // "run." at 180.09-180.61, over "Three hundred", and "370" at 180.71, so the number could not be
+  // moved back past the word before it and the host came in at 180.54, on "seventy". Next to a number
+  // neither neighbour's time is the transcriber's own: the cut goes in the longest real pause the two
+  // words around the break reach.
+  const parse = (s: string) =>
+    s.split(" ").map(tok => {
+      const [, word, start, end] = /^(.*)@([\d.]+)-([\d.]+)$/.exec(tok)!;
+      return { word, start: Number(start), end: Number(end) };
+    });
+  const words = parse(
+    "working@177.785-178.106 people@178.146-178.426 actually@178.666-179.306 run.@180.087-180.607 370@180.707-181.087 pages,@181.127-181.567 101@182.208-182.808 numbered@182.948-183.268 hustles@183.308-183.689 across@183.749-184.069 13@184.249-184.649 chapters,@184.689-185.189"
+  );
+  const silences = [
+    [174.179, 174.503], [178.356, 178.486], [179.146, 179.958], [181.391, 181.858], [183.944, 184.116],
+    [184.815, 184.941], [184.995, 185.631],
+  ].map(([start, end]) => ({ start, end }));
+  const NUMBER = "Three hundred seventy pages, a hundred and one numbered hustles across thirteen chapters.";
+  const cta = (s: StoryboardScene, from: number, to: number) =>
+    Object.assign(s, { cta: true, ctaIndex: 0, narrationStartSec: from, narrationEndSec: to, audioDuration: to - from });
+
+  it("the cut the aligner places from the scene text: the end of the pause, not 'seventy'", () => {
+    const scenes = [pic(1, "working people actually run.", "the book", { coverHero: true }), host(2, NUMBER)];
+    const shifted = (list: { start: number; end: number }[]) =>
+      list.map(x => ({ ...x, start: Math.max(0, x.start - 177.75), end: x.end - 177.75 }));
+    const ranges = assignSceneRanges(scenes, shifted(words) as any, 185.6 - 177.75, shifted(silences), shifted(silences));
+    expect(ranges[0].endSec + 177.75).toBeCloseTo(179.918, 3);
+  });
+
+  it("the cut the gate makes when the cover finishes its sentence: in the same pause", async () => {
+    const { enforcePlanRules } = await import("./planGate");
+    const scenes = [
+      cta(host(1, "Three businesses in, and you can already see the pattern.", { qrCorner: true, hostProtected: true }), 164.06, 170.599),
+      cta(
+        pic(2, "That pattern fills a digital book called The Garage to Profit Bible, put together under this channel’s name from the honest arithmetic", "the book", { coverHero: true, stillImage: true }),
+        170.599,
+        177.75
+      ),
+      cta(host(3, `working people actually run. ${NUMBER}`, { qrCorner: true, hostProtected: true }), 177.75, 185.6),
+      cta(pic(4, "There’s a QR code on your screen — aim your phone’s camera at it, and the page opens on its own.", "a garage bench", { qrHero: true, qrTail: true, stillImage: true }), 185.6, 199),
+    ];
+    const r = enforcePlanRules(scenes, { faceImageUrl: "https://example.com/host.jpg" } as any, { words, silences });
+    const cover = r.scenes.find(s => s.coverHero)!;
+    const back = r.scenes[r.scenes.indexOf(cover) + 1];
+    expect(cover.scriptText).toMatch(/working people actually run\.$/);
+    expect(back.scriptText).toBe(NUMBER);
+    expect(cover.narrationEndSec!).toBeGreaterThanOrEqual(179.146);
+    expect(cover.narrationEndSec!).toBeLessThanOrEqual(179.958);
+    expect(back.narrationStartSec).toBeCloseTo(cover.narrationEndSec!, 5);
+  });
+
+  it("the opening list's 'A loan,' picture comes on its word, after '…costs $10,000.' and its pause", () => {
+    // "A" was heard at 5.47, inside the 0.75 s pause it really ends (5.37-6.12): the picture came up
+    // 0.65 s before the word.
+    const opening = parse(
+      "business@3.433-3.853 costs@3.913-4.273 $10,000.@4.413-5.173 A@5.473-5.633 loan,@6.353-6.753 a@7.013-7.053 lease,@7.113-7.433"
+    );
+    const pauses = [[4.02113, 4.33237], [5.3655, 6.11894], [6.72125, 6.87012]].map(([start, end]) => ({ start, end }));
+    const scenes = [host(1, "business costs ten thousand dollars."), pic(2, "A loan,", "a loan"), pic(3, "a lease,", "a lease")];
+    const ranges = assignSceneRanges(scenes, opening as any, 7.5, pauses, pauses);
+    expect(ranges[1].startSec).toBeCloseTo(6.11894 - 0.04, 3);
+  });
+
+  it("unchanged: a sentence break with no number at it, and a number inside a sentence, keep their cuts", () => {
+    const flat = parse("downside@190.152-190.732 flat.@190.892-191.213 Tonight@191.813-192.133 covers@192.193-192.493 17@192.713-193.214 under@193.334-193.514");
+    const pauses = [[190.6, 190.857], [191.024, 191.736], [193.384, 193.539]].map(([start, end]) => ({ start, end }));
+    const shifted = <T extends { start: number; end: number }>(list: T[]) =>
+      list.map(x => ({ ...x, start: x.start - 190, end: x.end - 190 }));
+    // "…the downside flat. | Tonight covers": the end of the pause, as the ordinary snap puts it.
+    const atBreak = assignSceneRanges(
+      [host(1, "the downside flat."), pic(2, "Tonight covers seventeen under", "x")],
+      shifted(flat) as any,
+      3.6,
+      shifted(pauses),
+      shifted(pauses)
+    );
+    expect(atBreak[0].endSec + 190).toBeCloseTo(191.696, 3);
+    // "Tonight covers | seventeen under": the voice runs straight on — left where the words put it.
+    const inside = assignSceneRanges(
+      [host(1, "the downside flat. Tonight covers"), pic(2, "seventeen under", "x")],
+      shifted(flat) as any,
+      3.6,
+      shifted(pauses),
+      shifted(pauses)
+    );
+    expect(inside[0].endSec + 190).toBeCloseTo(192.713, 3);
+  });
+
+  it("unchanged: a sentence gap split by a breath keeps its cut right before the number (job 409 at 1:40)", () => {
+    // "…all seven of the thieves." — 1.0 s silence, a 0.17 s breath, 0.55 s silence — "Two thousand
+    // years ago". The picture changes at the end of the second pause, as the film shipped it.
+    const heard = parse(
+      "the@98.414-98.515 thieves.@98.575-98.975 2,000@100.895-101.175 years@101.215-101.455 ago,@101.535-101.835"
+    );
+    const pauses = [[98.4144, 98.5567], [98.6814, 98.9481], [98.9947, 99.9863], [100.161, 100.715]].map(
+      ([start, end]) => ({ start: start - 98, end: end - 98 })
+    );
+    const ranges = assignSceneRanges(
+      [pic(1, "the thieves.", "x"), pic(2, "Two thousand years ago,", "y")],
+      heard.map(x => ({ ...x, start: x.start - 98, end: x.end - 98 })) as any,
+      4,
+      pauses,
+      pauses
+    );
+    expect(ranges[0].endSec + 98).toBeCloseTo(100.675, 3);
+  });
+});
+
+describe("a sentence that ends on a number the script spells out is cut in the pause after it (job 413 at 2:03)", () => {
+  // "…priced twenty-five to seventy-five dollars. | Nine times out of ten…": the transcriber wrote
+  // the price as "$75.", so the gate's cut never found the script's "dollars." among the heard words
+  // and the word share alone placed it a word off — after "Nine" (125.23), the host back on "times".
+  // The numeral heard in the word's place now finds the sentence end, and the pause after the price
+  // (124.064-124.902) takes the cut.
+  const words = "priced@122.103-122.704 $25@122.744-123.064 to@123.124-123.204 $75.@123.284-123.865 Nine@125.026-125.206 times@125.246-125.486 out@125.546-125.646 of@125.686-125.726 ten,@125.806-126.127 the@126.187-126.267 crime@126.307-126.567 is@126.627-126.707 stale@126.767-127.107 fuel@127.187-127.528 and@127.568-127.648 a@127.668-127.708 gummed@127.768-128.028 up@128.068-128.188 carburetor,@128.228-128.849 an@129.269-129.329 afternoon@129.429-129.809 of@129.849-129.91 cleaning,@129.97-130.39 and@130.45-130.55 a@130.57-130.61 $2@130.83-131.11 gasket.@131.151-131.591"
+    .split(" ")
+    .map(tok => {
+      const [, word, start, end] = /^(.*)@([\d.]+)-([\d.]+)$/.exec(tok)!;
+      return { word, start: Number(start), end: Number(end) };
+    });
+  const silences = [
+    [121.695, 122.028], [122.94, 123.069], [124.064, 124.902], [127.001, 127.151], [128.703, 129.165],
+    [131.215, 131.359], [131.423, 132.171],
+  ].map(([start, end]) => ({ start, end }));
+  const cta = (s: StoryboardScene, from: number, to: number) =>
+    Object.assign(s, { cta: true, ctaIndex: 0, narrationStartSec: from, narrationEndSec: to, audioDuration: to - from });
+
+  it("the book cover finishes the price, the host comes back on 'Nine', in the pause", async () => {
+    const { enforcePlanRules } = await import("./planGate");
+    const scenes = [
+      cta(host(1, "Three businesses in, and you can already see the pattern.", { qrCorner: true, hostProtected: true }), 110, 117.211),
+      cta(
+        pic(2, "Every spring, Marketplace fills up with mowers listed as ran-last-season,", "the book", { coverHero: true, stillImage: true }),
+        117.211,
+        122.028
+      ),
+      cta(
+        host(
+          3,
+          "priced twenty-five to seventy-five dollars. Nine times out of ten the crime is stale fuel and a gummed-up carburetor — an afternoon of cleaning and a two-dollar gasket.",
+          { qrCorner: true, hostProtected: true }
+        ),
+        122.028,
+        132.171
+      ),
+      cta(pic(4, "There’s a QR code on your screen — aim your phone’s camera at it.", "a garage bench", { qrHero: true, qrTail: true, stillImage: true }), 132.171, 140),
+    ];
+    const r = enforcePlanRules(scenes, { faceImageUrl: "https://example.com/host.jpg" } as any, { words, silences });
+    const cover = r.scenes.find(s => s.coverHero)!;
+    const back = r.scenes[r.scenes.indexOf(cover) + 1];
+    expect(cover.scriptText).toMatch(/seventy-five dollars\.$/);
+    expect(back.scriptText).toMatch(/^Nine times out of ten/);
+    expect(cover.narrationEndSec!).toBeGreaterThanOrEqual(124.064);
+    expect(cover.narrationEndSec!).toBeLessThanOrEqual(124.902);
+  });
+});
+
+describe("round 14: where a picture starts against the sentences (jobs 413 and 414)", async () => {
+  const { applyPictureSplits, carrySentenceStarts, contextRuns, lastWordsSec, parseContextGroups } = await import("./shotList");
+
+  it("413 scene 33: the step keeps 'nowhere near a spark.', and the dead mowers get their own picture", () => {
+    // The check's split at "The downside is real" was refused: the words before it, ~1.5 s, finish
+    // the step "store it sealed," — so the sealed can stayed up 8 s over a line about dead mowers.
+    const scenes = [
+      pic(32, "store it sealed,", "the red gas can with its black cap screwed tight on a shelf in an outdoor shed", {
+        listCut: true,
+        audioDuration: 1.167,
+      }),
+      pic(
+        33,
+        "nowhere near a spark. The downside is real: some mowers are just done, and you’ll eat a couple of corpses learning to tell the difference.",
+        "the sealed red gas can standing alone on a shelf in an outdoor shed",
+        { audioDuration: 9.73 }
+      ),
+    ];
+    const r = applyPictureSplits(
+      scenes,
+      [{ id: 1, split: [{ from: "The downside is real", show: "a dead push mower with a seized engine in the back corner of a garage" }] }],
+      [],
+      s => s.audioDuration ?? 0,
+      () => 10.5
+    );
+    expect(r.scenes.map(s => s.scriptText)).toEqual([
+      "store it sealed, nowhere near a spark.",
+      "The downside is real: some mowers are just done, and you’ll eat a couple of corpses learning to tell the difference.",
+    ]);
+    expect(r.scenes[1].showSubject).toMatch(/dead push mower/);
+    // Unchanged: a lead that is its own sentence ("Pull up a stool.") is never handed back.
+    const stool = [
+      pic(14, "and the catch stated flat.", "the host looking at a worn tool", { listCut: true, audioDuration: 2.034 }),
+      pic(15, "Pull up a stool. One piece of housekeeping first: license rules change town by town,", "the host on the phone", {
+        audioDuration: 5.792,
+      }),
+    ];
+    const kept = applyPictureSplits(
+      stool,
+      [{ id: 1, split: [{ from: "One piece of housekeeping", show: "a town clerk's counter" }] }],
+      [],
+      s => s.audioDuration ?? 0,
+      () => 10.5
+    );
+    expect(kept.scenes).toEqual(stool);
+  });
+
+  it("414 scenes 28-29: 'Green wood splits' goes on to the cracked wall, timed on the voice", () => {
+    const words = [
+      ["favorite.", 152.79, 153.27], ["Green", 154.091, 154.391], ["wood", 154.431, 154.711], ["splits", 154.791, 155.271],
+    ].map(([word, start, end]) => ({ word: word as string, start: start as number, end: end as number }));
+    const trees = pic(
+      28,
+      "because a fresh log gives up its chips far easier than a seasoned one, and tall, straight tulip poplar was a favorite. Green wood splits",
+      "tall straight tulip poplar trees in the wooded felling area",
+      { shotGroup: 23, audioDuration: 11.649 }
+    );
+    const wall = pic(29, "and shifts as it dries, so a new wall opens small cracks its first year.", "a hewn log wall with small drying cracks", {
+      shotGroup: 24,
+      audioDuration: 7.142,
+    });
+    const range = { startSec: 143.655, endSec: 155.304 };
+    const r = carrySentenceStarts([trees, wall], s => s.audioDuration ?? 0, () => 21, (s, n) =>
+      s === trees ? lastWordsSec(words, range, n) : undefined
+    );
+    expect(r.scenes[0].scriptText).toMatch(/was a favorite\.$/);
+    expect(r.scenes[1].scriptText).toMatch(/^Green wood splits and shifts as it dries/);
+    // Unchanged: the shot list's own cut inside one beat.
+    expect(carrySentenceStarts([trees, { ...wall, shotGroup: 23 }], s => s.audioDuration ?? 0, () => 21).moved).toBe(0);
+  });
+
+  it("413 scene 15: 'Pull up a stool.' keeps the stool its own picture showed; the phone call stays the next line's", () => {
+    const scenes = [
+      pic(15, "Pull up a stool. One piece of housekeeping first: license rules change town by town,", "the host on a stool at the garage workbench, settling in", {
+        humanPresent: true,
+      }),
+      pic(16, "so before you charge a stranger a dime, spend two minutes on the phone with your city office.", "the host on the phone at the workbench calling the city office", {
+        humanPresent: true,
+      }),
+    ];
+    const answer = JSON.stringify({ groups: [{ ids: [0, 1], show: "the host on the phone at the workbench calling the city office" }] });
+    const groups = (list: StoryboardScene[]) =>
+      parseContextGroups(answer, contextRuns(list), i => list[i].showSubject, i => atWork(list[i]), i => list[i].scriptText);
+    expect(groups(scenes)).toEqual([]);
+    // Unchanged: as shipped, the lead-in line's own picture was the phone call already — one group.
+    const shipped = [{ ...scenes[0], showSubject: scenes[1].showSubject }, scenes[1]];
+    expect(groups(shipped)).toHaveLength(1);
+  });
+});
+
+describe("round 14: a sentence that moves to another setting ends the topic (job 412 scene 26)", async () => {
+  const { applyPictureSplits, atWork, contextRuns, parseContextGroups, parsePictureFixes } = await import("./shotList");
+  const { settingNote } = await import("./lineSetting");
+  const WILD = "a wild cat stalking low through scattered brush across the dawn-lit wild landscape toward a small mouse";
+  const TURN =
+    "and bigger hunters can’t see well, and she inherited that schedule the same way she inherited her whiskers. Indoor life softens it, but it rarely erases it, so plenty of house cats keep one foot in the old rhythm.";
+
+  it("412 #26: the indoor sentence leaves the wild topic, and the line check splits it off with its own picture", () => {
+    // The same-topic pass gave 23-26 one wild picture; the indoor talk ran 7.4 s under the desert.
+    const scenes = [
+      pic(23, "The honest word is crepuscular, which is just a fancy way of saying dawn and dusk.", WILD),
+      pic(24, "Her wild relatives do their serious hunting in the low light at the edges of the day,", WILD),
+      pic(25, "when small prey is out moving around", WILD),
+      pic(26, TURN, WILD),
+    ];
+    const groups = parseContextGroups(
+      JSON.stringify({ groups: [{ ids: [0, 1, 2, 3], show: WILD }] }),
+      contextRuns(scenes),
+      i => scenes[i].showSubject,
+      i => atWork(scenes[i]),
+      i => scenes[i].scriptText
+    );
+    expect(groups).toEqual([{ ids: [0, 1, 2], show: WILD }]);
+    // The line check is told where the line turns, and its split gives the indoor sentence its picture.
+    expect(settingNote(TURN, WILD)).toMatch(/turn to another setting at "Indoor life softens it": indoors/);
+    const line = pic(26, TURN, WILD, { audioDuration: 13.88 });
+    const fixes = parsePictureFixes(
+      JSON.stringify({
+        pictures: [
+          {
+            id: 0,
+            about: "the schedule she inherited from wild hunters",
+            shows_it: true,
+            split: [{ from: "Indoor life softens it", show: "a grey-and-white house cat stretched out on a living room sofa" }],
+          },
+        ],
+      }),
+      [line]
+    );
+    const r = applyPictureSplits([line], fixes, [], s => s.audioDuration ?? 0);
+    expect(r.scenes.map(s => s.showSubject)).toEqual([WILD, "a grey-and-white house cat stretched out on a living room sofa"]);
+    expect(r.scenes[1].scriptText).toMatch(/^Indoor life softens it/);
+    // Unchanged: lines that stay in the wild still share the wild picture, and a line set where its
+    // picture is gets no mark.
+    expect(
+      parseContextGroups(
+        JSON.stringify({ groups: [{ ids: [0, 1], show: WILD }] }),
+        [[0, 1]],
+        i => scenes[i + 1].showSubject,
+        i => atWork(scenes[i + 1]),
+        i => scenes[i + 1].scriptText
+      )
+    ).toEqual([{ ids: [0, 1], show: WILD }]);
+    expect(settingNote(TURN, "a grey-and-white house cat stretched out on a living room sofa")).toBe("");
+  });
+});
+
+describe("round 14: a thing's place is no setting turn (jobs 190 and 192, beside job 412 scene 26)", async () => {
+  const { atWork, contextRuns, parseContextGroups } = await import("./shotList");
+  it("the feed sacks stay one picture though the lead-in names the house the cloth was in", () => {
+    // Both films grouped these two lines under one picture of the feed sacks by the burn barrel. The
+    // lead-in's "in our house" is where the cloth was, inside a sentence the host's line opened — not
+    // where the talk goes — so the setting cut of 412 scene 26 must leave the group whole.
+    const sacks = "feed sacks stacked flat in the yard near the rusted burn barrel";
+    const scenes = [
+      host(0, "Out of 10 plain sewing projects I stitched up from"),
+      pic(1, "cloth that was already sitting in our house, the one that paid me best for my", sacks),
+      pic(2, "time came from a stack of feed sacks my husband set aside for the burn barrel.", sacks),
+    ];
+    expect(
+      parseContextGroups(
+        JSON.stringify({ groups: [{ ids: [1, 2], show: sacks }] }),
+        contextRuns(scenes),
+        i => scenes[i]?.showSubject,
+        i => atWork(scenes[i]),
+        i => scenes[i]?.scriptText
+      )
+    ).toEqual([{ ids: [1, 2], show: sacks }]);
   });
 });
