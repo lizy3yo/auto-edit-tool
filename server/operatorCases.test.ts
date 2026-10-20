@@ -7850,3 +7850,236 @@ describe("a cutaway is written for the shot it will be, and an answer that is no
     expect(leftMotionLane(sharedOut)).toBe(false);
   });
 });
+
+/**
+ * A TOOL WORKS THE WAY IT REALLY DOES, AND A LINE ENDS AT THE PART IT SERVES (round 14, the review of
+ * jobs 413 and 414 made on the round-12 code). Job 413 scene 29: "pull the spark plug wire first" drew
+ * the plug lead looping into the carburetor's fuel inlet. Job 414 scene 13: a drawknife laid along the
+ * board, its stroke across the narrow width. Job 414 scene 17: the froe flat on top of the bolt, both
+ * hands pressing, no club — broken on all four draws, and every redraw went out without a word changed.
+ */
+describe("a tool works the way it really does, and a line ends at the part it serves (round 14, jobs 413 and 414)", () => {
+  const WOODWORKER = "A broad man in his sixties with a short white beard, wearing a sage green work shirt with rolled sleeves";
+  const froe17 = () =>
+    pic(
+      17,
+      "Number one is the roof, split by hand from white oak or chestnut with a froe, and the direction of the split mattered most. They",
+      "the host's hands holding a froe upright by its wooden handle, its flat blade driven into the end of a short pale white oak bolt",
+      {
+        visualPrompt:
+          "Bare hands holding a froe upright by its wooden handle, the flat blade driven into the end grain of a short pale white oak bolt.",
+        keyThing: "white oak bolt",
+        humanPresent: true,
+      }
+    );
+  const drawknife13 = () =>
+    pic(
+      13,
+      "since folk schools still teach plenty of these",
+      "a student at a workbench pulling a drawknife toward themself with both hands on its two bent end handles, shaving a pale board, seen from the side",
+      {
+        visualPrompt:
+          "Bare weathered hands on a workbench, fingers gripping both bent handles of a drawknife, pulling it toward the body across a pale tapered wooden board, shaved surface visible, seen from the side.",
+        humanPresent: true,
+        otherPerson: "a folk school student",
+      }
+    );
+  const plugWire29 = (over: Partial<StoryboardScene> = {}) =>
+    pic(
+      29,
+      "Two rules before your hands go near one: pull the spark plug wire first, every time, because a mower that turns over with your fingers under the deck will not apologize.",
+      "close-up of the host's fingers pulling the grey metal boot cap of a black rubber-coated spark plug wire off the spark plug on the mower engine.",
+      {
+        visualPrompt:
+          "Bare weathered hands, fingers pulling the grey metal boot cap off the end of a black rubber-coated spark plug wire connected to a mower engine.",
+        keyThing: "spark plug wire",
+        humanPresent: true,
+        ...over,
+      }
+    );
+
+  it("414-17 a froe goes in under a club, never pressed by hand — in every picture of someone at work", async () => {
+    const { SPLIT_STRIKE_CLAUSE } = await import("./longformVideo");
+    expect(SPLIT_STRIKE_CLAUSE).toMatch(/never goes in by hand pressure/);
+    expect(SPLIT_STRIKE_CLAUSE).toMatch(/STRUCK down into the end grain with a wooden club, mallet or sledge/);
+    expect(SPLIT_STRIKE_CLAUSE).toMatch(/brings the club down on the back of its blade/);
+    // A froe already in is levered, with no club: the rule never makes that picture wrong.
+    expect(SPLIT_STRIKE_CLAUSE).toMatch(/once a froe is sunk in the wood, its handle is pulled sideways to lever the split open/);
+    // A maul or an axe that splits is swung: it is never told to be struck with a club.
+    expect(SPLIT_STRIKE_CLAUSE).not.toMatch(/\bmaul\b|\baxe\b/);
+    expect(TOOL_POSITION_CLAUSE).toContain(SPLIT_STRIKE_CLAUSE);
+    const scenes = [froe17()];
+    markHostBroll(scenes, { hostLook: WOODWORKER, hostName: "Sam" }, "https://x/host.png");
+    expect(buildStillPrompt(scenes[0])).toContain(SPLIT_STRIKE_CLAUSE);
+    expect(ANON_PERSON_SUFFIX).toContain(SPLIT_STRIKE_CLAUSE);
+    expect(otherPersonClause("a folk school student")).toContain(SPLIT_STRIKE_CLAUSE);
+  });
+
+  it("414-13 a drawknife lies across the board and strokes along it, the piece held", async () => {
+    const { SHAVING_STROKE_CLAUSE } = await import("./longformVideo");
+    expect(SHAVING_STROKE_CLAUSE).toMatch(/edge lying ACROSS the piece and travels ALONG the piece's length, with the grain/);
+    expect(SHAVING_STROKE_CLAUSE).toMatch(/a drawknife pulled toward the user's body, a plane pushed away/);
+    expect(SHAVING_STROKE_CLAUSE).toMatch(/never sideways across the piece's narrow width/);
+    expect(SHAVING_STROKE_CLAUSE).toMatch(/held still in a vise, on a shaving horse, against a bench stop or clamped down/);
+    expect(TOOL_POSITION_CLAUSE).toContain(SHAVING_STROKE_CLAUSE);
+    expect(buildStillPrompt(drawknife13())).toContain(SHAVING_STROKE_CLAUSE);
+    // The rules before it are all still there (jobs 406 and 407).
+    expect(TOOL_POSITION_CLAUSE).toMatch(/An axe that is chopping, felling or hewing rather than splitting bites into the side of the log or trunk/);
+    expect(TOOL_POSITION_CLAUSE).toMatch(/that hand is on the tool itself or holds the work behind the edge/);
+  });
+
+  it("a tool at rest, with nobody in the picture, is told neither how to strike nor how to stroke", async () => {
+    const { SPLIT_STRIKE_CLAUSE, SHAVING_STROKE_CLAUSE } = await import("./longformVideo");
+    const scenes = [pic(3, "The froe is the tool that made those roofs.", "a froe and a drawknife hanging from pegs on a log cabin wall")];
+    markHostBroll(scenes, { hostLook: WOODWORKER, hostName: "Sam" }, "https://x/host.png");
+    expect(scenes[0].humanPresent).toBeFalsy();
+    const prompt = buildStillPrompt(scenes[0]);
+    expect(prompt).not.toContain(SPLIT_STRIKE_CLAUSE);
+    expect(prompt).not.toContain(SHAVING_STROKE_CLAUSE);
+  });
+
+  it("413-29 the spark plug wire runs to the one part it serves — with people in the picture or not", async () => {
+    const { CONNECTING_LINES_CLAUSE } = await import("./longformVideo");
+    expect(CONNECTING_LINES_CLAUSE).toMatch(/runs as ONE continuous piece from where it really starts to the one part it really serves/);
+    expect(CONNECTING_LINES_CLAUSE).toMatch(/never runs into a different part's fitting, never joins, swaps with or turns into another line/);
+    expect(CONNECTING_LINES_CLAUSE).toMatch(/two lines that run side by side stay two separate lines/);
+    const scenes = [plugWire29()];
+    markHostBroll(scenes, { hostLook: WOODWORKER, hostName: "Gary" }, "https://x/host.png");
+    expect(buildStillPrompt(scenes[0])).toContain(CONNECTING_LINES_CLAUSE);
+    // The same engine with nobody at it.
+    expect(buildStillPrompt(plugWire29({ humanPresent: false }))).toContain(CONNECTING_LINES_CLAUSE);
+    // Not on a content-policy fallback, which softens the picture's words away.
+    expect(buildStillPrompt(plugWire29({ humanPresent: false }), true)).not.toContain(CONNECTING_LINES_CLAUSE);
+  });
+
+  it("only a picture naming a line that connects things is told about lines", async () => {
+    const { connectingLinesClause, CONNECTING_LINES_CLAUSE } = await import("./longformVideo");
+    for (const words of [
+      "a garden hose coiled beside an outdoor tap",
+      "an extension cord running from the wall socket to the saw",
+      "jumper cables clamped onto the battery terminals",
+      "the fuel line from the tank to the carburetor",
+      "copper pipes under the kitchen sink",
+      "a tangle of wiring behind the dashboard",
+      "a green hosepipe running from the tap to the sprinkler",
+      // The replay's own: jobs 270 and 403.
+      "an electrical cord running under a rug on the floor",
+      "grey PVC pipe network running beneath the house toward the street",
+    ])
+      expect(connectingLinesClause(words), words).toBe(` ${CONNECTING_LINES_CLAUSE}`);
+    for (const words of [
+      "a wire brush resting on the workbench",
+      "a cord of split firewood stacked by the shed",
+      "chicken wire fence around the garden bed",
+      "a pipe wrench on the bench",
+      "a cordless drill on the bench",
+      "a cable-knit sweater folded on the bed",
+      "wire-rimmed glasses resting on an open book",
+      // The replay's smoke alarms (jobs 229, 259, 381, 394) and space heater (job 229): no line to run.
+      "a rounded white replacement alarm unit held in an open hand, no visible wiring",
+      "round white smoke alarm held in a hand near the ceiling, no wires visible",
+      "The unit displays no wires or connections, only the plain white face",
+      "A black space heater with a metal wire grille sitting on the floor near a low bed",
+      "a stack of folded quilts on a bed",
+      "the froe and the drawknife hanging on the back wall",
+    ])
+      expect(connectingLinesClause(words), words).toBe("");
+    // 414-17's froe names no line, and is not told about one.
+    const scenes = [froe17()];
+    markHostBroll(scenes, { hostLook: WOODWORKER, hostName: "Sam" }, "https://x/host.png");
+    expect(buildStillPrompt(scenes[0])).not.toContain(CONNECTING_LINES_CLAUSE);
+  });
+
+  it("the still check names a line in the wrong part, a drawknife along the board, and a froe pressed by hand", () => {
+    const q2 = STILL_DEFECT_SYSTEM.slice(STILL_DEFECT_SYSTEM.indexOf("QUESTION 2"), STILL_DEFECT_SYSTEM.indexOf("QUESTION 3"));
+    expect(q2).toMatch(/a cable, wire, cord, hose or pipe that runs into a part it does not serve or into another part's fitting/);
+    expect(q2).toMatch(/two different lines joined into one/);
+    expect(q2).toMatch(/a drawknife or spokeshave whose blade lies ALONG the length of the piece it is shaving/);
+    expect(q2).toMatch(/stroke would run sideways across the piece's narrow width instead of along its length/);
+    expect(q2).toMatch(
+      /A froe or wedge pressed down on top of the wood by the hands alone, its edge not in it and no club, mallet or sledge to strike it in, is this fault/
+    );
+    // …never a froe already in and levered, nor a hewing axe or a tool at rest (job 407).
+    expect(q2).toMatch(/a froe already sunk in the wood and levered by its handle needs no club in the frame/);
+    expect(q2).toMatch(/An axe chopping, felling or hewing into the side of a log or trunk is right/);
+    expect(q2).toMatch(/a tool hanging, lying or resting unused is splitting nothing/);
+    expect(q2).toMatch(/When unsure, answer false/);
+    // The check's own words name the tool or the line, so the redraw can be told which rule it broke.
+    expect(STILL_DEFECT_SYSTEM).toMatch(/a fault in a tool, cable, wire or hose names it/);
+  });
+
+  it("414-17 the first broken draw of a tool at work, or of a line in any picture, is redrawn told what was wrong", async () => {
+    const { faultRedrawFor } = await import("./longformVideo");
+    type R = "at rest" | "soft print" | "named fault";
+    const none = new Set<R>();
+    const first = { broken: 0, writing: 0 };
+    const once = { broken: 1, writing: 0 };
+    const froe = { broken: true, what: "froe blade lying flat on top of the bolt, no club" };
+    expect(faultRedrawFor({}, froe, first, none, true, true)).toBe("named fault");
+    // A tool with nobody at it cannot be put to work: its plain reroll, then the at-rest draw, as before.
+    expect(faultRedrawFor({}, froe, first, none, true, false)).toBeUndefined();
+    // A line is wrong in any picture (413-29, the engine with nobody at it too).
+    const wire = { broken: true, what: "spark plug wire runs into the carburetor fuel inlet" };
+    expect(faultRedrawFor({}, wire, first, none, true, false)).toBe("named fault");
+    // A fault in no tool and no line keeps its plain reroll (7 of 9 cleared, job 352).
+    for (const what of ["cutting board floating above the table", "hand with six fingers", "shelf edge fails to line up", ""])
+      expect(faultRedrawFor({}, { broken: true, what }, first, none, true, true), what).toBeUndefined();
+    // The second broken still gets the one at-rest draw, the named fault tried or not.
+    expect(faultRedrawFor({}, froe, once, new Set<R>(["named fault"]), true, true)).toBe("at rest");
+    // Once only; never over a content-policy rung; never on a check that could not run.
+    expect(faultRedrawFor({}, froe, first, new Set<R>(["named fault"]), true, true)).toBeUndefined();
+    expect(faultRedrawFor({}, froe, first, none, false, true)).toBeUndefined();
+    expect(faultRedrawFor({}, { ...froe, unchecked: true }, first, none, true, true)).toBeUndefined();
+  });
+
+  it("the redraw names the fault and the rule of the tool's own kind — from the fault, else from the picture's words", async () => {
+    const {
+      namedFaultRedraw,
+      NAMED_FAULT_START,
+      SPLIT_STRIKE_CLAUSE,
+      SHAVING_STROKE_CLAUSE,
+      CONNECTING_LINES_CLAUSE,
+      TOOL_AT_WORK_FIX,
+    } = await import("./longformVideo");
+    const P = "Bare hands holding a froe upright.";
+    const words17 = `${froe17().showSubject} ${froe17().visualPrompt}`;
+    const out = namedFaultRedraw(P, "froe blade lying flat on top of the bolt, no club.", words17, true);
+    expect(out.startsWith(`${P} `)).toBe(true);
+    expect(out).toContain(
+      `${NAMED_FAULT_START} froe blade lying flat on top of the bolt, no club. This time draw it the way it really is.`
+    );
+    expect(out).toContain(SPLIT_STRIKE_CLAUSE);
+    expect(out).not.toContain(SHAVING_STROKE_CLAUSE);
+    // Never twice.
+    expect(namedFaultRedraw(out, "froe still on top of the bolt", words17, true)).toBe(out);
+    // A fault naming only the blade takes its kind from the picture's own words.
+    expect(namedFaultRedraw(P, "blade resting on top of the wood", words17, true)).toContain(SPLIT_STRIKE_CLAUSE);
+    // 414-13.
+    const words13 = `${drawknife13().showSubject} ${drawknife13().visualPrompt}`;
+    const stroke = namedFaultRedraw(P, "drawknife lying along the board's length", words13, true);
+    expect(stroke).toContain(SHAVING_STROKE_CLAUSE);
+    expect(stroke).not.toContain(SPLIT_STRIKE_CLAUSE);
+    // 413-29: the line's rule, in a picture of someone at work or not.
+    const words29 = `${plugWire29().showSubject} ${plugWire29().visualPrompt}`;
+    for (const atWork of [true, false]) {
+      const line = namedFaultRedraw(P, "plug wire loops into the carburetor fuel inlet", words29, atWork);
+      expect(line).toContain(CONNECTING_LINES_CLAUSE);
+      expect(line).not.toContain(TOOL_AT_WORK_FIX);
+    }
+    // A tool of no named kind gets the plain tool rule.
+    const chisel = namedFaultRedraw(P, "chisel edge in the air beside the wood", "hands chopping a mortise with a chisel", true);
+    expect(chisel).toContain(TOOL_AT_WORK_FIX);
+    expect(chisel).not.toContain(SPLIT_STRIKE_CLAUSE);
+    // A fault in no tool and no line leaves the prompt as it was.
+    expect(namedFaultRedraw(P, "cutting board floating above the table", words17, true)).toBe(P);
+    expect(namedFaultRedraw(P, undefined, words17, true)).toBe(P);
+  });
+
+  it("the new rules name no channel's things", async () => {
+    const { SPLIT_STRIKE_CLAUSE, SHAVING_STROKE_CLAUSE, CONNECTING_LINES_CLAUSE, TOOL_AT_WORK_FIX } = await import(
+      "./longformVideo"
+    );
+    for (const clause of [SPLIT_STRIKE_CLAUSE, SHAVING_STROKE_CLAUSE, CONNECTING_LINES_CLAUSE, TOOL_AT_WORK_FIX])
+      expect(clause).not.toMatch(/spark plug|carburet|mower|engine|oak|chestnut|bolt|shingle|roof|cabin|folk school|Foxfire/i);
+  });
+});

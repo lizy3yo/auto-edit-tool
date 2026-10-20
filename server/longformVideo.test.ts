@@ -11250,6 +11250,97 @@ describe("a picture that ships with a fault says so, and two faults get one chan
     expect(out.buffer.equals(c)).toBe(true);
   });
 
+  // Job 414 scene 17 (round 14): the froe flat on top of the bolt, no club, broken on all four draws —
+  // the first broken frame's reroll went out from the very same prompt.
+  const froe = () =>
+    ({
+      index: 17,
+      scriptText:
+        "Number one is the roof, split by hand from white oak or chestnut with a froe, and the direction of the split mattered most. They",
+      showSubject:
+        "the host's hands holding a froe upright by its wooden handle, its flat blade driven into the end of a short pale white oak bolt",
+      visualPrompt:
+        "Bare hands holding a froe upright by its wooden handle, the flat blade driven into the end grain of a short pale white oak bolt.",
+      humanPresent: true,
+    }) as any;
+
+  it("job 414 scene 17: the first broken draw of a tool at work is redrawn told what was wrong; the second still gets the at-rest draw", async () => {
+    const { NAMED_FAULT_START, SPLIT_STRIKE_CLAUSE, THINGS_AT_REST_CLAUSE, PERSON_FREE_FALLBACK } = await import(
+      "./longformVideo"
+    );
+    const [a, b, c] = await Promise.all([pngOf("#a11"), pngOf("#a22"), pngOf("#a33")]);
+    checks(
+      { broken: true, what: "froe blade lying flat on top of the bolt, no club" },
+      { broken: true, what: "froe blade still resting on top" }
+    );
+    const genImage = drawsOf(a, b, c);
+    const out = await generateValidatedStill(froe(), 4, undefined, genImage);
+    expect(genImage).toHaveBeenCalledTimes(3); // no draw added: the named fault took the reroll's turn
+    const [p1, p2, p3] = genImage.mock.calls.map(c => c[0].prompt as string);
+    expect(p1).not.toContain(NAMED_FAULT_START);
+    expect(p2.startsWith(p1)).toBe(true);
+    const added = p2.slice(p1.length);
+    expect(added).toContain(`${NAMED_FAULT_START} froe blade lying flat on top of the bolt, no club.`);
+    expect(added).toContain(SPLIT_STRIKE_CLAUSE);
+    expect(p3).toContain(PERSON_FREE_FALLBACK);
+    expect(p3).toContain(THINGS_AT_REST_CLAUSE);
+    expect(p3).not.toContain(NAMED_FAULT_START);
+    expect(out.buffer.equals(c)).toBe(true);
+  });
+
+  it("a first broken draw whose fault is in no tool or line keeps its plain reroll", async () => {
+    const [a, b] = await Promise.all([pngOf("#b11"), pngOf("#b22")]);
+    checks({ broken: true, what: "hand with six fingers on the handle" });
+    const genImage = drawsOf(a, b);
+    const out = await generateValidatedStill(froe(), 4, undefined, genImage);
+    expect(genImage).toHaveBeenCalledTimes(2);
+    expect(genImage.mock.calls[1][0].prompt).toBe(genImage.mock.calls[0][0].prompt);
+    expect(out.buffer.equals(b)).toBe(true);
+  });
+
+  it("job 413 scene 29: a line in the wrong part is redrawn told so, with nobody in the picture too", async () => {
+    const { NAMED_FAULT_START, CONNECTING_LINES_CLAUSE } = await import("./longformVideo");
+    const [a, b] = await Promise.all([pngOf("#c11"), pngOf("#c22")]);
+    checks({ broken: true, what: "spark plug wire runs into the carburetor fuel inlet" });
+    const genImage = drawsOf(a, b);
+    const scene = {
+      index: 29,
+      scriptText: "pull the spark plug wire first, every time,",
+      showSubject: "the black rubber-coated spark plug wire on the mower engine",
+      visualPrompt: "A black rubber-coated spark plug wire connected to a mower engine.",
+    } as any;
+    const out = await generateValidatedStill(scene, 4, undefined, genImage);
+    const [p1, p2] = genImage.mock.calls.map(c => c[0].prompt as string);
+    expect(p1).toContain(CONNECTING_LINES_CLAUSE); // asked from the first draw
+    expect(p2.startsWith(p1)).toBe(true);
+    expect(p2.slice(p1.length)).toContain(`${NAMED_FAULT_START} spark plug wire runs into the carburetor fuel inlet.`);
+    expect(p2.slice(p1.length)).toContain(CONNECTING_LINES_CLAUSE);
+    expect(out.buffer.equals(b)).toBe(true);
+  });
+
+  it("the named fault adds no draw: broken on the last attempt ships as before, flagged", async () => {
+    const [a] = await Promise.all([pngOf("#d11")]);
+    checks({ broken: true, what: "froe blade lying flat on top of the bolt, no club" });
+    const genImage = drawsOf(a);
+    const out = await generateValidatedStill(froe(), 1, undefined, genImage);
+    expect(genImage).toHaveBeenCalledTimes(1);
+    expect(out.buffer.equals(a)).toBe(true);
+    expect(out.flaws).toEqual(["broken"]);
+  });
+
+  it("FAULT_REDRAWS=0 sends the first broken tool draw's reroll unchanged", async () => {
+    const [a, b] = await Promise.all([pngOf("#e11"), pngOf("#e22")]);
+    checks({ broken: true, what: "froe blade lying flat on top of the bolt, no club" });
+    const genImage = drawsOf(a, b);
+    process.env.FAULT_REDRAWS = "0";
+    try {
+      await generateValidatedStill(froe(), 4, undefined, genImage);
+    } finally {
+      delete process.env.FAULT_REDRAWS;
+    }
+    expect(genImage.mock.calls[1][0].prompt).toBe(genImage.mock.calls[0][0].prompt);
+  });
+
   // Job 343 scene 17: a plain picture (its line asks for no print) with writing on three of four draws.
   const houseSign = () =>
     ({

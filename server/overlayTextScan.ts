@@ -121,9 +121,24 @@ export const STILL_DEFECT_SYSTEM =
   "wood's end grain: pushed into the SIDE of an upright piece, its edge resting on the wood but not " +
   "in it, its blade sticking out into the air with no wood under its edge, or lying ACROSS a split " +
   "already open (a split runs along the blade); a piece splitting apart with no blade in its " +
-  "split; a hand gripping a piece where it is splitting open. An axe chopping, felling or hewing " +
+  "split; a hand gripping a piece where it is splitting open. " +
+  // Round 14, job 414 scene 17: the froe flat on top of the bolt, both hands pressing down, no club —
+  // named so the check's words carry it to the redraw (`namedFaultClause`). A froe already in the wood
+  // and levered by its handle is right with no club in sight.
+  "A froe or wedge pressed down on top of the wood by the hands alone, its edge not in it and no " +
+  "club, mallet or sledge to strike it in, is this fault; a froe already sunk in the wood and levered " +
+  "by its handle needs no club in the frame. An axe chopping, felling or hewing " +
   "into the side of a log or trunk is right, and a tool hanging, lying or resting unused is " +
   "splitting nothing\n" +
+  // Round 14, job 414 scene 13: a drawknife laid along the board, its stroke across the narrow width.
+  "- a drawknife or spokeshave whose blade lies ALONG the length of the piece it is shaving, so its " +
+  "stroke would run sideways across the piece's narrow width instead of along its length\n" +
+  // Round 14, job 413 scene 29: the plug lead looping into the carburetor's fuel inlet. A loose cord
+  // or a stripped wire end is real, so only a line ending in the wrong part or merged is named.
+  "- a cable, wire, cord, hose or pipe that runs into a part it does not serve or into another " +
+  "part's fitting (an electrical lead plugged into a fuel or water fitting, a hose ending in a power " +
+  "socket), two different lines joined into one, or a line that fades into a surface or into another " +
+  "object\n" +
   "- a phone, tablet or laptop built into, framed by or made of another object (a tablet whose " +
   "frame is a cutting board, a screen set inside a quilt or a shelf)\n" +
   "- a body part that looks CUT OFF: hair still shaped like a head or hairstyle with no head " +
@@ -153,7 +168,9 @@ export const STILL_DEFECT_SYSTEM =
   "When unsure, answer false.\n\n" +
   'Return ONLY this JSON, no prose: {"overlay":true|false,"broken":true|false,"writing":true|false,"what":"..."}\n' +
   'what: 3-8 words naming the worst defect and where it sits (e.g. "white caption bar across ' +
-  'the bottom", "cutting board floating above the table"); "" when both are false.';
+  'the bottom", "cutting board floating above the table"); a fault in a tool, cable, wire or hose ' +
+  'names it (e.g. "saw blade resting on top of the plank", "power cord running into the tap"); "" ' +
+  "when both are false.";
 
 export interface StillDefectVerdict {
   overlay: boolean;

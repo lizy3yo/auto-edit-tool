@@ -236,19 +236,38 @@ export const THINGS_AT_REST_CLAUSE =
  * goes out with the prompt changed against it (`plainLookRedraw`, round 13), so a third draw buys
  * nothing more. Every other fault keeps the picture as before, and the job says so
  * (`notePictureFlaws`). Pure.
+ *
+ * THE FIRST BROKEN DRAW OF A TOOL OR A LINE IS TOLD WHAT WAS WRONG (round 14, "named fault"): the
+ * first broken frame was redrawn from the very same prompt, and a tool's position is what the prompt
+ * itself sets up — job 414 scene 17's froe lay flat on top of the bolt with no club on all four draws,
+ * the at-rest draw included, and the first one shipped. When the check's own words name a tool at work
+ * in a picture of someone at work, or a cable, wire, cord, hose or pipe in any picture
+ * (`namedFaultClause`), that reroll goes out with the fault named and the rule that fixes it
+ * (`namedFaultRedraw`). It takes the reroll's own turn — no extra draw — and the second broken still
+ * gets the at-rest draw.
  */
-export type FaultRedraw = "at rest" | "soft print";
+export type FaultRedraw = "at rest" | "soft print" | "named fault";
 export function faultRedrawFor(
   scene: Pick<StoryboardScene, "blurPrint" | "pictureText">,
-  defects: { broken?: boolean; writing?: boolean; overlay?: boolean; unchecked?: boolean },
+  defects: { broken?: boolean; writing?: boolean; overlay?: boolean; unchecked?: boolean; what?: string },
   /** Earlier draws of this picture the check named broken / readable writing. */
   seen: { broken: number; writing: number },
   tried: ReadonlySet<FaultRedraw>,
   /** The prompt is still the ordinary one — a content-policy rung must not be rebuilt over. */
-  ordinaryPrompt: boolean
+  ordinaryPrompt: boolean,
+  /** Someone is drawn at work in it (`humanPresent`, not drawn with nobody in it). */
+  atWork = false
 ): FaultRedraw | undefined {
   if (defects.unchecked) return undefined;
   if (defects.broken && seen.broken > 0 && ordinaryPrompt && !tried.has("at rest")) return "at rest";
+  if (
+    defects.broken &&
+    seen.broken === 0 &&
+    ordinaryPrompt &&
+    !tried.has("named fault") &&
+    namedFaultClause(defects.what, "", atWork)
+  )
+    return "named fault";
   if (
     defects.writing &&
     !defects.overlay &&
@@ -259,6 +278,75 @@ export function faultRedrawFor(
   )
     return "soft print";
   return undefined;
+}
+
+/** How the named-fault redraw's clause starts — found again so it is never added twice. */
+export const NAMED_FAULT_START = "THE LAST DRAW OF THIS PICTURE GOT THIS WRONG:";
+/**
+ * The redraw's rule for a tool at work whose fault names no tool of its own kind: the parts of
+ * `TOOL_POSITION_CLAUSE` and `TOOL_CONTACT_CLAUSE` a broken frame most often misses, in one sentence.
+ */
+export const TOOL_AT_WORK_FIX =
+  "Every tool is held by its handle in its normal grip and at its normal working angle; a tool that " +
+  "is working has its blade, bit or edge really in the material it works on — never resting on top " +
+  "of it, in the air beside it or through something solid — and its path is clear of the table and " +
+  "of every hand.";
+/** A fault the check names on a tool or a tool's working part. */
+const TOOL_FAULT =
+  /\b(?:blades?|(?:drill|router)\s+bits?|saws?|chisels?|gouges?|froes?|wedges?|mauls?|axes?|hatchets?|knife|knives|draw\s?knife|drawknives|spokeshaves?|planes?|drills?|screwdrivers?|hammers?|mallets?|needles?|scissors|shears|cutters?|wrench(?:es)?|pliers|tools?)\b/i;
+/** …a tool that splits wood (`SPLIT_STRIKE_CLAUSE`) — a maul or axe is swung, never struck. */
+const SPLITTING_TOOL = /\b(?:froes?|wedges?|riv(?:e|en|es|ing)|end\s+grain)\b/i;
+/** …a tool that shaves wood by a pull or a push (`SHAVING_STROKE_CLAUSE`). */
+const SHAVING_TOOL = /\b(?:draw\s?knife|drawknives|spokeshaves?|planes?|planing)\b/i;
+
+/**
+ * The clause the first broken draw of a tool or a line is redrawn with (`faultRedrawFor`'s "named
+ * fault"): the check's own words for what was wrong, then the rule that fixes it — a line's
+ * (`CONNECTING_LINES_CLAUSE`) in any picture; on a picture of someone at work, the rule of the tool's
+ * own kind, named by the fault or else by the picture's words (`SPLIT_STRIKE_CLAUSE`,
+ * `SHAVING_STROKE_CLAUSE`), else `TOOL_AT_WORK_FIX`. Undefined for any other fault, a fault with no
+ * words, and a tool in a picture with nobody in it — a tool with no hand on it cannot be put to work,
+ * so that frame keeps its plain reroll and then the at-rest draw. Pure.
+ */
+export function namedFaultClause(
+  what: string | undefined,
+  /** The picture's own words (its subject and description), for a fault that names no tool kind. */
+  words: string,
+  atWork: boolean
+): string | undefined {
+  const fault = (what ?? "")
+    .replace(/["“”]/g, "'")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/[.;,:\s]+$/, "");
+  if (!fault) return undefined;
+  let rules: string[];
+  if (connectingLinesClause(fault)) rules = [CONNECTING_LINES_CLAUSE];
+  else if (atWork && TOOL_FAULT.test(fault)) {
+    const kinds = (t: string) => [
+      ...(SPLITTING_TOOL.test(t) ? [SPLIT_STRIKE_CLAUSE] : []),
+      ...(SHAVING_TOOL.test(t) ? [SHAVING_STROKE_CLAUSE] : []),
+    ];
+    const own = kinds(fault);
+    const fromWords = kinds(words);
+    rules = own.length ? own : fromWords.length ? fromWords : [TOOL_AT_WORK_FIX];
+  } else return undefined;
+  return `${NAMED_FAULT_START} ${fault}. This time draw it the way it really is. ${rules.join(" ")}`;
+}
+
+/**
+ * The prompt of the named-fault redraw: the prompt as it was, the fault and its rule after it —
+ * never twice. Pure.
+ */
+export function namedFaultRedraw(
+  prompt: string,
+  what: string | undefined,
+  words: string,
+  atWork: boolean
+): string {
+  if (prompt.includes(NAMED_FAULT_START)) return prompt;
+  const clause = namedFaultClause(what, words, atWork);
+  return clause ? `${prompt} ${clause}` : prompt;
 }
 import {
   deriveStyleBible,
@@ -6127,6 +6215,77 @@ const SHOT_ANGLE_SUFFIX: Record<string, string> = {
 };
 
 /**
+ * A FROE OR A WEDGE IS STRUCK IN, never pressed (round 14, job 414 scene 17: "split by hand … with a
+ * froe" drawn four times with the blade lying flat on top of the bolt's end grain, both hands pressing
+ * down on the handle and no club anywhere — refused as broken on every draw, and the first draw
+ * shipped). The end-grain rule said where the edge goes, never what drives it there, and two hands
+ * on a handle cannot put an edge into end grain, so the picture maker left it on top. A maul or an
+ * axe that splits is swung, so neither is named here. Part of `TOOL_POSITION_CLAUSE`.
+ */
+export const SPLIT_STRIKE_CLAUSE =
+  "A froe or a wedge never goes in by hand pressure: it is STRUCK down into the end grain with a " +
+  "wooden club, mallet or sledge — for a froe, one hand holds its handle upright while the other " +
+  "brings the club down on the back of its blade — or, once a froe is sunk in the wood, its handle " +
+  "is pulled sideways to lever the split open.";
+
+/**
+ * A TOOL THAT SHAVES TRAVELS ALONG THE PIECE (round 14, job 414 scene 13: "since folk schools still
+ * teach plenty of these" drawn with a drawknife laid along the length of the board, the worker at the
+ * bench's side — its stroke would run across the board's narrow width; scene 14 repeated the stroke).
+ * The tool rules gave a pull tool its grip and set-up, never which way it travels against the work.
+ * Part of `TOOL_POSITION_CLAUSE`.
+ */
+export const SHAVING_STROKE_CLAUSE =
+  "A tool that shaves wood by being pulled or pushed — a drawknife, spokeshave or plane — has its " +
+  "edge lying ACROSS the piece and travels ALONG the piece's length, with the grain (a drawknife " +
+  "pulled toward the user's body, a plane pushed away), never sideways across the piece's narrow " +
+  "width; the piece is held still in a vise, on a shaving horse, against a bench stop or clamped down.";
+
+/**
+ * EVERY CABLE, WIRE OR HOSE ENDS AT THE PART IT SERVES (round 14, job 413 scene 29: "pull the spark
+ * plug wire first" drawn with the plug lead looping down into the carburetor's fuel inlet — the fuel
+ * hose had become the plug wire, 11 s on a small-engine channel). The picture's words named one end of
+ * the wire and nothing said where the other goes, so the picture maker ran it to the nearest round
+ * fitting and merged the two lines. Added to any picture whose words name a line that connects things
+ * (`connectingLinesClause`), with people in it or not. A line coiled or hung up is left loose: the
+ * replay over the stored storyboards found garden hoses coiled on a wall beside a fire extinguisher,
+ * which a rule to fit every hose to a part would have plumbed into something.
+ */
+export const CONNECTING_LINES_CLAUSE =
+  "Every cable, wire, cord, hose or pipe that connects things runs as ONE continuous piece from " +
+  "where it really starts to the one part it really serves, and is fitted onto that part: an " +
+  "electrical lead to what it powers or fires, a fuel, water or air line to its own fitting. It never " +
+  "runs into a different part's fitting, never joins, swaps with or turns into another line, and " +
+  "never fades into a surface; two lines that run side by side stay two separate lines. One that is " +
+  "coiled, hung up or lying loose has its own free ends and runs into nothing.";
+
+/**
+ * Words naming a line that connects one thing to another. A bare "cord" is not one: the replay found it
+ * almost only as a craft material (a drawstring, clothesline cord coiled into a fabric bowl, a twisted
+ * cord of yarn) — only an electrical cord, or one said to be plugged in or running somewhere, is.
+ */
+const CONNECTING_LINE =
+  /\b(?:cables?|wires?|wiring|hoses?|hosepipes?|tubing|pipes?|(?:power|extension|electric(?:al)?|charging|charger|lamp|appliance|usb|phone|mains)\s+cords?|cords?\s+(?:plugged|running|runs|leading)|(?:fuel|gas|oil|water|air|brake|vacuum|power|supply|feed|drain)\s+lines?)\b/i;
+/**
+ * …and the same words used for something that connects nothing: a wire brush, mesh, fence, grille or
+ * display rack, wire-rimmed glasses, a cable-knit sweater or a cable stitch, a pipe wrench or clamp, a
+ * tobacco pipe — and a line the words say is NOT there. The replay found five smoke alarms described
+ * "no visible wiring" or "no wires or connections" (jobs 229, 259, 381, 393, 394): told how wires run,
+ * the picture maker would be handed the wires the line rules out.
+ */
+const NOT_A_CONNECTING_LINE =
+  /\b(?:(?:no|without|never)\s+(?:visible\s+|exposed\s+|loose\s+|hanging\s+|trailing\s+)?(?:wires?|wiring|cables?|cords?|hoses?|pipes?)(?:\s+(?:or|and|nor)\s+\w+)?|wire[\s-]+(?:brush(?:es)?|wheels?|racks?|mesh|baskets?|shel(?:f|ves|ving)|fenc(?:e|es|ing)|whisks?|frames?|hangers?|cutters?|strippers?|wool|rimmed|framed|grilles?|grills?|grates?|guards?|display)|cables?[\s-]+(?:knit|stitch(?:es|ing)?|needles?|patterns?|cars?|ties?)|(?:chicken|barbed|baling|fence|fencing|picture|floral|craft|jewelry|jewellery|beading|armature)\s+wires?|pipe\s+(?:wrench(?:es)?|cutters?|cleaners?|clamps?)|(?:tobacco|smoking|corncob)\s+pipes?)/gi;
+
+/**
+ * `CONNECTING_LINES_CLAUSE` (with its leading space) when a picture's own words name a cable, wire,
+ * cord, hose or pipe that connects things; "" otherwise — a picture with no line in it is never told
+ * about lines. Pure.
+ */
+export function connectingLinesClause(words: string): string {
+  return CONNECTING_LINE.test(words.replace(NOT_A_CONNECTING_LINE, " ")) ? ` ${CONNECTING_LINES_CLAUSE}` : "";
+}
+
+/**
  * Appended to the HANDS-ONLY b-roll lane (`humanPresent`) — used only when a beat genuinely
  * needs a human action on screen. B-roll never shows a person: only bare hands and forearms
  * enter the frame at the task, never a face, head, or body, and never the channel host.
@@ -6153,6 +6312,10 @@ const SHOT_ANGLE_SUFFIX: Record<string, string> = {
  * knife only as a carving one: a kitchen knife cuts DOWN into the board beside the guide hand, and
  * one being sharpened has fingers on its flat (job 406's knife-sharpening lines), poses "pushed away
  * from the other hand" does not describe.
+ *
+ * WHAT DRIVES A SPLITTING EDGE IN, AND WHICH WAY A SHAVING TOOL TRAVELS (round 14, the review of job
+ * 414): `SPLIT_STRIKE_CLAUSE` and `SHAVING_STROKE_CLAUSE`, inside this clause so every picture of a
+ * person or hands at work carries them.
  */
 export const TOOL_POSITION_CLAUSE =
   "Every tool is held and placed the way a person who really uses it does: by its handle, in its " +
@@ -6165,13 +6328,17 @@ export const TOOL_POSITION_CLAUSE =
   "grain — the top, when it stands on end — its edge sunk in the wood and its blade along the " +
   "grain, so the split opens along the line of the blade; never pushed into the side of the piece, " +
   "resting on the wood with its edge not in it, sticking out into the air with no wood under its " +
-  "edge, or lying across a split already open. An axe that is chopping, felling or hewing rather " +
+  "edge, or lying across a split already open. " +
+  SPLIT_STRIKE_CLAUSE +
+  " An axe that is chopping, felling or hewing rather " +
   "than splitting bites into the side of the log or trunk. The holding " +
   "hand stays well back and to the side of the blade, bit or edge — never in front of it, in its " +
   "path, or right beside the cut — and a blade never cuts into the table under the work. A chisel, " +
   "gouge, plane or a knife carving wood is pushed AWAY from the other hand: that hand is on the " +
   "tool itself or holds the work behind the edge, or the work is clamped, and no hand ever lies on " +
-  "the work ahead of where the edge points. A piece being split is held by its block, fork or " +
+  "the work ahead of where the edge points. " +
+  SHAVING_STROKE_CLAUSE +
+  " A piece being split is held by its block, fork or " +
   "wedge, never by a hand where it splits open. The piece " +
   "being worked sits ON its surface or in its holder as a separate solid thing — never sunk " +
   "into, passing through or grown out of the table or bench.";
@@ -7289,8 +7456,11 @@ export function buildStillPrompt(
   // on every picture that named it ("close view of the toilet's internal porcelain S-shaped trapway
   // channel") or was about it ("close-up of the smooth white curved S-shaped porcelain channel").
   const outside = !visualOverride && drawnFromOutside(scene) ? ` ${SEEN_FROM_OUTSIDE_CLAUSE}` : "";
+  // A LINE ENDS AT THE PART IT SERVES (`connectingLinesClause`, job 413 scene 29: the spark plug wire
+  // drawn running into the carburetor's fuel inlet) — only when the picture's own words name one.
+  const lines = !aggressive ? connectingLinesClause(`${shown ?? ""} ${visual}`) : "";
   return withAllowedText(
-    `${lead}${visual}${scrubLegibleWriting(namedLookClause(scene))}${look}${outside}${item}${angleSuffix}${personSuffix}${memory}${app} ${amateurIphoneLook(subject, motion)} ${framing} ${noFigures} ${NO_BOOK_SUFFIX}`,
+    `${lead}${visual}${scrubLegibleWriting(namedLookClause(scene))}${look}${outside}${lines}${item}${angleSuffix}${personSuffix}${memory}${app} ${amateurIphoneLook(subject, motion)} ${framing} ${noFigures} ${NO_BOOK_SUFFIX}`,
     scene.pictureText,
     scene.blurPrint
   );
@@ -11475,8 +11645,20 @@ async function drawValidatedStill(
       // named a second time gets one draw with its prompt changed against it, before the keep below
       // can settle for the frame (job 352 scene 147 shipped broken → broken; job 343 scene 17 a sign
       // with writing on three of four draws). It is that fault's last chance, so it never loses its
-      // turn to the attempt budget. `FAULT_REDRAWS=0` turns it off.
-      const redraw = faultRedrawFor(scene, defects, faultsSeen, faultRedraws, tier === 0);
+      // turn to the attempt budget. A FIRST broken frame whose fault is a tool or a line ("named
+      // fault", round 14) has its plain reroll told what was wrong instead — the same draw, no extra.
+      // `FAULT_REDRAWS=0` turns both off.
+      // Someone drawn at work: a tool's fault is then told the rule of its own kind (`namedFaultClause`).
+      const atWork = !!scene.humanPresent && !personFree;
+      // A frame seen cut open already had its prompt changed against that (`SEEN_FROM_OUTSIDE_CLAUSE`).
+      const redraw = faultRedrawFor(
+        scene,
+        cutOpenFrames.has(buffer) ? { ...defects, what: undefined } : defects,
+        faultsSeen,
+        faultRedraws,
+        tier === 0,
+        atWork
+      );
       if (defects.broken) faultsSeen.broken++;
       if (defects.writing) faultsSeen.writing++;
       if (redraw && process.env.FAULT_REDRAWS !== "0") {
@@ -11489,15 +11671,30 @@ async function drawValidatedStill(
           personFree = true;
           prompt = `${buildStillPrompt({ ...scene, humanPresent: false, brollHostLook: undefined, brollHostRef: undefined, hostFaceShown: undefined }, false, visualOverride, subject, square)} ${PERSON_FREE_FALLBACK} ${THINGS_AT_REST_CLAUSE}`;
           lastError = `Still image has broken geometry (${defects.what})`;
+        } else if (redraw === "named fault") {
+          // The first broken frame's own reroll, told what was wrong and the rule that fixes it (job
+          // 414 scene 17: the froe on top of the bolt on four draws from one prompt).
+          prompt = namedFaultRedraw(
+            prompt,
+            defects.what,
+            `${scene.showSubject ?? ""} ${visualOverride ?? (square ? scene.splitVisual : undefined) ?? scene.visualPrompt ?? ""}`,
+            atWork
+          );
+          lastError = `Still image has broken geometry (${defects.what})`;
         } else {
           prompt = softPrintRedraw(prompt);
           lastError = "Still image has readable writing";
         }
-        if (attempt === attempts) attempts++;
+        // The named fault takes the plain reroll's own turn, so it never adds a draw.
+        if (attempt === attempts && redraw !== "named fault") attempts++;
         console.warn(
-          `[Longform] scene ${scene.index} still has ${redraw === "at rest" ? "broken geometry" : "readable writing"} ` +
-            `again (${defects.what}) → drawing it once more ` +
-            (redraw === "at rest" ? "with its things at rest and nobody in it" : "with the print soft, from further back")
+          `[Longform] scene ${scene.index} still has ${redraw === "soft print" ? "readable writing" : "broken geometry"} ` +
+            `${redraw === "named fault" ? "" : "again "}(${defects.what}) → drawing it once more ` +
+            (redraw === "at rest"
+              ? "with its things at rest and nobody in it"
+              : redraw === "named fault"
+                ? "told what was wrong and how it really works"
+                : "with the print soft, from further back")
         );
         continue;
       }
