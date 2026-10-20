@@ -29,7 +29,7 @@ import { resolveSets, templateById } from "../../graphics/src/registry";
 import { FPS, type Theme } from "../../graphics/src/theme";
 import { themeFromPixels } from "../../graphics/src/palette";
 import { WINDOW } from "../../graphics/src/more";
-import { NOTO_PNG, planGraphics, type PlanMessage, type PlanRound } from "../../graphics/src/plan/planner";
+import { NOTO_PNG, planGraphics, respellCue, type PlanMessage, type PlanRound } from "../../graphics/src/plan/planner";
 import { checkRules, placementFor, type FilmLayout } from "../../graphics/src/plan/rules";
 import { detectCuts, judgeFilm, type QaResult, type Readability } from "../../graphics/src/plan/qa";
 import { getMediaDuration } from "../mediaProbe";
@@ -37,7 +37,7 @@ import { ffmpeg, frameDiffs, levelsOf, narrationOf } from "./media";
 import { driftedStretches, LEVEL_FRAME_SEC, retimeWords, spliceStretch } from "../../graphics/src/plan/wordTiming";
 import { execFfmpeg } from "../ffmpegSpawn";
 import { notAListAsSaid } from "../spokenLists";
-import { calmestPlace, describe, makeReadable, measureCue, subjectOf } from "./readable";
+import { calmestPlace, clearOfSubject, describe, makeReadable, measureCue, placeAndRead, subjectOf } from "./readable";
 import { GRAPHICS_DIR, renderGraphic } from "./render";
 
 /** The model that writes the plan (the lab measured Opus best at following the moments). */
@@ -283,6 +283,16 @@ export async function addGraphics(input: AddGraphicsInput): Promise<GraphicsReco
   progress(input.savedPlan?.length && !input.replan ? "Using the saved graphics plan" : "Planning the graphics", 12);
   const planned = await plan(input, words, cuts);
   const { specs, cues } = resolveKeeping(planned.cues, words, cuts, input.film, dropped);
+  // A SAVED plan is shown in the script's spelling too (`respellCue`; the planner does it for a new
+  // one): a plan approved before kept the transcript's spelling of a script word on screen (job 411's
+  // "migratorious"). Only shown words change, a word for a word, so every time stays and the resolved
+  // cue is mended the same way as its plan.
+  for (const c of cues) {
+    const changed = respellCue(c, c, input.film, words);
+    const spec = specs.find(s => s.id === c.id);
+    if (spec) respellCue(spec, c, input.film, words);
+    if (changed.length) log(`graphics: ${c.id} in the script's spelling: ${changed.join(", ")}`);
+  }
   // Nothing outlasts the film (`endWithFilm`): ended on its last frame, and left out when that
   // leaves it too short to read.
   for (const id of endWithFilm(cues, filmDiffs.length - 1, FPS)) dropped.push({ id, why: "the film ends before it can be read" });
@@ -333,8 +343,17 @@ export async function addGraphics(input: AddGraphicsInput): Promise<GraphicsReco
       }
       let file = await renderCue(c);
       if (def.kind === "overlay" && def.underlay !== "window") {
-        const io = { render: renderCue, measure, calmest: (cue: ResolvedCue, size: { w: number; h: number }) => calmestPlace(input.filmPath, cue, cuts, size) };
-        const made = await makeReadable(c, !!def.movable, file, io, attempts);
+        const io = { render: renderCue, measure, calmest: (cue: ResolvedCue, size: { w: number; h: number }) => calmestPlace(input.filmPath, cue, cuts, size, def.spots) };
+        // A graphic with places of its own, drawn as designed over b-roll (not placed by the layout
+        // below a host's chin or in a host's panel), goes where it is clear of the picture's subject
+        // first (`placeAndRead`): job 413's price pair sat on the phone it priced, job 412's MYTH stamp
+        // on the sleeper's head and across the cat's eye, job 414's chapter plate on its froe.
+        const spots = def.spots && !c.props.low && !c.props.panel ? def.spots : undefined;
+        const made = spots
+          ? await placeAndRead(c, !!def.movable, file, { ...io, clear: (cue, designed) => clearOfSubject(input.filmPath, designed, cue, cuts, spots) }, attempts)
+          : await makeReadable(c, !!def.movable, file, io, attempts);
+        const move = made.steps.find(s => s.startsWith("clear of the picture's subject"));
+        if (move) log(`graphics: ${c.id} ${move}`);
         file = made.file;
         readability.push({ id: c.id, pass: made.r.pass, summary: describe(made.r), steps: made.steps });
         // Text that cannot be read is left out, never shipped.

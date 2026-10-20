@@ -2,7 +2,7 @@
 // lab's composite. Pure: it reads frame-to-frame change measured off the RENDERED files (the
 // faults it catches — a one-frame flash, a graphic still up after its words — only exist in the
 // output), the resolved cues and the readability readings.
-import { CUT_SNAP_SEC, MIN_ON_SCREEN_SEC, blinkBeside, stillUpAfterWords, tooShortToRead, type ResolvedCue } from "../cueResolve";
+import { CUT_SNAP_SEC, MIN_ON_SCREEN_SEC, blinkBeside, readableFrames, stillUpAfterWords, tooShortToRead, type ResolvedCue } from "../cueResolve";
 import { replacesPicture, templateById } from "../registry";
 import { appearFrame } from "../timing";
 import type { RuleProblem } from "./rules";
@@ -121,7 +121,8 @@ export function judgeFilm(q: QaInput): QaResult {
   const spills = cues.filter(c => !c.conformed.end && filmCuts.some(k => k > c.startFrame + 3 && k < c.endFrame && c.endFrame - k < fps));
   // Up too short to read (under MIN_ON_SCREEN_SEC) — titles and approved graphics too, which the
   // planner raises or keeps rather than refuses: Dale's "3 piles" stood 1.27 s and his "The ad fee"
-  // chapter 1.40 s, and QA said pass (job 397).
+  // chapter 1.40 s, and QA said pass (job 397). Counted from when its words are drawn (`readableFrames`),
+  // not from the cue's start: job 413's "A mower blade" was read 1.0 s of a 2.1 s cue, and passed.
   const tooShort = cues.filter(c => tooShortToRead(c, fps));
   const unreadable = q.readability.filter(r => !r.pass);
 
@@ -133,7 +134,7 @@ export function judgeFilm(q: QaInput): QaResult {
   if (lingering.length) failures.push(`still up after its words: ${lingering.map(c => c.id).join(", ")}`);
   if (blinks.length) failures.push(`a blink of footage beside ${blinks.map(c => c.id).join(", ")}`);
   if (spills.length) failures.push(`a tail onto the next shot: ${spills.map(c => c.id).join(", ")}`);
-  if (tooShort.length) failures.push(`up too short to read (under ${MIN_ON_SCREEN_SEC} s): ${tooShort.map(c => `${c.id} (${at(c.endFrame - c.startFrame)})`).join(", ")}`);
+  if (tooShort.length) failures.push(`up too short to read (under ${MIN_ON_SCREEN_SEC} s): ${tooShort.map(c => `${c.id} (${at(readableFrames(c, fps))})`).join(", ")}`);
   if (q.rules.length) failures.push(`placement: ${q.rules.map(p => `${p.cue} ${p.problem}`).join("; ")}`);
   if (unreadable.length) failures.push(`text not readable: ${unreadable.map(r => `${r.id} (${r.summary})`).join(", ")}`);
 

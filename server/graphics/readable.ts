@@ -3,13 +3,12 @@
 // every shot it spans, and — only if it fails — fixes it (darker behind the words, a lighter shade
 // of the coloured words, the calmest part of the picture, and last the coloured words in the plain
 // text colour), re-rendering and re-measuring each time (`makeReadable`).
-import type { ResolvedCue } from "../../graphics/src/cueResolve";
+import { shownFrom, type ResolvedCue } from "../../graphics/src/cueResolve";
 import { PLACES, type Place } from "../../graphics/src/components";
-import { MIN_COLOUR, MIN_WHITE, boxBrightness, findSubject, measureContrast, overlap, type Contrast } from "../../graphics/src/legibility";
+import { MIN_COLOUR, MIN_WHITE, boxBrightness, findSubject, footprint, measureContrast, onSubject, subjectMap, type Contrast } from "../../graphics/src/legibility";
 import { themeFor } from "../../graphics/src/palette";
+import { clearSpot, placeBox, type SpotChoice, type Spots } from "../../graphics/src/spots";
 import { FRAME_H, FRAME_W, grabFrame } from "./media";
-
-type Box = { x0: number; y0: number; x1: number; y1: number };
 
 /** Moments to judge: 0.35 s before the end of every shot the graphic spans (its words are up by
  * then, and it is clear of its own fade-out), and before its own end. */
@@ -18,6 +17,16 @@ export function sampleTimes(cue: ResolvedCue, cuts: number[]): number[] {
   const out: number[] = [];
   for (let i = 1; i < edges.length; i++) if (edges[i] - edges[i - 1] > 0.5) out.push(edges[i] - 0.35);
   return out.slice(-5);
+}
+
+/** The moments of `sampleTimes` at which the graphic's words are on screen (`shownFrom`), for judging
+ * WHERE it goes: a graphic whose start was put on a cut, or on words said before its own, draws nothing
+ * until its first element's word (job 412's MYTH stamp: up at 33.13 s, drawn at 36.07 s), so a picture
+ * it has left by then is not one it covers. The last moment is always kept. */
+export function shownTimes(cue: ResolvedCue, cuts: number[]): number[] {
+  const all = sampleTimes(cue, cuts);
+  const shown = all.filter(t => t >= shownFrom(cue) - 1e-6);
+  return shown.length ? shown : all.slice(-1);
 }
 
 /** The theme's coloured text colours for this cue, exactly as it renders them. Words drawn in the
@@ -47,27 +56,43 @@ export async function subjectOf(film: string, t: number) {
   return findSubject(await grabFrame(film, t, false), FRAME_W, FRAME_H);
 }
 
-/** Where a block of `w`×`h` text would sit at `place` (matches the templates' placeStyle). */
-function boxAt(place: Place, w: number, h: number): Box {
-  const y0 = place.v === "top" ? 150 : place.v === "bottom" ? FRAME_H - 170 - h : (FRAME_H - h) / 2;
-  const x0 = place.h === "left" ? 160 : FRAME_W - 160 - w;
-  return { x0: Math.round(x0), y0: Math.round(y0), x1: Math.round(x0 + w), y1: Math.round(y0 + h) };
-}
-
-/** The calmest place for the text on these frames: the darkest box, off the subject. */
-export async function calmestPlace(film: string, cue: ResolvedCue, cuts: number[], size: { w: number; h: number }): Promise<Place> {
-  const frames = await Promise.all(sampleTimes(cue, cuts).map(t => grabFrame(film, t, false)));
-  if (!frames.length) return PLACES[0];
-  const subject = findSubject(frames[frames.length - 1], FRAME_W, FRAME_H).box;
+/**
+ * The calmest place for the text on these frames: the darkest box, off the subject — among the
+ * template's own places when it has them (`spots`), else every place a block of text may take. The
+ * subject is where the picture's subject map (`subjectMap`) puts it on each shot the graphic spans:
+ * `findSubject`'s box, read off the last frame only, spread over most of the picture, so this chose
+ * by brightness alone.
+ */
+export async function calmestPlace(film: string, cue: ResolvedCue, cuts: number[], size: { w: number; h: number }, spots?: Spots): Promise<Place> {
+  const frames = await Promise.all(shownTimes(cue, cuts).map(t => grabFrame(film, t, false)));
+  if (!frames.length) return spots?.places[0] ?? PLACES[0];
+  const maps = frames.map(f => subjectMap(f, FRAME_W, FRAME_H));
   let best: { place: Place; score: number } | undefined;
-  for (const place of PLACES) {
-    const box = boxAt(place, size.w, size.h);
+  for (const place of spots?.places ?? PLACES) {
+    const box = spots ? spots.box(place, size) : placeBox(place, size, size.h);
     const bright = Math.max(...frames.map(f => boxBrightness(f, FRAME_W, box)));
-    const onSubject = overlap(box, subject) / ((box.x1 - box.x0) * (box.y1 - box.y0));
-    const s = bright + 0.5 * onSubject;
+    const subject = Math.max(...maps.map(m => onSubject(m, box, FRAME_W, FRAME_H)));
+    const s = bright + 0.5 * subject;
     if (!best || s < best.score) best = { place, score: s };
   }
   return best!.place;
+}
+
+/**
+ * CLEAR OF THE SUBJECT: the place, of a template's own (`spots`), whose drawing covers least of the
+ * picture's subject on every shot its words are up over (`shownTimes`, src/spots.ts `clearSpot`), its
+ * drawing's size measured off the drawing as designed (`designed`, at the last moment judged — every
+ * element is up by then). Asked before any readability fix, of a graphic drawn as designed over b-roll.
+ * Undefined when there is nothing to judge (a graphic too short to sample, a drawing with nothing on it).
+ */
+export async function clearOfSubject(film: string, designed: string, cue: ResolvedCue, cuts: number[], spots: Spots): Promise<SpotChoice | undefined> {
+  const times = shownTimes(cue, cuts);
+  if (!times.length) return undefined;
+  const drawn = footprint(await grabFrame(designed, times[times.length - 1] - cue.start, true), FRAME_W, FRAME_H);
+  if (!drawn) return undefined;
+  const frames = await Promise.all(times.map(t => grabFrame(film, t, false)));
+  const maps = frames.map(f => subjectMap(f, FRAME_W, FRAME_H));
+  return clearSpot(spots, { w: drawn.x1 - drawn.x0, h: drawn.y1 - drawn.y0 }, maps, { w: FRAME_W, h: FRAME_H }, cue.props.place as Place | undefined);
 }
 
 /**
@@ -150,6 +175,43 @@ export async function makeReadable(
   }
   c.props = best.props as typeof c.props;
   return { r: best.r, file: best.file, steps };
+}
+
+/** What a graphic with places of its own needs besides the readability fixes: which of them is clear
+ * of the picture's subject (`clearOfSubject`), judged on its drawing as designed. */
+export type PlaceIo = ReadableIo & { clear: (c: ResolvedCue, designed: string) => Promise<SpotChoice | undefined> };
+
+const placeName = (p: Place) => `${p.v} ${p.h}`;
+
+/**
+ * A graphic with places of its own (registry `spots`), drawn as designed over b-roll: moved first to
+ * the place clear of the picture's subject (`clearOfSubject`), then made readable there
+ * (`makeReadable`). Readable only where it was designed, it goes back there rather than be left out —
+ * the subject is a measure, a graphic that cannot be read is a loss. Any failure to judge the subject
+ * keeps it as designed. The cue's props are left as the drawing returned; WHEN it shows never changes.
+ */
+export async function placeAndRead(c: ResolvedCue, movable: boolean, designed: string, io: PlaceIo, attempts: string[]): Promise<{ r: Reading; file: string; steps: string[] }> {
+  let choice: SpotChoice | undefined;
+  try {
+    choice = await io.clear(c, designed);
+  } catch {
+    choice = undefined;
+  }
+  if (!choice?.moved) return makeReadable(c, movable, designed, io, attempts);
+  const asDesigned = { ...c.props };
+  const moveStep = `clear of the picture's subject: ${placeName(choice.from)} → ${placeName(choice.place)} (on the subject: ${choice.scores.map(s => `${placeName(s.place)} ${s.on.toFixed(2)}`).join(", ")})`;
+  c.props.place = choice.place;
+  const moved = await io.render(c);
+  attempts.push(moved);
+  const there = await makeReadable(c, movable, moved, io, attempts);
+  if (there.r.pass) return { ...there, steps: [moveStep, ...there.steps] };
+  const thereProps = { ...c.props };
+  c.props = { ...asDesigned };
+  const back = await makeReadable(c, movable, designed, io, attempts);
+  const steps = [moveStep, ...there.steps, "not readable clear of the subject — back where it was designed:", ...back.steps];
+  if (back.r.pass || score(back.r) >= score(there.r)) return { ...back, steps };
+  c.props = thereProps as typeof c.props;
+  return { r: there.r, file: there.file, steps };
 }
 
 export const describe = (r: Contrast) =>

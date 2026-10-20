@@ -25,6 +25,7 @@ import {
 } from "./components";
 import { withAlpha } from "./palette";
 import { CAPTION_PAGE_WORDS, Leave, ShadeContext, plate, useAt, usePlate } from "./overlays";
+import { numberLabelAnchor } from "./spots";
 import { LAYOUT, TYPE } from "./theme";
 import { fadeIn, scrimIn, type Phrase } from "./timing";
 
@@ -108,6 +109,10 @@ export type NumberLabelProps = BaseProps & {
    * price for each of two things ("$5 to $10 a knife and $10 to $20 a mower blade", job 406) is not
    * a comparison, and "vs" there said the wrong thing. Without it the two sit side by side. */
   compare?: boolean;
+  /** Which corner it sits in (bottom-left as designed): the one clear of the picture's subject, set by
+   * the finishing step (registry `spots`). Job 413's "From $25 / To $75" sat on the phone screen whose
+   * listing it priced, over the listing's title and the thumb holding the phone. */
+  place?: Place;
 };
 
 const ValuePill: React.FC<{ label: string; value: string; at: number; strong: boolean }> = ({ label, value, at: atSec, strong }) => {
@@ -127,15 +132,15 @@ const ValuePill: React.FC<{ label: string; value: string; at: number; strong: bo
  * it stood alone beside the kicker before either value, then pointed at empty space until the second
  * was said (job 406: alone 82.03-82.7 s, then beside one value for 1.7 s; job 401: "HIS AGE 64 vs"
  * for 3.5 s before "81"). */
-export const NumberLabel: React.FC<NumberLabelProps> = ({ kicker, a, b, compare }) => {
+export const NumberLabel: React.FC<NumberLabelProps> = ({ kicker, a, b, compare, place }) => {
   const t = useTheme();
   const at = useAt();
   const versus = useEnter(at(b.at), 14);
   return (
     <Leave>
-      <div style={{ position: "absolute", left: LAYOUT.actionSafeX + 24, bottom: 120, display: "flex", flexDirection: "column", gap: 16 }}>
+      <div style={{ ...numberLabelAnchor(place), display: "flex", flexDirection: "column", gap: 16 }}>
         {kicker && (
-          <div style={{ ...plate(usePlate(0.74)), alignSelf: "flex-start", padding: "8px 16px", borderRadius: 8 }}>
+          <div style={{ ...plate(usePlate(0.74)), padding: "8px 16px", borderRadius: 8 }}>
             <Kicker text={kicker} size={24} />
           </div>
         )}
@@ -285,6 +290,19 @@ export const CrossedList: React.FC<CrossedListProps> = ({ items }) => {
 
 export type MythStampProps = BaseProps & { label?: string; at: number; phrase?: Phrase; place?: Place };
 
+/** The MYTH stamp's band height (`placeStyle`), and its places: top-right as designed, then the
+ * other side, then the bands below — the one clear of the picture's subject is chosen by the
+ * finishing step (registry `spots`). */
+export const MYTH_STAMP_BAND = 300;
+export const MYTH_STAMP_PLACES: Place[] = [
+  { h: "right", v: "top" },
+  { h: "left", v: "top" },
+  { h: "right", v: "middle" },
+  { h: "left", v: "middle" },
+  { h: "right", v: "bottom" },
+  { h: "left", v: "bottom" },
+];
+
 /** A red stamp slammed onto the picture when a myth is said; the myth itself, if shown, underneath. */
 export const MythStamp: React.FC<MythStampProps> = ({ label = "Myth", at: atSec, phrase, place }) => {
   const t = useTheme();
@@ -296,7 +314,7 @@ export const MythStamp: React.FC<MythStampProps> = ({ label = "Myth", at: atSec,
   const shade = useShade();
   return (
     <Leave>
-      <div style={placeStyle(place ?? { h: "right", v: "top" }, 300)}>
+      <div style={placeStyle(place ?? MYTH_STAMP_PLACES[0], MYTH_STAMP_BAND)}>
         <div style={{ opacity: frame < f ? 0 : 1, transform: `rotate(-9deg) scale(${frame < f ? 1.6 : 1.6 - 0.6 * s})`, border: `10px solid ${t.danger}`, borderRadius: 18, padding: "6px 40px 10px", fontFamily: t.font, fontWeight: 900, fontSize: 120, letterSpacing: "0.08em", textTransform: "uppercase", color: t.danger, background: `rgba(12,16,22,${shaded(0.35, shade)})`, textShadow: "0 4px 18px rgba(0,0,0,0.35)" }}>
           {label}
         </div>

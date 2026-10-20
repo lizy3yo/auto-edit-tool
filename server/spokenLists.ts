@@ -489,6 +489,34 @@ const POINT = /^(?:how|what|when|where|why|which|whether)\b/i;
 /** A sentence quoted in a message, cut to a readable length. */
 const quoted = (s: string, max = 140) => `"${s.length > max ? `${s.slice(0, max - 1).trimEnd()}…` : s}"`;
 
+/** A dash between two words, spaced or not. */
+const DASH = /—|–|\s-\s/g;
+/** A colon between two words — never one inside a time or a ratio ("at 7:30", "2:1"). */
+const COLON = /(?<!\d):|:(?!\d)/;
+/** Where a sentence TURNS between two words: a dash (spaced or not) or a colon. */
+const TURN = new RegExp(`${DASH.source}|${COLON.source}`);
+
+/**
+ * A LIST ENDS WHERE ITS SENTENCE TURNS (2026-10-20, Gary's job 413 at 2:06): "the crime is stale fuel
+ * and a gummed-up carburetor — an afternoon of cleaning and a two-dollar gasket." The words after the
+ * dash are the FIX and what it costs, and the voice read the dash as a comma ("carburetor, an
+ * afternoon of cleaning, and a $2 gasket"), so the planner's checklist "The usual crime" ticked the
+ * cure as two more crimes. The script still writes the turn. The dash or colon `sentence` writes
+ * between two rows (from character `from` to `to`), or undefined — also when the words after it go on
+ * with a joining word: "…the obligations we are about to talk about — and a man who, years later…"
+ * (job 400's "Who Seneca was") is the list's last item, said after a pause. Nor is an ASIDE the
+ * sentence closes again before the next row ("a saw — any saw — a drill, and a chisel"): the list
+ * picks up where the second dash leaves off. Pure.
+ */
+function turnBetween(sentence: string, from: number, to: number): string | undefined {
+  const between = sentence.slice(from, to);
+  const m = TURN.exec(between);
+  if (!m) return undefined;
+  if (!COLON.test(between) && (between.match(DASH)?.length ?? 0) >= 2) return undefined;
+  const after = tokenSpans(between.slice(m.index + m[0].length) + " " + sentence.slice(to))[0]?.tok;
+  return after && JOINERS.has(after) ? undefined : m[0].trim();
+}
+
 /**
  * A LIST GRAPHIC IS A LIST THE NARRATOR SAYS (2026-10-18, Gideon's job 400, 1:41): the graphics
  * planner numbered "1 Two thousand years ago / 2 Seneca wrote a short / 3 Furious / 4 Loving essay"
@@ -506,6 +534,8 @@ const quoted = (s: string, max = 140) => `"${s.length > max ? `${s.slice(0, max 
  *    the same film's "Who Seneca was" rows ("an advisor standing one step from the throne, buried
  *    under exactly the kind of obligations we are about to talk about — and a man who, years later,
  *    would be ordered to end his own life") are a list of what one man was, 13 words to a row.
+ *  - two rows said one after the other in one sentence are not on two sides of a dash or a colon
+ *    the script writes there (`turnBetween`): a list ends where its sentence turns.
  * Rows in different sentences ("A cord under a rug. A space heater quietly cooking the side of a
  * mattress at 2 in the morning.", Frederick's job 393) and rows not found in `script` (a number
  * said as digits) are held to the first rule only: nothing here refuses what it cannot read.
@@ -524,8 +554,8 @@ export function notAListAsSaid(script: string, rows: string[], opts: { points?: 
   if (said.length < 2) return undefined;
   // Where the rows are said: the tightest run holding every row in order.
   const sentences = splitSentences(script);
-  const flat: { tok: string; s: number }[] = [];
-  sentences.forEach((s, n) => tokenSpans(s).forEach(t => flat.push({ tok: t.tok, s: n })));
+  const flat: { tok: string; s: number; start: number; end: number }[] = [];
+  sentences.forEach((s, n) => tokenSpans(s).forEach(t => flat.push({ tok: t.tok, s: n, start: t.start, end: t.end })));
   const toks = flat.map(t => t.tok);
   const wants = said.map(r => tokenSpans(r).map(t => t.tok));
   let best: number[] | null = null;
@@ -542,6 +572,16 @@ export function notAListAsSaid(script: string, rows: string[], opts: { points?: 
     if (at.length === wants.length && cursor - i < span) [best, span] = [at, cursor - i];
   }
   if (!best) return undefined;
+  for (let k = 0; k + 1 < best.length; k++) {
+    const last = flat[best[k] + wants[k].length - 1];
+    const next = flat[best[k + 1]];
+    const turn = last.s === next.s ? turnBetween(sentences[last.s], last.end, next.start) : undefined;
+    if (turn)
+      return (
+        `"${said[k]}" and "${said[k + 1]}" are on two sides of the script's "${turn}" in ${quoted(sentences[last.s])} — ` +
+        `what follows a dash or a colon says something more about the line (what it means, what it takes, what it costs), never the next item of the same list`
+      );
+  }
   const bySentence = new Map<number, string[]>();
   best.forEach((i, k) => bySentence.set(flat[i].s, [...(bySentence.get(flat[i].s) ?? []), said[k]]));
   for (const [s, group] of Array.from(bySentence)) {

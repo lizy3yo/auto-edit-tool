@@ -9280,3 +9280,327 @@ describe("a host take never stops between 'anything' and the clause that says wh
     expect(r.scenes[0].narrationEndSec).toBe(2.612);
   });
 });
+
+describe("a graphic shows the script's spelling, never the transcript's (round 14, Walter's job 411)", () => {
+  // 411 (1:46-1:51): the term card read "migratorious" — the transcriber's spelling — while the script,
+  // the real name and the field guide inside the card's own window read "migratorius". The script's
+  // spelling could not be anchored (one letter longer), and the repair round copied the transcript's.
+  // Words and scenes as stored.
+  const words = (s: string) =>
+    s.split(" ").map(t => {
+      const [text, range] = t.split("@");
+      const [start, end] = range.split("-").map(Number);
+      return { text, start, end };
+    });
+  const heard = words(
+    "guides,@105.425-105.765 ends@106.322-106.482 in@106.562-106.622 the@106.662-106.742 word@106.782-107.042 migratorious,@107.263-108.223 which@108.663-108.823 means@108.903-109.164 just@109.304-109.504 about@109.564-109.764 what@109.804-109.924 it@109.964-110.024 sounds@110.064-110.344 like.@110.424-110.664 " +
+      "Seems@111.385-111.685 somebody@111.845-112.225 should@112.285-112.445 have@112.465-112.585 checked@112.645-112.926 with@112.946-113.086 the@113.106-113.186 robins@113.266-113.726 first.@113.806-114.186"
+  );
+  const cuts = [100.77, 114.66];
+  const scene = (index: number, a: number, b: number, scriptText: string) => ({ index, narrationStartSec: a, narrationEndSec: b, scriptText, hostPresent: false, cta: false, split: false, hostOpener: false });
+  const film = {
+    scenes: [
+      scene(17, 100.77, 114.66, "The funny part is that the robin’s own scientific name, the one printed in the field guides, ends in the word migratorius, which means just about what it sounds like. Seems somebody should have checked with the robins first."),
+      scene(18, 114.66, 120.05, "If so many of them stay, then why does the yard feel so empty come November?"),
+    ],
+  };
+  const card = (spelling: string) => ({
+    id: "term-migratorius-fix",
+    template: "TermWindow",
+    start: `ends in the word ${spelling}`,
+    startPad: -0.15,
+    end: "what it sounds like.",
+    endPad: 0.3,
+    props: { kicker: "The term", term: spelling, at: `@${spelling}`, meaning: { text: "which means just about what it sounds like", words: true } },
+  });
+
+  it("411: the card asked in the script's spelling is placed, and one in the transcript's is shown in the script's", async () => {
+    const { planGraphics } = await import("../graphics/src/plan/planner");
+    for (const spelling of ["migratorius", "migratorious"]) {
+      let n = 0;
+      const ask = async () => (n++ === 0 ? JSON.stringify({ cues: [card(spelling)] }) : '{"cues": []}');
+      const out = await planGraphics({ words: heard, cuts, film, ask, ensureIcon: async () => true });
+      expect(out.rounds[0].problems).toEqual([]);
+      expect(out.resolved.map(c => [c.id, c.props.term, c.start, c.end])).toEqual([["term-migratorius-fix", "migratorius", 106.167, 110.967]]);
+    }
+  });
+
+  it("411: the saved plan, on a Reassemble, is shown in the script's spelling at the same times", async () => {
+    const { resolveCues } = await import("../graphics/src/cueResolve");
+    const { respellCue } = await import("../graphics/src/plan/planner");
+    const [c] = resolveCues([card("migratorious")], heard, { cuts, fps: 30 });
+    expect(respellCue(c, c, film, heard)).toEqual(['"migratorious" → "migratorius"']);
+    expect([c.props.term, c.start, c.end]).toEqual(["migratorius", 106.167, 110.967]);
+  });
+
+  it("a word the script itself says is left as written, and so is every word of a clean caption", async () => {
+    const { resolveCues } = await import("../graphics/src/cueResolve");
+    const { respellCue } = await import("../graphics/src/plan/planner");
+    const seems = { id: "seems", template: "DimCaption", start: "Seems somebody should have checked", end: "the robins first.", props: { phrase: { text: "Seems somebody should have checked with the robins first.", words: true }, emphasis: ["robins"] } };
+    const [c] = resolveCues([seems], heard, { cuts, fps: 30 });
+    expect(respellCue(c, c, film, heard)).toEqual([]);
+    expect(c.props.phrase).toMatchObject({ text: "Seems somebody should have checked with the robins first." });
+  });
+});
+
+describe("a card says what the voice says (round 14, Walter's job 411, Luca's job 412, Sam's job 414)", () => {
+  // Four cards of the verification films drew what the voice never said. Each run below puts the cue
+  // the job STORED to the planner as its first answer, on the words and pictures as that film had them;
+  // the repair round answers with what the refusal asks for. The clean cards beside them are placed.
+  const words = (s: string) =>
+    s.split(" ").map(t => {
+      const [text, range] = t.split("@");
+      const [start, end] = range.split("-").map(Number);
+      return { text, start, end };
+    });
+  const scene = (index: number, a: number, b: number, extra: Record<string, unknown> = {}) => ({ index, narrationStartSec: a, narrationEndSec: b, scriptText: "", hostPresent: false, cta: false, split: false, hostOpener: false, ...extra });
+  type Cue = { id: string; template: string; start: string; startPad: number; end: string; endPad: number; props: Record<string, unknown> };
+  const plan = async (heard: ReturnType<typeof words>, scenes: ReturnType<typeof scene>[], first: Cue[], repair: Cue[] = []) => {
+    const { planGraphics } = await import("../graphics/src/plan/planner");
+    const answers = [first, repair];
+    let n = 0;
+    const ask = async () => JSON.stringify({ cues: answers[n++] ?? [] });
+    const cuts = scenes.slice(1).map(s => s.narrationStartSec);
+    return planGraphics({ words: heard, cuts, film: { scenes }, ask, ensureIcon: async () => true });
+  };
+  const problemOf = (out: { rounds: { problems: { cue: string; problem: string }[] }[] }, id: string) => out.rounds[0].problems.find(p => p.cue === id)?.problem;
+
+  it("414 (0:31): '24 skills' for 'held the other 24 together' is refused; the card with the words he says after 24 is placed", async () => {
+    const heard = words(
+      "could@29.309-29.489 not@29.629-29.87 grow.@29.95-30.35 That@31.17-31.371 steel@31.491-31.991 is@32.591-32.671 why@32.731-32.872 the@32.912-33.012 last@33.112-33.452 skill@33.492-33.812 on@33.892-33.972 this@34.012-34.192 list@34.292-34.573 held@34.693-34.913 the@34.953-35.053 other@35.213-35.433 24@35.673-36.114 together.@36.154-36.594 I@37.795-37.875 am@37.935-38.055 Sam,@38.195-38.635 and@39.156-39.256 this@39.336-39.496 one@39.676-39.776 is@39.856-39.936 for@39.996-40.136"
+    );
+    const card = (unit: string): Cue => ({
+      id: "twenty-four-skills",
+      template: "BigNumber",
+      start: "That steel is why the last",
+      startPad: -0.15,
+      end: "the other twenty-four together",
+      endPad: 0.3,
+      props: { at: "@twenty-four", line: { text: "That steel is why the last skill on this list held the other", words: true }, unit, value: 24, kicker: "The last skill", countSec: 0.6 },
+    });
+    const out = await plan(heard, [scene(8, 25.28, 30.71), scene(9, 30.71, 37.51), scene(10, 37.51, 41.53, { hostPresent: true })], [card("skills")], [card("together")]);
+    expect(problemOf(out, "twenty-four-skills")).toContain('its unit "skills" is not what he says after the number — he says "24 together."');
+    expect(out.cues.map(c => [c.id, c.props.unit])).toEqual([["twenty-four-skills", "together"]]);
+  });
+
+  it("414 (0:47): MYTH on 'The title says lost' — the host's own true statement, which he only softens — is refused and not placed", async () => {
+    const heard = words(
+      "very@45.239-45.54 little@45.6-45.86 cash.@45.92-46.42 The@47.181-47.281 title@47.341-47.721 says@47.801-48.061 Lost,@48.161-48.622 which@49.122-49.302 is@49.382-49.462 too@49.562-49.782 strong,@49.862-50.363 since@50.883-51.143 folk@51.243-51.524 schools@51.544-51.924 still@52.004-52.304 teach@52.364-52.624 plenty@52.744-53.105 of@53.145-53.185 these,@53.265-53.565 and@54.065-54.165 the@54.205-54.285 Foxfire@54.385-55.106 books@55.166-55.426 recorded@55.506-55.986 a@56.026-56.066 good@56.166-56.407 share.@56.487-56.887"
+    );
+    const stamp: Cue = { id: "title-says-lost", template: "MythStamp", start: "The title says lost, which", startPad: -0.15, end: "The title says lost", endPad: 0.3, props: { at: "@says lost", label: "Myth", phrase: { text: "The title says lost", words: true } } };
+    const out = await plan(heard, [scene(11, 41.53, 47.06), scene(12, 47.06, 50.71), scene(13, 50.71, 53.92), scene(14, 53.92, 57.6)], [stamp]);
+    expect(problemOf(out, "title-says-lost")).toMatch(/^"The title says lost" is the host's own true statement about a claim, not the belief/);
+    expect(out.cues).toEqual([]);
+  });
+
+  it("412: 'a hundred times before' counted up to 100 and a MYTH stamp with no words are refused; the 'stubborn old myth' stamp is placed", async () => {
+    const heard = words(
+      "steady@18.35-18.71 as@18.75-18.83 a@18.89-18.93 tightrope@18.99-19.47 walker,@19.51-19.85 because@20.291-20.531 she@20.591-20.731 has@20.751-20.871 made@20.931-21.111 this@21.151-21.291 crossing@21.351-21.751 a@21.892-21.952 hundred@22.052-22.412 times@22.452-22.772 before.@22.852-23.272 " +
+        "A@33.274-33.314 few@33.374-33.554 people,@33.614-33.995 half@34.275-34.495 awake@34.555-34.855 and@34.895-34.995 fully@35.135-35.395 annoyed,@35.455-35.875 call@36.116-36.336 it@36.376-36.436 revenge.@36.516-37.056 Here's@37.736-37.916 the@37.957-38.037 thing@38.077-38.297 though,@38.337-38.557 it's@39.177-39.317 neither.@39.437-39.877 " +
+        "not@99.087-99.387 your@99.568-99.848 clock.@99.888-100.208 There's@100.828-101.028 a@101.068-101.108 stubborn@101.188-101.569 old@101.629-101.789 myth@101.909-102.169 that@102.249-102.389 cats@102.449-102.729 are@102.789-102.849 nocturnal,@102.889-103.57 creatures@103.93-104.41 of@104.47-104.53 the@104.57-104.67 deep@104.75-105.01 night,@105.11-105.39 and@105.791-105.891 that's@105.911-106.111 mostly@106.191-106.511 a@106.551-106.591 costume@106.671-107.091 they@107.131-107.251 wear@107.271-107.452 in@107.492-107.552 cartoons.@107.612-108.232"
+    );
+    const crossing: Cue = {
+      id: "hundred-crossings",
+      template: "BigNumberOverlay",
+      start: "because she has made this crossing",
+      startPad: -0.15,
+      end: "a hundred times before",
+      endPad: 0.3,
+      props: { at: "@hundred", line: { text: "because she has made this crossing a", words: true }, unit: "times", value: 100, kicker: "Her crossing", countSec: 0.6 },
+    };
+    const revenge: Cue = { id: "revenge-myth", template: "MythStamp", start: "A few people, half awake", startPad: -0.15, end: "call it revenge", endPad: 0.3, props: { at: "@call it revenge", label: "Myth" } };
+    const nocturnal: Cue = {
+      id: "nocturnal-myth",
+      template: "MythStamp",
+      start: "There’s a stubborn old myth",
+      startPad: -0.15,
+      end: "that cats are nocturnal",
+      endPad: 0.3,
+      props: { at: "@cats are nocturnal", label: "Myth", phrase: { text: "There’s a stubborn old myth that cats are nocturnal", words: true } },
+    };
+    const scenes = [scene(8, 18.13, 23.75), scene(9, 23.75, 28.91), scene(10, 28.91, 33.12, { split: true, hostPresent: true }), scene(11, 33.12, 40.35), scene(21, 92.8, 103.78), scene(22, 103.78, 108.76)];
+    const out = await plan(heard, scenes, [crossing, revenge, nocturnal], [nocturnal]);
+    expect(problemOf(out, "hundred-crossings")).toMatch(/^"a hundred times before\." is a figure of speech/);
+    expect(problemOf(out, "revenge-myth")).toMatch(/^MYTH is stamped with no "phrase"/);
+    expect(problemOf(out, "nocturnal-myth")).toBeUndefined();
+    expect(out.cues.map(c => c.id)).toEqual(["nocturnal-myth"]);
+  });
+
+  it("411 (2:24): 'Hardly sings → Soft clucking', both said of one winter, is refused; 'more than 100 years' keeps its number card", async () => {
+    const heard = words(
+      "The@55.472-55.552 big@55.572-55.752 holiday@55.832-56.293 tally@56.353-56.773 birders@56.833-57.193 have@57.233-57.353 kept@57.393-57.593 going@57.633-57.894 for@57.934-58.074 more@58.114-58.254 than@58.294-58.434 100@58.474-58.974 years.@59.034-59.415 " +
+        "Once@139.943-140.103 nesting@140.183-140.563 season@140.603-140.963 is@141.023-141.123 over,@141.223-141.463 that@141.743-141.923 job@141.963-142.184 is@142.244-142.344 done,@142.404-142.704 and@143.104-143.184 through@143.204-143.424 the@143.444-143.524 winter,@143.584-143.904 a@144.104-144.144 robin@144.204-144.504 hardly@144.564-144.884 sings@144.924-145.184 at@145.244-145.284 all.@145.424-145.584 " +
+        "Mostly@146.284-146.684 you'll@146.724-146.904 hear@146.944-147.125 a@147.185-147.205 low,@147.285-147.605 soft@147.745-148.085 clucking,@148.225-148.685 a@149.105-149.125 bit@149.165-149.305 like@149.345-149.505 somebody@149.565-149.925 tutting@150.005-150.345 under@150.405-150.565 their@150.605-150.765 breath.@150.805-151.125"
+    );
+    const birdCount: Cue = {
+      id: "bird-count-hundred-years",
+      template: "BigNumberOverlay",
+      start: "the big holiday tally birders have",
+      startPad: -0.15,
+      end: "than a hundred years",
+      endPad: 0.3,
+      props: { at: "@a hundred years", line: { text: "the big holiday tally birders have kept going for more than", words: true }, unit: "years", value: 100, kicker: "Christmas Bird Count", countSec: 0.6 },
+    };
+    const winterVoice: Cue = {
+      id: "winter-voice",
+      template: "BeforeAfter",
+      start: "and through the winter a robin",
+      startPad: -0.15,
+      end: "tutting under their breath",
+      endPad: 0.3,
+      props: { after: { at: "@a low, soft clucking", label: "Soft clucking" }, before: { at: "@hardly sings at all", label: "Hardly sings" }, kicker: "In winter" },
+    };
+    const scenes = [scene(10, 50.98, 54.98, { split: true, hostPresent: true }), scene(11, 54.98, 62.33), scene(22, 139.74, 146.15), scene(23, 146.15, 151.3), scene(24, 151.3, 154.58)];
+    const out = await plan(heard, scenes, [birdCount, winterVoice], [birdCount]);
+    expect(problemOf(out, "winter-voice")).toMatch(/^"Hardly sings" → "Soft clucking" is no before and after/);
+    expect(problemOf(out, "bird-count-hundred-years")).toBeUndefined();
+    expect(out.cues.map(c => c.id)).toEqual(["bird-count-hundred-years"]);
+  });
+});
+
+describe("a checklist ticks a list the narrator says, and a chapter series is the parts the film counts (round 14, Gary's job 413)", () => {
+  // Two graphics of the same practice film. "THE USUAL CRIME" ticked "An afternoon of cleaning" and
+  // "A $2 gasket" — the fix the script names after a dash the voice read as a comma — as two more
+  // crimes; and the two parts the excerpt counts aloud lost their chapter labels because the kicker
+  // promised seventeen. Each run puts the cue the job stored (or planned) to the planner as its first
+  // answer, on the words and scenes the film had.
+  const words = (s: string) =>
+    s.split(" ").map(t => {
+      const [text, range] = t.split("@");
+      const [start, end] = range.split("-").map(Number);
+      return { text, start, end };
+    });
+  const scene = (index: number, a: number, b: number, extra: Record<string, unknown> = {}) => ({ index, narrationStartSec: a, narrationEndSec: b, scriptText: "", hostPresent: false, cta: false, split: false, hostOpener: false, ...extra });
+  type Cue = { id: string; template: string; start: string; startPad: number; end?: string; endPad?: number; durationSec?: number; props: Record<string, unknown> };
+  const plan = async (heard: ReturnType<typeof words>, scenes: ReturnType<typeof scene>[], first: Cue[], repair: Cue[] = []) => {
+    const { planGraphics } = await import("../graphics/src/plan/planner");
+    const { notAListAsSaid } = await import("./spokenLists");
+    let n = 0;
+    const ask = async () => JSON.stringify({ cues: [first, repair][n++] ?? [] });
+    const cuts = scenes.slice(1).map(s => s.narrationStartSec);
+    return planGraphics({ words: heard, cuts, film: { scenes }, ask, ensureIcon: async () => true, listCheck: notAListAsSaid });
+  };
+
+  it("413 (2:06): 'The usual crime' is refused at the script's dash; the opening's 'a loan, a lease, a logo, and a lawyer —' is a checklist that is placed", async () => {
+    const heard = words(
+      "$10,000.@4.413-5.173 A@5.473-5.633 loan,@6.353-6.753 a@7.013-7.053 lease,@7.113-7.433 a@7.733-7.753 logo,@7.813-8.313 and@8.434-8.534 a@8.574-8.594 lawyer,@8.654-9.014 all@9.554-9.694 before@9.734-10.034 the@10.054-10.154 first@10.234-10.474 customer@10.534-10.994 ever@11.234-11.394 shows@11.454-11.734 up.@11.894-11.974 " +
+        "Nine@125.03-125.21 times@125.25-125.49 out@125.55-125.65 of@125.69-125.73 ten,@125.81-126.13 the@126.19-126.27 crime@126.31-126.57 is@126.63-126.71 stale@126.77-127.11 fuel@127.19-127.53 and@127.57-127.65 a@127.67-127.71 gummed@127.77-128.03 up@128.07-128.19 carburetor,@128.23-128.85 an@129.27-129.33 afternoon@129.43-129.81 of@129.85-129.91 cleaning,@129.97-130.39 and@130.45-130.55 a@130.57-130.61 $2@130.83-131.11 gasket.@131.15-131.59 " +
+        "Fixed@132.25-132.49 and@132.53-132.61 washed.@132.65-133.01"
+    );
+    const scenes = [
+      scene(1, 0, 5.41, { hostPresent: true, scriptText: "Somewhere along the line, everybody agreed that starting a business costs ten thousand dollars." }),
+      scene(2, 5.41, 6.83, { scriptText: "A loan," }),
+      scene(3, 6.83, 7.55, { scriptText: "a lease," }),
+      scene(4, 7.55, 8.36, { scriptText: "a logo," }),
+      scene(5, 8.36, 9.39, { scriptText: "and a lawyer —" }),
+      scene(6, 9.39, 12.52, { scriptText: "all before the first customer ever shows up." }),
+      scene(26, 117.17, 124.86, { scriptText: "Every spring, Marketplace fills up with mowers listed as ran-last-season, priced twenty-five to seventy-five dollars." }),
+      scene(27, 124.86, 132.13, { scriptText: "Nine times out of ten the crime is stale fuel and a gummed-up carburetor — an afternoon of cleaning and a two-dollar gasket." }),
+      scene(28, 132.13, 136.95, { scriptText: "Fixed and washed, that same machine sells for a hundred fifty to three hundred." }),
+    ];
+    const crime: Cue = {
+      id: "usual-mower-crime",
+      template: "Checklist",
+      start: "the crime is stale fuel",
+      startPad: -0.15,
+      end: "and a $2 gasket",
+      endPad: 0.3,
+      props: {
+        title: "The usual crime",
+        items: [
+          { at: "@stale fuel", text: "Stale fuel" },
+          { at: "@a gummed up carburetor", text: "A gummed up carburetor" },
+          { at: "@an afternoon of cleaning", text: "An afternoon of cleaning" },
+          { at: "@a $2 gasket", text: "A $2 gasket" },
+        ],
+      },
+    };
+    const costs: Cue = {
+      id: "before-first-customer",
+      template: "Checklist",
+      start: "A loan, a lease, a",
+      startPad: -0.15,
+      end: "and a lawyer",
+      endPad: 0.3,
+      props: { title: "Before the first customer", items: ["A loan", "a lease", "a logo", "a lawyer"].map(x => ({ at: `@${x}`, text: x.charAt(0).toUpperCase() + x.slice(1), say: x })) },
+    };
+    // the repair keeps the cue that passed and drops the one refused
+    const out = await plan(heard, scenes, [costs, crime], [costs]);
+    expect(out.rounds[0].problems.find(p => p.cue === "usual-mower-crime")?.problem).toMatch(/^"The usual crime" is not a list the narrator says: row 3 \("an afternoon of cleaning"\) names no thing/);
+    expect(out.rounds[0].problems.find(p => p.cue === "before-first-customer")).toBeUndefined();
+    expect(out.cues.map(c => c.id)).toEqual(["before-first-customer"]);
+  });
+
+  it("413 (0:59, 1:51): 'Number one' and 'number two' keep their chapter labels, without the '…of 17' the excerpt never reaches", async () => {
+    const heard = words(
+      "Cheap@59.10-59.38 insurance.@59.44-60.02 Now,@60.80-61.02 number@61.59-61.83 one.@62.03-62.17 Number@63.17-63.41 one,@63.57-63.71 knife@64.37-64.65 and@64.79-64.89 tool@64.97-65.25 sharpening.@65.29-65.79 " +
+        "And@111.67-111.75 since@111.81-112.00 you're@112.02-112.19 already@112.24-112.58 sharpening@112.64-113.10 mower@113.14-113.40 blades,@113.44-113.80 meet@114.22-114.40 number@114.46-114.72 two,@114.76-115.04 lawn@115.66-115.94 mower@115.96-116.20 flipping.@116.26-116.64 " +
+        "grab@211.40-211.70 it@211.79-211.87 now@211.91-212.13 or@212.33-212.43 after@212.53-212.75 number@212.79-213.01 17,@213.05-213.61 same@213.91-214.18 book.@214.22-214.60"
+    );
+    const scenes = [
+      scene(17, 58.97, 66.54, { hostPresent: true, split: true, scriptText: "Cheap insurance. Now — number one.\n\nNumber one: knife and tool sharpening." }),
+      scene(18, 66.54, 70.33, { scriptText: "Every kitchen on your street has a drawer full of dull knives," }),
+      scene(25, 111.53, 117.17, { hostPresent: true, split: true, scriptText: "And since you’re already sharpening mower blades, meet number two: lawn mower flipping." }),
+      scene(26, 117.17, 124.86, { scriptText: "Every spring, Marketplace fills up with mowers." }),
+      scene(37, 197.96, 219.55, { cta: true, scriptText: "No deadline, no countdown — grab it now or after number seventeen, same book either way." }),
+    ];
+    const chapter = (id: string, start: string, number: number, title: string): Cue => ({ id, template: "ChapterLabel", start, startPad: -0.15, durationSec: 4.5, props: { kicker: `Garage businesses · ${number} of 17`, number, title } });
+    const out = await plan(heard, scenes, [chapter("chapter-one-sharpening", "Number one, knife and tool", 1, "Knife sharpening"), chapter("chapter-two-mower-flipping", "meet number two, lawn mower", 2, "Mower flipping")]);
+    expect(out.rounds.flatMap(r => r.problems).filter(p => /chapter/.test(p.cue + p.problem))).toEqual([]);
+    expect(out.cues.map(c => c.props.kicker)).toEqual(["Garage businesses · 1", "Garage businesses · 2"]);
+  });
+});
+
+describe("round 14: a graphic is read from when its words show, and sits clear of the picture's subject (jobs 412, 413)", () => {
+  const FPS = 30;
+  const words = (s: string): Word[] =>
+    s.split(" ").map(t => {
+      const [text, range] = t.split("@");
+      const [start, end] = range.split("-").map(Number);
+      return { text, start, end };
+    });
+
+  it("413 (1:11): 'A mower blade' opened on the cut 1.2 s before its words and was read 1.0 s; now it is read 2.9 s, from its words", async () => {
+    const { resolveCues, readableFrames } = await import("../graphics/src/cueResolve");
+    const { resolveSets } = await import("../graphics/src/registry");
+    const heard = words(
+      "and@70.451-70.551 every@70.631-70.831 shed@70.931-71.252 has@71.292-71.452 a@71.512-71.532 mower@71.612-71.892 blade@71.932-72.172 that's@72.212-72.392 beating@72.512-72.833 the@72.873-72.933 grass@72.973-73.293 instead@73.333-73.613 of@73.633-73.693 cutting@73.793-74.113 it.@74.173-74.254 A@75.074-75.114 guided@75.174-75.514"
+    );
+    const spec = { id: "mower-blade-label", template: "SmallLabel", start: "every shed has a mower blade", startPad: -0.15, end: "a mower blade", endPad: 0.3, props: { at: "@a mower blade", text: "A mower blade" } };
+    const [c] = resolveCues([spec], heard, { cuts: [66.54, 70.33, 74.92], fps: FPS, ...resolveSets() });
+    expect([c.start, c.shownAt, c.end]).toEqual([70.333, 71.467, 74.367]);
+    expect(readableFrames(c, FPS) / FPS).toBeCloseTo(2.9, 6);
+    // as it shipped (cue to 72.47 s), QA now reports what it said was fine
+    expect(tooShortToRead({ startFrame: 2110, endFrame: 2174, shownAt: 71.467 }, FPS)).toBe(true);
+  });
+
+  it("412 (0:36): the MYTH stamp that showed for 1.25 s of a 4.2 s cue is read for 1.5 s from 'call it revenge'", async () => {
+    const { resolveCues } = await import("../graphics/src/cueResolve");
+    const { resolveSets } = await import("../graphics/src/registry");
+    const heard = words(
+      "A@33.274-33.314 few@33.374-33.554 people,@33.614-33.995 half@34.275-34.495 awake@34.555-34.855 and@34.895-34.995 fully@35.135-35.395 annoyed,@35.455-35.875 call@36.116-36.336 it@36.376-36.436 revenge.@36.516-37.056 Here's@37.736-37.916 the@37.957-38.037"
+    );
+    const spec = { id: "revenge-myth", template: "MythStamp", start: "A few people, half awake", startPad: -0.15, end: "call it revenge", endPad: 0.3, props: { at: "@call it revenge", label: "Myth" } };
+    const [c] = resolveCues([spec], heard, { cuts: [33.12, 40.35], fps: FPS, ...resolveSets() });
+    expect([c.shownAt, c.end]).toEqual([36.067, 37.567]);
+    expect(tooShortToRead(c, FPS)).toBe(false);
+    expect(tooShortToRead({ ...c, endFrame: 1121 }, FPS)).toBe(true); // its old end, 37.37 s
+  });
+
+  it("the price pair leaves the phone (413, 2:02), the MYTH stamp the sleeper's head (412, 0:36) and the cat's face (412, 1:44); placements that were clear stay", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { clearSpot } = await import("../graphics/src/spots");
+    const { templateById } = await import("../graphics/src/registry");
+    const { maps } = JSON.parse(readFileSync(`${import.meta.dirname}/../graphics/src/__fixtures__/subject-maps.json`, "utf8")) as { maps: Record<string, number[]> };
+    const choose = (template: string, size: { w: number; h: number }, frames: string[]) => {
+      const c = clearSpot(templateById(template).spots!, size, frames.map(f => maps[f]), { w: 1920, h: 1080 });
+      return `${c.from.v} ${c.from.h} → ${c.place.v} ${c.place.h}`;
+    };
+    expect(choose("NumberLabel", { w: 540, h: 220 }, ["phone"])).toBe("bottom left → bottom right");
+    expect(choose("MythStamp", { w: 534, h: 254 }, ["revenge"])).toBe("top right → top left");
+    expect(choose("MythStamp", { w: 728, h: 410 }, ["noct21", "noct22"])).toBe("top right → top left");
+    // the knife table (413, 1:40) and the frosted grass (411, 0:11): clear where they were designed
+    expect(choose("NumberLabel", { w: 540, h: 220 }, ["knives"])).toBe("bottom left → bottom left");
+    expect(choose("MythStamp", { w: 534, h: 254 }, ["robins"])).toBe("top right → top right");
+  });
+});

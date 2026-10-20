@@ -62,10 +62,16 @@ export type ChapterProps = BaseProps & {
   /** On a SPLIT, the host's panel (px): the label stays inside it, clear of the seam and the
    * picture beside it. Implies `low` — a split is a host take. */
   panel?: { x: number; w: number };
+  /** Over b-roll only, which corner band it takes (bottom-left as designed): the one clear of the
+   * picture's subject, set by the finishing step (registry `spots`). Over a host take `low`, `side`
+   * and `panel` place it and this is not read. */
+  place?: Place;
 };
 
 /** The chapter label's plate as designed (px at 1920×1080): bottom-left over b-roll. */
 export const CHAPTER_PLATE = { left: 100, bottom: 155, w: 960, h: 265 } as const;
+/** Its top over b-roll when it takes a top band (`place.v` "top"): the other graphics' top band. */
+export const CHAPTER_TOP = 150;
 /** Its size over a host take: from `LAYOUT.belowChinY` down it has ~290 px of room, and at this
  * size it ends 78 px above the frame's bottom (inside the action-safe area). */
 export const CHAPTER_LOW_SCALE = 0.8;
@@ -85,10 +91,18 @@ export type ChapterBox = { left: number; top: number; width: number; scale: numb
  * (`low`, or a split's `panel`): smaller and BELOW THE CHIN, inside the host's panel on a split, on
  * the right while the name card holds the bottom-left. Job 407 (scene 21, "Number two squared the
  * walls…"): the plate as designed spans y 660-925 and its top edge cut across the centred host's
- * beard for 3 s; job 402's on a split (scene 14) also ran across the seam onto the picture. Pure.
+ * beard for 3 s; job 402's on a split (scene 14) also ran across the seam onto the picture. Over
+ * b-roll it takes the corner band `place` names, the one clear of the picture's subject (job 414's
+ * "1 The roof" covered the froe it was about, its socket and half its blade). Pure.
  */
-export function chapterBox(p: Pick<ChapterProps, "low" | "side" | "panel">): ChapterBox {
-  if (!p.low && !p.panel) return { left: CHAPTER_PLATE.left, top: HEIGHT - CHAPTER_PLATE.bottom - CHAPTER_PLATE.h, width: CHAPTER_PLATE.w, scale: 1 };
+export function chapterBox(p: Pick<ChapterProps, "low" | "side" | "panel" | "place">): ChapterBox {
+  if (!p.low && !p.panel)
+    return {
+      left: p.place?.h === "right" ? WIDTH - CHAPTER_PLATE.left - CHAPTER_PLATE.w : CHAPTER_PLATE.left,
+      top: p.place?.v === "top" ? CHAPTER_TOP : HEIGHT - CHAPTER_PLATE.bottom - CHAPTER_PLATE.h,
+      width: CHAPTER_PLATE.w,
+      scale: 1,
+    };
   const x0 = p.panel?.x ?? 0;
   const x1 = p.panel ? p.panel.x + p.panel.w : WIDTH;
   const left = x0 <= 0 ? CHAPTER_PLATE.left : x0 + CHAPTER_SEAM_INSET;
@@ -99,14 +113,14 @@ export function chapterBox(p: Pick<ChapterProps, "low" | "side" | "panel">): Cha
   return { left: p.side === "right" ? right - width * scale : left, top: LAYOUT.belowChinY, width, scale };
 }
 
-export const ChapterLabel: React.FC<ChapterProps> = ({ kicker, number, title, low, side, panel }) => {
+export const ChapterLabel: React.FC<ChapterProps> = ({ kicker, number, title, low, side, panel, place }) => {
   const t = useTheme();
   const frame = useCurrentFrame();
   const wipe = fadeIn(frame, 0, 12);
   const k = useEnter(5, 10);
   const n = useEnter(8, 16);
   const ti = useEnter(12, 16);
-  const box = chapterBox({ low, side, panel });
+  const box = chapterBox({ low, side, panel, place });
   return (
     <Leave>
       <div

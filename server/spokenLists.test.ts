@@ -1370,3 +1370,50 @@ describe("two steps or two bare words are a list only when they name things (job
     ]);
   });
 });
+
+describe("a list ends where its sentence turns at a dash or a colon (round 13 graphics review, Gary's job 413)", () => {
+  // The script at 2:06. The voice read the dash as a comma, and the checklist "The usual crime"
+  // ticked the fix and its cost ("an afternoon of cleaning", "a $2 gasket") as two more crimes.
+  const crime = "Nine times out of ten the crime is stale fuel and a gummed-up carburetor — an afternoon of cleaning and a two-dollar gasket.";
+
+  it("rows on two sides of the script's dash are refused, even when commas would make them a list", () => {
+    expect(notAListAsSaid(crime, ["stale fuel", "a gummed-up carburetor", "a two-dollar gasket"])).toBe(
+      `"a gummed-up carburetor" and "a two-dollar gasket" are on two sides of the script's "—" in "${crime}" — what follows a dash or a colon says something more about the line (what it means, what it takes, what it costs), never the next item of the same list`
+    );
+    // the comma rule alone passes this one; the dash still ends the list
+    const withCommas = "The crime is stale fuel, a gummed-up carburetor — a rag, and a two-dollar gasket.";
+    expect(validateSpokenList(withCommas, ["stale fuel", "a gummed-up carburetor", "a rag", "a two-dollar gasket"], false, Infinity)).toBe(true);
+    expect(notAListAsSaid(withCommas, ["stale fuel", "a gummed-up carburetor", "a rag", "a two-dollar gasket"])).toMatch(/^"a gummed-up carburetor" and "a rag" are on two sides of the script's "—"/);
+    expect(notAListAsSaid("Two things went wrong: the fuel, the gasket: the rest was fine.", ["the fuel", "the gasket", "the rest"])).toMatch(/are on two sides of the script's ":"/);
+  });
+
+  it("a dash before the first row or after the last, or one the next item goes on from with 'and', turns nothing", () => {
+    // the same film's opening, 0:05
+    expect(notAListAsSaid("A loan, a lease, a logo, and a lawyer — all before the first customer ever shows up.", ["A loan", "a lease", "a logo", "a lawyer"])).toBeUndefined();
+    expect(notAListAsSaid("Here's tonight's deal: seventeen businesses, the true cost to start each one, and the catch stated flat.", ["seventeen businesses", "the true cost to start each one", "the catch stated flat"])).toBeUndefined();
+    // job 400's "Who Seneca was": its last item comes after a dash, on "and"
+    const whoHeWas =
+      "He was one of the richest men in the empire, an advisor standing one step from the throne, buried under exactly the kind of obligations we are about to talk about — and a man who, years later, would be ordered to end his own life by the very emperor he had served.";
+    expect(notAListAsSaid(whoHeWas, ["an advisor standing one step from the throne", "buried under exactly the kind of obligations we are about to talk about", "and a man who, years later, would be ordered to end his own life"])).toBeUndefined();
+  });
+});
+
+describe("an aside closed again, or a colon inside a time, turns no list (round 14 review of job 413's fix)", () => {
+  it("a dash aside the sentence closes before the next row is no turn; job 413's one dash still is", () => {
+    expect(notAListAsSaid("You need a saw — any saw — a drill, and a chisel.", ["a saw", "a drill", "a chisel"])).toBeUndefined();
+    // job 413's line with the cost written as an aside still ends the crime at its first dash
+    expect(
+      notAListAsSaid("Nine times out of ten the crime is stale fuel and a gummed-up carburetor — an afternoon of cleaning and a two-dollar gasket.", [
+        "stale fuel",
+        "a gummed-up carburetor",
+        "a two-dollar gasket",
+      ])
+    ).toMatch(/are on two sides of the script's "—"/);
+  });
+
+  it("the colon in a time or a ratio is no turn; a colon between words still is", () => {
+    expect(notAListAsSaid("You want coffee at 6:30, toast, and eggs.", ["coffee", "toast", "eggs"])).toBeUndefined();
+    expect(notAListAsSaid("Mix the cement at 1:3, the sand, and the water.", ["the cement", "the sand", "the water"])).toBeUndefined();
+    expect(notAListAsSaid("Two things went wrong: the fuel, the gasket: the rest was fine.", ["the fuel", "the gasket", "the rest"])).toMatch(/are on two sides of the script's ":"/);
+  });
+});

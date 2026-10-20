@@ -20,7 +20,7 @@
 //
 // Pure apart from the two things it is handed: `ask` (the model call — metered by the app) and
 // `ensureIcon` (makes an emoji's image available).
-import { CARD_HOLD_MAX_SEC, CueError, LINGER_SEC, MIN_ON_SCREEN_SEC, MIN_SHOT_SEC, NEW_LINE_GRACE_SEC, blinkBeside, findPhrase, findVerbatim, holdToCut, indexWords, ownSentenceEnd, parseSpokenNumber, resolveCues, sameWord, tokens, tooShortToRead, type CueSpec, type ResolvedCue, type Word } from "../cueResolve";
+import { CARD_HOLD_MAX_SEC, CueError, LINGER_SEC, MIN_ON_SCREEN_SEC, MIN_SHOT_SEC, NEW_LINE_GRACE_SEC, blinkBeside, findPhrase, findVerbatim, holdToCut, indexWords, ownSentenceEnd, parseSpokenNumber, readableFrames, resolveCues, sameWord, tokens, tooShortToRead, withinEdits, type CueSpec, type ResolvedCue, type TokenIndex, type Word } from "../cueResolve";
 import { TEMPLATES, resolveSets, templateById } from "../registry";
 import { FPS, LAYOUT, WIDTH } from "../theme";
 import { DIM_GAP_SEC, MIN_GAP_SEC, checkRules, nameTagRange, type FilmLayout, type LayoutScene } from "./rules";
@@ -70,6 +70,17 @@ export function stepStripMaxChars(n: number): number {
 
 /** The list windows: numbered rows, each standing for an item the narrator says. */
 const LIST_WINDOWS = new Set(["ListWindow", "HostListWindow"]);
+
+/**
+ * The graphics that show a LIST under a title, a row for each item said one after another — the list
+ * windows, and the checklist that ticks each row as it is said. Each is held to the rules every
+ * spoken list is found by (`listCheck`). Only the windows were: Gary's job 413 (2:06) ticked "THE
+ * USUAL CRIME: Stale fuel / A gummed up carburetor / An afternoon of cleaning / A $2 gasket", the last
+ * two the fix the script names after a dash. Not the side-by-side pills (IconLabels, which may name
+ * one thing or offer two), nor the crossed-out list (CrossedList, which dismisses states and choices
+ * as well as things: "not broken, not dead").
+ */
+const ROW_LISTS = new Set([...Array.from(LIST_WINDOWS), "Checklist"]);
 
 /** Noto Color Emoji (Apache-2.0), pinned: the image of an emoji, by its code points. */
 export const NOTO_PNG = "https://cdn.jsdelivr.net/gh/googlefonts/noto-emoji@v2.047/png/512";
@@ -163,12 +174,19 @@ Full-screen cards — replace the picture, so ONLY inside a b-roll stretch, neve
 - Versus — compares two kinds or options: {"kicker", "left": {"icon" (optional),"title" (1-3 words),"sub" (≤6 words),"say","at"}, "right": {same}, "winner": "left"|"right"|"none"}
   (a side's "say" is all its words as said, its sub's words among them: the title appears on "at", the sub as its own words are said)
 - BigNumber — says a number that matters (a time, an amount, a count): {"kicker", "prefix": "$" (a currency sign, if any), "value": number, "unit": "1-2 words", "at": "@the spoken number", "line": phrase, "countSec": 0.6 for small numbers}. Start it on the sentence that holds the number, not sentences before.
+  (a REAL figure only: a round number said to mean "many" — "made this trip a hundred times before", "a million
+  reasons", "a thousand ways" — is a figure of speech, never counted up like a statistic. The "unit" is the word or
+  two he says RIGHT AFTER the number — "about 40 minutes left" is 40 "minutes left", "kept the other 12 going" is
+  12 "going" — or none: never a word he does not say there, even one he said earlier in the sentence)
 - StepCards — gives 2-4 steps the viewer should do, when the steps have no pictures of their own (over STEP PICTURE scenes, StepLabels): {"kicker", "steps": [{"text" (≤${STEP_MAX_WORDS} words), "icon" (optional), "at": "@words"}]}
   (each step is the narrator's own words, shortened, keeping his "a", "the", "it" — "Leave it on the shelf", never
   "Leave on shelf" — never a word he does not say, and never stopped before what its last word takes. Steps are
   done ONE AFTER ANOTHER: a choice the line offers — "…, or …", "alternatively" — is part of the
   step before it, never a step of its own: "Call the office, or send an email" is ONE step, "Call or email")
 - BeforeAfter — an old way or state replaced by a new one: {"kicker", "before": {"icon" (optional),"label","at"}, "after": {"icon" (optional),"label","at"}}
+  (its arrow says one turned into the other, so the line SAYS a change between two times or states — then and
+  now, "used to", "became", "is now", "instead", one season against another. Two things true at the SAME time —
+  one state said two ways, "it barely moves at all; mostly it just sits there" — are no before and after)
 - TwoPoint — links two places or things ("the one in the basement sets off the one by your bed"): {"title": phrase, "a": {"label","sub","at"}, "b": {"label","sub","at"}}
 - FactCard — states a finding or a general fact ("most…", "studies show…", "the rule is…"): {"kicker": "Fact", "fact": ONE WHOLE SENTENCE (≤14 words), "emphasis", "source": "where it comes from, ONLY if the script says it", "icon" (optional)}
 - YesNoCard — asks a yes/no question and answers it: {"kicker", "question": ONE WHOLE SENTENCE (≤14 words), "answer": "yes"|"no", "at": "@the spoken answer", "line": phrase (optional, the reason)}
@@ -186,10 +204,16 @@ Graphics with the picture in a window — they replace the picture with the foot
 On top of the footage:
 - TitleOverFootage — the video's topic line in its opening, over its first b-roll: {"kicker" (optional), "phrase": phrase (≤10 words), "emphasis"}
 - ChapterLabel — the script counts its parts aloud ("first thing…", "second…"): label EVERY counted part (all or none): {"kicker": "Topic · 1 of 3", "number": 1, "title": "1-3 words"}, "durationSec": 4.5 instead of "end"
+  (the "of 3" is how many parts THIS FILM counts aloud: when it promises more than it counts — "seventeen ideas",
+  with only "number one" and "number two" said — label the parts it counts, and the "of …" is left off)
 - StepLabels — describes 2-4 actions in order: {"steps": [{"text" (≤${STEP_MAX_WORDS} words, his own words as for StepCards), "at": "@words"}]} (a choice
   — "…, or …" — is part of the step before it, never the next step, as for StepCards; the labels sit side by side
   on ONE line, so all of them together hold at most ${stepStripMaxChars(3)} characters with three steps, ${stepStripMaxChars(4)} with four)
-- Checklist — lists 2-4 signs or things to check (each ticked as said) (over b-roll): {"title": "2-4 words", "items": [{"text" (≤5 words), "at": "@words"}]}
+- Checklist — lists 2-4 signs or things to check (each ticked as said) (over b-roll): {"title": "2-4 words", "items": [{"text" (≤5 words), "at": "@words", "say": "the item as said"}]}
+  (a list he says, held to the same rules as a ListWindow: every row is one of what the title names, said one after
+  another in the same run of the sentence. A list ends where the sentence turns at a dash or a colon, even when
+  the voice reads it as a comma: "the trouble is a worn belt, a loose pulley, and a dry bearing — an hour of work
+  and a ten-dollar part" ticks three troubles; the words after the dash are the fix and its cost, never more troubles)
 - CrossedList — dismisses 2-3 things ("not the bowl, not the house"), optionally then names the real one (over b-roll): {"items": [{"text" (≤3 words), "icon" (optional), "at": "@words", "keep": true only for the real one}]}
 - WarningLabel — names a danger or a mistake to avoid, in words that SAY it: read alone under its "WARNING"
   header, the line itself says what not to do or what goes wrong ("never", "don't", "not", "avoid", "too…",
@@ -212,7 +236,11 @@ On top of the footage:
 - BigNumberOverlay — says a number that matters while the picture matters too (over b-roll): same props as BigNumber
 - DimCaption — a striking line over b-roll, one short sentence seen at a glance — never two in a row: {"phrase": phrase (≤10 words), "emphasis"}
 - ArrowCaption — a line pointing at something in the picture ("this one", "that disc", "right here") (over b-roll): {"phrase": phrase (≤10 words), "emphasis"}
-- MythStamp — says a myth over footage (no correction card needed): {"label": "Myth", "at": "@the myth's key words", "phrase": phrase (optional, ≤10 words)}
+- MythStamp — states a belief the narrator calls FALSE, over footage (no correction card needed): {"label": "Myth", "at": "@the belief's key words", "phrase": phrase (REQUIRED, ≤10 words)}
+  (the "phrase" is the BELIEF ITSELF as he says it — "Most people think the paint is dry", "Bats are blind" —
+  so the stamp says what the myth is. Never the host's own true statement about a claim — "The title says…",
+  "I called it…" — and never a claim he only softens ("that's a bit strong"): stamped, those call the film's own
+  words a myth. He calls it false nearby — "it's neither", "that's not true", "a myth", "never")
 - Quote — the host's OWN advice or saying, in one memorable line (over b-roll): {"quote": ONE WHOLE SENTENCE (≤16 words), "author": "the host's name", "emphasis"}.
   It is signed with the host's name, so it is never words the script gives someone ELSE to say: a line
   the viewer is told to say or ask ("Just ask: Could I get that in writing, please?"), a request to a
@@ -273,6 +301,102 @@ const mmss = (s: number) => `${Math.floor(s / 60)}:${(s % 60).toFixed(1).padStar
 const splitKind = (s: LayoutScene) => (s.hostPanel && s.hostPanel.x > 0 ? "SPLIT (host right, picture left)" : "SPLIT (host left, picture right)");
 const kindOf = (s: LayoutScene) => (s.cta ? "CTA" : s.split ? splitKind(s) : s.hostPresent ? "HOST" : "B-ROLL");
 
+/* ───────────── The script's spelling ───────────── */
+
+/** A word as written: letters, with an apostrophe inside ("robin’s"). Numbers are never respelled. */
+const WRITTEN_WORD = /[A-Za-z]+(?:['’][A-Za-z]+)*/g;
+/** A written word as the transcript's tokens have it (`tokens`): lower case, a straight apostrophe. */
+const spellingKey = (w: string) => w.toLowerCase().replace(/[’‘]/g, "'");
+
+/** The script's words, each by its key: the first spelling as written, or one written as a NAME
+ * (a capital where no sentence starts), which keeps its capital. Pure. */
+function scriptSpellings(script: string): Map<string, { form: string; name: boolean }> {
+  const out = new Map<string, { form: string; name: boolean }>();
+  for (const m of Array.from(script.matchAll(WRITTEN_WORD))) {
+    const before = script.slice(0, m.index).trimEnd();
+    const name = /^[A-Z]/.test(m[0]) && !!before && !/[.?!:]["”’')]*$/.test(before);
+    const key = spellingKey(m[0]);
+    const had = out.get(key);
+    if (!had || (name && !had.name)) out.set(key, { form: m[0], name });
+  }
+  return out;
+}
+
+/** How many single-letter edits apart two keys are (at most 4 is looked for). Pure. */
+const editsApart = (a: string, b: string) => [0, 1, 2, 3, 4].find(n => withinEdits(a, b, n)) ?? Infinity;
+
+/** The script's word with the shown word's case: all capitals, a first capital, or lower case — a name
+ * keeps the script's capital; the shown word's apostrophe style is kept. */
+function asShown(shown: string, script: { form: string; name: boolean }): string {
+  const apostrophe = /['’]/.exec(shown)?.[0];
+  const form = apostrophe ? script.form.replace(/['’]/g, apostrophe) : script.form;
+  if (shown.length > 1 && shown === shown.toUpperCase()) return form.toUpperCase();
+  if (/^[A-Z]/.test(shown)) return form.charAt(0).toUpperCase() + form.slice(1);
+  return script.name ? form : form.toLowerCase();
+}
+
+/**
+ * A SHOWN LINE IN THE SCRIPT'S SPELLING. The resolver times a graphic on the TRANSCRIPT, and the planner
+ * copies its words from what it is shown and what the checks say, so a word the transcriber spelled its
+ * own way could reach the screen: Walter's job 411 (1:47) put "migratorious" — the transcript's — on the
+ * term card, while the script, the real name and the field guide in the card's own window all read
+ * "migratorius". A word on screen is put back in the script's spelling when:
+ * - it is HEARD while the graphic is up (`heard`, the transcript's tokens): the transcript's spelling;
+ * - the script around it never writes it that way; and
+ * - the script there writes a word the resolver takes for it (`sameWord`: a close spelling, an
+ *   apostrophe, a plural): the closest one, and the only one that close.
+ * So a word the script itself says, a word nobody said, a short word (under four letters) and a number
+ * never change, and every changed word still matches what is heard. Pure.
+ */
+export function inScriptSpelling(text: string, script: string, heard: Set<string>): string {
+  if (!script.trim() || !heard.size) return text;
+  const spellings = scriptSpellings(script);
+  return text.replace(WRITTEN_WORD, shown => {
+    const key = spellingKey(shown);
+    if (key.replace(/'/g, "").length < 4 || spellings.has(key) || !heard.has(key)) return shown;
+    let best: { form: string; name: boolean } | undefined;
+    let fewest = Infinity;
+    let tie = false;
+    for (const [k, written] of Array.from(spellings)) {
+      if (!sameWord(key, k)) continue;
+      const edits = editsApart(key, k);
+      if (edits < fewest) [best, fewest, tie] = [written, edits, false];
+      else if (edits === fewest) tie = true;
+    }
+    return best && !tie ? asShown(shown, best) : shown;
+  });
+}
+
+/** The props a graphic SHOWS as words (registry): its lines, labels, terms and accent words. Times,
+ * "at"/"say" anchors, icons and placement are never respelled. */
+const SHOWN_TEXT = new Set(["kicker", "headline", "phrase", "myth", "truth", "title", "sub", "label", "text", "fact", "question", "line", "meaning", "quote", "term", "emphasis", "value", "unit", "display", "source"]);
+
+/**
+ * Every word a graphic shows in the script's spelling (`inScriptSpelling`), in place: the script around
+ * where it resolved (`at`, the scenes it is up over and one either side) against the words heard while
+ * it is up (a second either side). Works on a planned cue and on a resolved one alike — only shown
+ * words change, one word for one word, so every time stays where it was. Returns what changed. Pure
+ * apart from mending `cue.props`.
+ */
+export function respellCue(cue: { props: Record<string, unknown> }, at: { start: number; end: number }, film: FilmLayout, words: Word[]): string[] {
+  const script = scriptAround(film, at.start, at.end);
+  const heard = new Set(words.filter(w => w.end >= at.start - 1 && w.start <= at.end + 1).flatMap(w => tokens(w.text)));
+  const changed: string[] = [];
+  const walk = (v: unknown, key: string): unknown => {
+    if (typeof v === "string") {
+      if (!SHOWN_TEXT.has(key)) return v;
+      const next = inScriptSpelling(v, script, heard);
+      if (next !== v) changed.push(`"${v}" → "${next}"`);
+      return next;
+    }
+    if (Array.isArray(v)) v.forEach((x, i) => (v[i] = walk(x, key)));
+    else if (v && typeof v === "object") for (const [k, x] of Object.entries(v)) (v as Record<string, unknown>)[k] = walk(x, k);
+    return v;
+  };
+  walk(cue.props, "");
+  return changed;
+}
+
 /**
  * What is said over each scene (one line per `film.scenes` entry), as the FILM'S OWN SOUND has it:
  * the transcript's words whose middle falls inside the scene's span — the clock the resolver times a
@@ -284,7 +408,9 @@ const kindOf = (s: LayoutScene) => (s.cta ? "CTA" : s.split ? splitKind(s) : s.h
  * them (a number read as digits, a compound split, one misheard word), the script's own text is
  * kept: the same words on the same clock, spelled as written — the planner copies a line onto the
  * screen, and Hank's "out of square" heard as "out a square" (job 398) must not be shown that way.
- * A span with no words heard keeps its script text. Pure.
+ * Where the heard words are read instead, each word the transcriber spelled its own way takes the
+ * script's spelling (`inScriptSpelling`, the scene's script and one either side): the planner copies
+ * these words onto the screen. A span with no words heard keeps its script text. Pure.
  */
 export function wordsSaidOver(film: FilmLayout, words: Word[]): string[] {
   const heard: Word[][] = film.scenes.map(() => []);
@@ -299,7 +425,11 @@ export function wordsSaidOver(film: FilmLayout, words: Word[]): string[] {
     if (!index.length) return script;
     const hits = script ? findVerbatim(index, script, 0) : null;
     if (hits && hits[0] === 0 && index[hits[hits.length - 1]].word === index[index.length - 1].word) return script;
-    return heard[k].map(w => w.text.trim()).join(" ");
+    const near = film.scenes
+      .slice(Math.max(0, k - 1), k + 2)
+      .map(x => (x.scriptText ?? "").trim())
+      .join(" ");
+    return inScriptSpelling(heard[k].map(w => w.text.trim()).join(" "), near, new Set(index.map(t => t.tok)));
   });
 }
 
@@ -611,6 +741,311 @@ export function tidyNumbers(node: unknown): void {
   for (const v of Object.values(o)) tidyNumbers(v);
 }
 
+/* ───────────── A card says what the voice says ───────────── */
+// Round 14, the verification films: four cards drew something the voice never said. Each check reads
+// the words AS SAID around where the cue resolved, and names what is wrong so the one repair round can
+// mend it (the catalogue states each rule up front too).
+
+const ENDS_A_SENTENCE = /[.?!]["”')]*$/;
+const ENDS_A_CLAUSE = /[,;:.?!]["”')]*$/;
+/** Words as read here: lower case, straight apostrophes, one space. */
+const plainText = (ws: Word[]) => ws.map(w => w.text.trim().toLowerCase().replace(/[’‘]/g, "'")).join(" ");
+/** The first word of the sentence word `i` is in. */
+function sentenceStart(words: Word[], i: number): number {
+  while (i > 0 && !ENDS_A_SENTENCE.test(words[i - 1].text.trim())) i--;
+  return i;
+}
+/** The last word of the sentence word `i` is in. */
+function sentenceEnd(words: Word[], i: number): number {
+  while (i < words.length - 1 && !ENDS_A_SENTENCE.test(words[i].text.trim())) i++;
+  return i;
+}
+/** The words (positions, first to last) an element is said on, from the word the resolver timed it on
+ * (`sync`, by the start of its name: '.at "' for a cue's own "at", 'before.at "' for a side's,
+ * 'phrase "' for a word-by-word line) and its own words (`said`). Undefined when the cue has no such
+ * element. */
+function elementWords(c: ResolvedCue, words: Word[], index: TokenIndex, element: string, said: string): { first: number; last: number } | undefined {
+  const s = c.sync.find(x => x.element.startsWith(element));
+  const first = s ? words.findIndex(w => w.start === s.wordStart) : -1;
+  if (first < 0) return undefined;
+  const from = index.findIndex(t => t.word === first);
+  const hits = from >= 0 ? findVerbatim(index, said.replace(/^@/, ""), from) : null;
+  return { first, last: hits && index[hits[0]].word === first ? index[hits[hits.length - 1]].word : first };
+}
+
+/** Where a number graphic's value is said, in the tokens of its sentence from a couple of words before
+ * its "at" (job 412's "@hundred" lands on "hundred", and "a hundred" is the number): the tokens (each
+ * with its word), and the value's position and length among them. Undefined when the value is not
+ * found there. */
+function numberSaid(words: Word[], at: number, value: number): { toks: { tok: string; word: number }[]; p: number; n: number } | undefined {
+  const from = Math.max(sentenceStart(words, at), at - 2);
+  const toks: { tok: string; word: number }[] = [];
+  for (let i = from; i <= Math.min(sentenceEnd(words, at), at + 14); i++) for (const tok of tokens(words[i].text)) toks.push({ tok, word: i });
+  const digits = String(value).replace(/\D/g, "");
+  const plain = toks.map(t => t.tok);
+  for (let p = 0; p < toks.length; p++) {
+    if (plain[p] === digits) return { toks, p, n: 1 };
+    const spoken = parseSpokenNumber(plain, p);
+    if (spoken && spoken.value === value) return { toks, p, n: spoken.n };
+  }
+  return undefined;
+}
+
+/**
+ * A ROUND NUMBER SAID TO MEAN "MANY" IS NO STATISTIC. Luca's job 412 (0:20) counted a big number up
+ * 16, 77, 96, 100 and landed on "100 times" under "because she has made this crossing a hundred times
+ * before" — a figure of speech; the script gives no count. A hundred, a thousand, a million or a billion
+ * of TIMES, REASONS, WAYS, THINGS, QUESTIONS, IDEAS, EXCUSES, WORDS or STORIES ("a million little
+ * reasons") says "many", and a million or a billion PIECES ("shattered into a million pieces") — a
+ * hundred or a thousand pieces is a count a maker gives ("I sold a hundred pieces at that fair"). Any of
+ * them as a RATE is a measure ("1,000 words a day", "a hundred times a minute"), and "times" as a ratio
+ * too ("a thousand times stronger", "a hundred times the size"); a round count of anything else ("more
+ * than a hundred years", the same channel's job 411) is a fact. Returns the words as said, or undefined.
+ * Pure.
+ */
+const ROUND_FIGURES = new Set([100, 1000, 1e6, 1e9]);
+const FIGURE_NOUN = /^(?:times|reasons|ways|things|questions|ideas|excuses|words|stories)$/;
+const FIGURE_NOUN_PAST_COUNTING = /^pieces$/;
+const FIGURE_DESCRIBING = /^(?:little|tiny|small|different|other|new|good|great|silly|crazy|possible)$/;
+const A_RATE = /^(?:a|an|per|each|every)$/;
+const TIMES_A_MEASURE =
+  /^(?:as|than|the|more|less|fewer|bigger|smaller|larger|faster|slower|longer|shorter|stronger|weaker|higher|lower|better|worse|cheaper|greater|heavier|lighter|louder|quieter|hotter|colder|harder|softer|deeper|wider|thicker|thinner|older|younger|safer|brighter)$/;
+export function figureOfSpeech(words: Word[], at: number, value: number): string | undefined {
+  if (!ROUND_FIGURES.has(value)) return undefined;
+  const said = numberSaid(words, at, value);
+  if (!said) return undefined;
+  const { toks, p, n } = said;
+  const after = toks.slice(p + n).map(t => t.tok);
+  const k = FIGURE_DESCRIBING.test(after[0] ?? "") ? 1 : 0;
+  const noun = after[k];
+  const next = after[k + 1] ?? "";
+  const many = !!noun && (FIGURE_NOUN.test(noun) || (value >= 1e6 && FIGURE_NOUN_PAST_COUNTING.test(noun)));
+  if (!many || A_RATE.test(next) || (noun === "times" && TIMES_A_MEASURE.test(next))) return undefined;
+  const nounWord = toks[p + n + k].word;
+  return words
+    .slice(toks[p].word, Math.min(nounWord + 2, sentenceEnd(words, nounWord) + 1))
+    .map(w => w.text.trim())
+    .join(" ");
+}
+
+/** A short unit as written, and the words that say it: "%" is "percent", "a.m." is "in the morning". */
+const WRITTEN_UNITS: [RegExp, string[]][] = [
+  [/^%$/, ["percent", "per cent"]],
+  [/^a\.?\s?m\.?$/i, ["am", "a m", "in the morning"]],
+  [/^p\.?\s?m\.?$/i, ["pm", "p m", "in the afternoon", "in the evening", "at night"]],
+  [/^°\s?[cf]?$/i, ["degrees"]],
+  [/^hrs?\.?$/i, ["hours"]],
+  [/^mins?\.?$/i, ["minutes"]],
+  [/^secs?\.?$/i, ["seconds"]],
+  [/^yrs?\.?$/i, ["years"]],
+  [/^lbs?\.?$/i, ["pounds"]],
+  [/^oz\.?$/i, ["ounces"]],
+  [/^ft\.?$/i, ["feet", "foot"]],
+  [/^mph$/i, ["miles per hour", "miles an hour"]],
+];
+/** How far past the number a unit's words may run: "seven OF THE thieves", "nine TIMES out of 10". */
+const UNIT_REACH = 5;
+/** A sign the transcriber writes ON the number stands for words said right after it: "$10" is "ten
+ * dollars", "15%" is "fifteen percent", "40°" is "forty degrees". */
+const SIGNS_SAID: [RegExp, string][] = [
+  [/\$/, "dollars"],
+  [/%/, "percent"],
+  [/°/, "degrees"],
+  [/£/, "pounds"],
+  [/€/, "euros"],
+  [/¢/, "cents"],
+];
+/** Plurals the plain "-s" match (`sameWord`) misses — a unit is often said as a describing word, in
+ * the singular: "a six-foot fence" is 6 "feet", "a two-inch overhang" 2 "inches". */
+const IRREGULAR_PLURALS: Record<string, string> = { feet: "foot", teeth: "tooth", people: "person", children: "child", men: "man", women: "woman", geese: "goose", mice: "mouse" };
+const sameUnitWord = (a: string, b: string): boolean => {
+  if (sameWord(a, b) || a === `${b}es` || b === `${a}es`) return true;
+  return (IRREGULAR_PLURALS[a] ?? a) === (IRREGULAR_PLURALS[b] ?? b);
+};
+
+/**
+ * THE UNIT IS SAID RIGHT AFTER THE NUMBER. Sam's job 414 (0:31) ended a number card "held the other /
+ * 24 skills" for "held the other 24 together": "skills" was never said after the number (only "the
+ * last skill" earlier in the sentence), and "together" never shown — on screen the last skill WAS 24
+ * skills. A unit's words are said in order within UNIT_REACH words after the number, in its own
+ * sentence: "17 summers left", "seven of the thieves", "nine times out of 10", "Three piles." A short
+ * unit as written is said in words ("15%" heard as "15%" or "percent", "2 a.m." as "two in the
+ * morning"), a sign written on the number is said after it ("$10" is "ten dollars", `SIGNS_SAID`), and a
+ * unit said in the singular as a describing word is the same unit ("a six-foot fence", `sameUnitWord`).
+ * Returns what is said after the number when the unit is not, else undefined — also when the number
+ * itself cannot be found (the number check names that). Pure.
+ */
+export function unitNotSaid(unit: unknown, words: Word[], at: number, value: number): string | undefined {
+  if (typeof unit !== "string" || !unit.trim()) return undefined;
+  const said = numberSaid(words, at, value);
+  if (!said) return undefined;
+  const { toks, p, n } = said;
+  const numberWord = toks[p + n - 1].word;
+  const written = WRITTEN_UNITS.find(([re]) => re.test(unit.trim()));
+  // "15%." is one word, and its "%" is no token: the sign is said with the number, right after it.
+  const signs = SIGNS_SAID.filter(([re]) => re.test(words[numberWord].text)).map(([, w]) => w);
+  const after = [...signs, ...toks.slice(p + n).map(t => t.tok)];
+  const forms = [tokens(unit), ...(written?.[1] ?? []).map(f => tokens(f))].filter(f => f.length);
+  const inOrder = (want: string[]) => {
+    let j = 0;
+    for (const w of want) {
+      while (j < Math.min(after.length, UNIT_REACH) && !sameUnitWord(after[j], w)) j++;
+      if (j >= Math.min(after.length, UNIT_REACH)) return false;
+      j++;
+    }
+    return true;
+  };
+  if (forms.some(inOrder)) return undefined;
+  return words
+    .slice(toks[p].word, Math.min(numberWord + 4, sentenceEnd(words, numberWord)) + 1)
+    .map(w => w.text.trim())
+    .join(" ");
+}
+
+/**
+ * A BEFORE AND AFTER IS A CHANGE THE VOICE SAYS. The card draws an arrow from one side into the other,
+ * so the two must be two times or two states. Walter's job 411 (2:24) drew "Hardly sings → Soft
+ * clucking" under "IN WINTER" for "through the winter, a robin hardly sings at all. Mostly you'll hear
+ * a low, soft clucking" — one season's behaviour said two ways, as if the bird turned from one into the
+ * other. The sides' own words, the few words leading into the first (within its sentence) and the rest
+ * of the second's clause must say the change, the way round 11 asks the words between two values
+ * before NumberLabel draws "vs":
+ * - a time set against another, or a change said as one ("now", "used to", "no longer", "became",
+ *   "instead", "replaced", "what you want is", an old way the viewer is told to "stop" or "quit"…) —
+ *   job 400's clock "that was background noise at 30 is now the loudest thing in the room";
+ * - a past state on the first side and a present one on the second ("was … is");
+ * - or two different seasons, months or times of day.
+ * Pure: the words, and where each side's "at" words are said (first and last word, film order).
+ */
+const CHANGE_SAID = new RegExp(
+  [
+    "\\b(?:now|nowadays|today|these days|anymore|any more|no longer|used to|back then|back when|at first|ago|once|later|after|afterwards?|before|until|till|since|then|eventually|finally|by the time|from then on)\\b",
+    "\\b(?:bec[oa]me|becomes|becoming|turn(?:s|ed|ing)? (?:into|to)|grew into|grow(?:s|n)? into|chang(?:e|es|ed|ing)|(?:went|goes|gone|going|got) from|replac(?:e|es|ed|ing|ement)|swap(?:s|ped|ping)?|switch(?:es|ed|ing)?|upgrad(?:e|es|ed|ing)|instead|rather than|trad(?:e|es|ed|ing) (?:in|up|for))\\b",
+    "\\bwhat you (?:want|need)\\b",
+    // An old way replaced by a new one: "Stop rinsing it with bleach; use vinegar."
+    "\\b(?:stop(?:s|ped|ping)?|quit(?:s|ting)?|ditch(?:es|ed|ing)?|no more)\\b",
+  ].join("|")
+);
+const PAST_STATE = /\b(?:was|were|had|used)\b/;
+const PRESENT_STATE = /\b(?:is|are|has|have)\b|'s\b|'re\b/;
+// "May", "March" and "fall" are a time only after a word that names one ("in May", "this fall",
+// "every fall"): "it may barely chirp" or "the leaves fall" beside "in winter" is no second season.
+const TIME_NAMES =
+  /\b(spring|summer|autumn|winter|morning|afternoon|evening|night|dawn|dusk|january|february|april|june|july|august|september|october|november|december)\b|\b(?:in|by|until|till|since|from|through|this|last|next|every|each|early|late|mid|the|that|of)\s+(fall|march|may)\b/g;
+export function changeSaid(words: Word[], a: { first: number; last: number }, b: { first: number; last: number }): boolean {
+  const [one, two] = a.first <= b.first ? [a, b] : [b, a];
+  const from = Math.max(sentenceStart(words, one.first), one.first - 3);
+  let to = Math.max(one.last, two.last);
+  for (let k = 0; k < 8 && to < words.length - 1 && !ENDS_A_CLAUSE.test(words[to].text.trim()); k++) to++;
+  const all = plainText(words.slice(from, to + 1));
+  if (CHANGE_SAID.test(all)) return true;
+  if (PAST_STATE.test(plainText(words.slice(from, one.last + 1))) && PRESENT_STATE.test(plainText(words.slice(one.last + 1, to + 1)))) return true;
+  const seasons = new Set(Array.from(all.matchAll(TIME_NAMES), m => (m[1] === "autumn" ? "fall" : (m[1] ?? m[2]))));
+  return seasons.size >= 2;
+}
+
+/**
+ * A MYTH STAMP STAMPS A BELIEF THE VOICE CALLS FALSE. Three ways a stamp went wrong:
+ * - with no "phrase" it says MYTH over a picture and nothing else: Luca's job 412 (0:33) stamped
+ *   "call it revenge" with no words, up only 1.2 s; Walter's job 411's planner, refused a lower-case
+ *   phrase, simply dropped it. The phrase is REQUIRED — it is the belief;
+ * - the host's own true statement about a claim: Sam's job 414 (0:47) stamped "The title says lost" —
+ *   the title does say it, so the card called the film's own title a myth. A phrase that opens on the
+ *   film's own words ("the title says", "this video", "my book") or the host saying or naming something
+ *   ("I said", "we call it") is never the belief;
+ * - a claim the voice never calls false: the same line goes on "which is too strong" — a softening, not
+ *   a myth. Around the phrase (the sentence before it, its own, three after) the narrator must name it
+ *   a belief or false ("myth", "not true", "actually", "everybody figures", "people call"…), or say a
+ *   negation outside the phrase's own words ("it's neither", "Life is not short." — the job 401 stamp
+ *   on "Everyone complains that life is too short", three sentences before it).
+ * Returns why, or undefined. Pure: the cue as planned, as resolved, and the words.
+ */
+const OPENERS_OF_A_LINE = /^(?:(?:so|and|but|now|well|okay|see)[\s,]+)*/;
+// "This video", "my book" are the film's own; after a bare "the" only when it then says something —
+// "the title says", "the video is" — since "the video game", "the headline rate" or "the channel lock"
+// may well be the belief.
+const FILMS_OWN_WORDS = new RegExp(
+  "^(?:(?:this|my|our)\\s+(?:(?:video|channel|book)'s\\s+)?(?:title|video|channel|episode|script|thumbnail|headline|book|list)\\b" +
+    "|the\\s+(?:(?:video|channel|book)'s\\s+)?(?:title|video|channel|episode|script|thumbnail|headline)\\s+(?:says|said|reads|read|calls|called|is|was|promises|promised|claims|claimed|names|named|asks|asked)\\b)"
+);
+const HOST_SAYS = /^(?:i|we)(?:\s+[a-z']+){0,2}\s+(?:say|says|said|call|calls|called|name|named|titled|wrote|write|promised|mean|meant)\b/;
+const CALLED_FALSE = new RegExp(
+  [
+    "\\b(?:myths?|misconceptions?|misunderst(?:ood|and|anding)|legends?|folklore|old wives|rumou?rs?|superstitions?)\\b",
+    "\\b(?:untrue|false|wrong|nonsense|mistaken|bogus|baloney|hogwash)\\b",
+    "\\b(?:turns? out|in fact|actually|the truth|truth is|the reality|honest)\\b",
+    "\\b(?:people|everyone|everybody|folks|most of us|most|many|they|you'd|you might|we've been|we were|we all)(?:\\s+[a-z']+){0,2}\\s+(?:think|thinks|thought|believe|believes|believed|figure|figures|figured|assume|assumes|assumed|say|says|said|call|calls|called|claim|claims|swear|swears|insist|insists|complain|complains|reckon|reckons|told|heard|expect|expects)\\b",
+  ].join("|")
+);
+const NEGATION = /\b(?:not|no|never|nobody|nothing|none|neither|nor|nowhere)\b|n't\b/;
+export function mythStampProblem(spec: CueSpec, c: ResolvedCue, words: Word[]): string | undefined {
+  const phrase = (spec.props?.phrase as { text?: unknown } | undefined)?.text;
+  if (typeof phrase !== "string" || !phrase.trim())
+    return (
+      `MYTH is stamped with no "phrase", so it never says what the myth is. Give it its "phrase": the BELIEF itself, ` +
+      `in his words from where its clause starts, with a capital letter ("Most people think the paint is dry"), or drop it`
+    );
+  const line = phrase.trim().toLowerCase().replace(/[’‘]/g, "'").replace(OPENERS_OF_A_LINE, "");
+  if (FILMS_OWN_WORDS.test(line) || HOST_SAYS.test(line))
+    return (
+      `"${phrase}" is the host's own true statement about a claim, not the belief — stamped MYTH, it calls the film's own ` +
+      `words a myth. Stamp the belief itself, in his words, only where he calls it false; otherwise show the line another way, or drop it`
+    );
+  const index = indexWords(words);
+  const at = elementWords(c, words, index, 'phrase "', phrase);
+  if (!at) return undefined;
+  const from = sentenceStart(words, Math.max(0, sentenceStart(words, at.first) - 1));
+  let to = sentenceEnd(words, at.last);
+  for (let k = 0; k < 3 && to < words.length - 1; k++) to = sentenceEnd(words, to + 1);
+  if (CALLED_FALSE.test(plainText(words.slice(from, to + 1)))) return undefined;
+  if (NEGATION.test(plainText(words.slice(from, at.first))) || NEGATION.test(plainText(words.slice(at.last + 1, to + 1)))) return undefined;
+  const next = words.slice(at.last + 1, Math.min(to + 1, at.last + 14)).map(w => w.text.trim()).join(" ");
+  return (
+    `"${phrase}" is stamped MYTH, but nothing he says around it calls it false ("…${next}…") — a claim he only softens ` +
+    `or goes on from is no myth. Show the line another way (a caption), or drop it`
+  );
+}
+
+/** Why a BeforeAfter's two sides are not a change the voice says (`changeSaid`), or undefined. */
+export function beforeAfterProblem(spec: CueSpec, c: ResolvedCue, words: Word[]): string | undefined {
+  const side = (k: "before" | "after") => spec.props?.[k] as { at?: unknown; label?: unknown } | undefined;
+  const [before, after] = [side("before"), side("after")];
+  if (typeof before?.at !== "string" || typeof after?.at !== "string") return undefined;
+  const index = indexWords(words);
+  const a = elementWords(c, words, index, 'before.at "', before.at);
+  const b = elementWords(c, words, index, 'after.at "', after.at);
+  if (!a || !b || changeSaid(words, a, b)) return undefined;
+  const lo = Math.min(a.first, b.first);
+  const said = words.slice(lo, Math.min(words.length, Math.max(a.last, b.last) + 1)).map(w => w.text.trim()).join(" ");
+  return (
+    `"${String(before.label ?? "")}" → "${String(after.label ?? "")}" is no before and after: "${said}" says no change between two times or ` +
+    `states (no "now", "used to", "became", "instead", no then against now) — the arrow says one turned into the other. ` +
+    `Two sides of one state are shown another way (a caption), or not at all`
+  );
+}
+
+/** Why a number graphic's number or unit is not what the voice says (`figureOfSpeech`, `unitNotSaid`),
+ * or undefined. Read where its "at" resolved. */
+export function numberCardProblem(spec: CueSpec, c: ResolvedCue, words: Word[]): string | undefined {
+  const value = spec.props?.value;
+  if (typeof value !== "number" || typeof spec.props?.at !== "string") return undefined;
+  const at = elementWords(c, words, indexWords(words), '.at "', spec.props.at);
+  if (!at) return undefined;
+  const figure = figureOfSpeech(words, at.first, value);
+  if (figure)
+    return (
+      `"${figure}" is a figure of speech — the number means "many" here, not a count he gives. Counted up on a ` +
+      `number graphic it reads as a statistic: show the line as a caption (DimCaption), or drop it`
+    );
+  const heard = unitNotSaid(spec.props.unit, words, at.first, value);
+  if (heard)
+    return (
+      `its unit "${String(spec.props.unit)}" is not what he says after the number — he says "${heard}". The unit is the ` +
+      `word or two he says RIGHT AFTER the number, or none: leave "unit" out, or use those words`
+    );
+  return undefined;
+}
+
 /* ───────────── Script moments and spoken lists ───────────── */
 
 /** Words a sentence holds when it is a moment a template is made for. */
@@ -623,25 +1058,29 @@ const MOMENT = new RegExp(
 
 /**
  * Sentences with no graphic over them that hold a moment (`MOMENT`), outside the call to action, in
- * film order — what the fill round asks about. By the script, never by the clock. Pure.
+ * film order — what the fill round asks about. By the script, never by the clock: each sentence is
+ * the words heard in the script's spelling (`inScriptSpelling`), as the planner copies them onto the
+ * screen (job 411's fill round was offered the transcript's "migratorious"). Pure.
  */
 export function uncoveredMoments(placed: ResolvedCue[], words: Word[], film: FilmLayout): { from: number; to: number; text: string }[] {
   const cta = film.scenes.filter(s => s.cta).map(s => [s.narrationStartSec, s.narrationEndSec] as const);
-  const sentences: { from: number; to: number; text: string }[] = [];
+  const sentences: { from: number; to: number; text: string; heard: Set<string> }[] = [];
   let cur: Word[] = [];
   for (const w of words) {
     cur.push(w);
     if (/[.?!]["”')]*$/.test(w.text.trim())) {
-      sentences.push({ from: cur[0].start, to: cur[cur.length - 1].end, text: cur.map(x => x.text.trim()).join(" ") });
+      sentences.push({ from: cur[0].start, to: cur[cur.length - 1].end, text: cur.map(x => x.text.trim()).join(" "), heard: new Set(cur.flatMap(x => tokens(x.text))) });
       cur = [];
     }
   }
-  return sentences.filter(s => {
-    if (s.text.split(" ").length < 4 || !MOMENT.test(s.text)) return false;
-    if (cta.some(([a, b]) => s.from < b && s.to > a)) return false;
-    const len = s.to - s.from;
-    return !placed.some(c => Math.min(c.end, s.to) - Math.max(c.start, s.from) > len * 0.4);
-  });
+  return sentences
+    .filter(s => {
+      if (s.text.split(" ").length < 4 || !MOMENT.test(s.text)) return false;
+      if (cta.some(([a, b]) => s.from < b && s.to > a)) return false;
+      const len = s.to - s.from;
+      return !placed.some(c => Math.min(c.end, s.to) - Math.max(c.start, s.from) > len * 0.4);
+    })
+    .map(s => ({ from: s.from, to: s.to, text: inScriptSpelling(s.text, scriptAround(film, s.from, s.to), s.heard) }));
 }
 
 /** A word as compared: lower case, no punctuation ("throne," is "throne", "Rome’s" is "rome's"). */
@@ -1031,12 +1470,61 @@ export function fromAFoundList(rows: string[], lists: { items: string[] }[]): bo
   });
 }
 
-/** A list window's rows as said: each item's "say", else its shown text. */
+/** A list graphic's rows as said: each item's "say", else its shown text. */
 function listRows(items: unknown): string[] {
   if (!Array.isArray(items)) return [];
   return items.map(it => {
     const o = (it ?? {}) as { say?: unknown; text?: unknown };
     return String(typeof o.say === "string" && o.say.trim() ? o.say : (o.text ?? "")).trim();
+  });
+}
+
+/** The script's words with where each one is written: cut at white space and at a dash, which is
+ * no word, so a word never carries the dash beside it into a row ("carburetor—an"). */
+function writtenWords(script: string): Word[] {
+  return Array.from(script.matchAll(/[^\s—–]+/g), m => ({ text: m[0], start: m.index!, end: m.index! + m[0].length }));
+}
+
+/** A sign the transcriber writes on a number, as the words it stands for (`SIGNS_SAID`): "a $2
+ * gasket" is "a 2 dollars gasket", which the resolver's matcher finds in the script's "a two-dollar
+ * gasket" (a number in words, a plural, a compound split). */
+function signsAsWords(row: string): string {
+  const word = (sign: string) => SIGNS_SAID.find(([re]) => re.test(sign))?.[1] ?? "";
+  return row.replace(/([$£€])\s?(\d[\d,.]*)|(\d[\d,.]*)\s?([%°¢])/g, (_, pre?: string, a?: string, b?: string, post?: string) =>
+    pre ? `${a} ${word(pre)}` : `${b} ${word(post ?? "")}`
+  );
+}
+
+/** The punctuation at a row's two ends, which is no part of the row. Any letter is a letter: an
+ * A-Z class read "café," as "caf". (Built with the constructor: the "u" flag in a literal needs an
+ * ES6 target.) */
+const ROW_ENDS = new RegExp("^[^\\p{L}\\p{N}$£€]+|[^\\p{L}\\p{N}%°¢]+$", "gu");
+
+/**
+ * A LIST GRAPHIC'S ROWS IN THE SCRIPT'S OWN WORDS, so the list rules read them at the script's own
+ * punctuation. The rows are the HEARD words, and the voice may read the script's punctuation another
+ * way: Gary's job 413 (2:06) heard "the crime is stale fuel and a gummed up carburetor, an afternoon
+ * of cleaning, and a $2 gasket" where the script writes "…a gummed-up carburetor — an afternoon of
+ * cleaning and a two-dollar gasket". Matched word for word, "a gummed up carburetor" and "a $2 gasket"
+ * were nowhere in the script, so the rules — which refuse nothing they cannot find — passed a
+ * checklist that ticked the fix as two more crimes. Each row is looked for in `script`, in order, by
+ * the resolver's own matcher (`findVerbatim`: a number in words or digits, a compound split, one
+ * misheard word), as heard and then with a sign said as its word ("$2" is "2 dollars"), and is
+ * replaced by the whole written words it was found on, without the punctuation at its ends. A row
+ * not found stays as heard. Pure.
+ */
+export function rowsAsWritten(rows: string[], script: string): string[] {
+  const written = writtenWords(script);
+  const index = indexWords(written);
+  let from = 0;
+  return rows.map(row => {
+    const hits = findVerbatim(index, row, from) ?? findVerbatim(index, signsAsWords(row), from);
+    if (!hits) return row;
+    from = hits[hits.length - 1] + 1;
+    const a = written[index[hits[0]].word];
+    const b = written[index[hits[hits.length - 1]].word];
+    const text = script.slice(a.start, b.end).replace(ROW_ENDS, "");
+    return text || row;
   });
 }
 
@@ -1049,6 +1537,73 @@ function scriptAround(film: FilmLayout, a: number, b: number): string {
     .slice(Math.max(0, over[0] - 1), over[over.length - 1] + 2)
     .map(s => (s.scriptText ?? "").trim())
     .join(" ");
+}
+
+/** An ordinal word as a count said aloud ("Second thing.", "And the third one…"). */
+const ORDINAL_COUNT: Record<string, number> = {
+  first: 1, second: 2, third: 3, fourth: 4, fifth: 5, sixth: 6, seventh: 7, eighth: 8, ninth: 9, tenth: 10,
+  eleventh: 11, twelfth: 12, thirteenth: 13, fourteenth: 14, fifteenth: 15, sixteenth: 16, seventeenth: 17,
+  eighteenth: 18, nineteenth: 19, twentieth: 20,
+};
+/** Words a sentence may open on before its ordinal count: "And the third…", "Now, second:". */
+const COUNT_OPENERS = new Set(["and", "so", "now", "then", "okay", "ok", "alright", "next", "the", "my", "our", "your"]);
+/** A word that ends a sentence (or turns it, as "Now — number one" does), so the next one opens. */
+const ENDS_SENTENCE = /[.!?:—–]["”’')\]]*$/;
+
+/**
+ * THE PARTS A FILM COUNTS ALOUD, outside its call to action: every "number N" ("Number one: knife
+ * and tool sharpening", "meet number two"), and every ordinal a sentence opens on ("Second thing.",
+ * "And the third one…"; "a second bag" mid-sentence is no count). A count said in the call to action
+ * is a pointer to the film, not a part of it: Gary's job 413 pitched the book with "grab it now or
+ * after number seventeen" and "number four is hiding on every window" — parts this excerpt never
+ * reaches. Pure.
+ */
+export function countsSaidAloud(words: Word[], film: FilmLayout): Set<number> {
+  const out = new Set<number>();
+  const inCta = (w: Word) => {
+    const mid = (w.start + w.end) / 2;
+    return film.scenes.some(s => s.cta && mid >= s.narrationStartSec && mid < s.narrationEndSec);
+  };
+  /** The tokens of the words outside the call to action, each with how many came before it in its sentence. */
+  const toks: { tok: string; inSentence: number }[] = [];
+  let inSentence = 0;
+  words.forEach((w, i) => {
+    if (i > 0 && ENDS_SENTENCE.test(words[i - 1].text.trim())) inSentence = 0;
+    if (inCta(w)) {
+      toks.push({ tok: "", inSentence: Infinity });
+      return;
+    }
+    for (const tok of tokens(w.text)) toks.push({ tok, inSentence: inSentence++ });
+  });
+  toks.forEach((t, i) => {
+    if (t.tok === "number") {
+      const next = toks[i + 1]?.tok ?? "";
+      const n = /^\d+$/.test(next) ? Number(next) : parseSpokenNumber(toks.slice(i + 1, i + 9).map(x => x.tok), 0)?.value;
+      if (n && n > 0) out.add(n);
+    }
+    const ordinal = ORDINAL_COUNT[t.tok];
+    if (ordinal && toks.slice(i - t.inSentence, i).every(x => COUNT_OPENERS.has(x.tok))) out.add(ordinal);
+  });
+  return out;
+}
+
+/** The "of N" a chapter kicker ends its count on: its last one ("Out of 10 tips · 1 of 10" is the
+ * second). */
+const lastPromise = (kicker: string) => {
+  const all = Array.from(kicker.matchAll(/\s+of\s+(\d+)\b/gi));
+  return all[all.length - 1];
+};
+
+/** The total a chapter label's kicker promises ("Garage businesses · 1 of 17" → 17), else 0. */
+const kickerTotal = (spec: CueSpec) => Number(lastPromise(String(spec.props?.kicker ?? ""))?.[1] ?? 0);
+
+/**
+ * A chapter kicker without the total it promises: "Garage businesses · 1 of 17" → "Garage businesses ·
+ * 1". Only the "of N" goes; the part's own number stays. Pure.
+ */
+export function withoutPromisedTotal(kicker: string): string {
+  const m = lastPromise(kicker);
+  return m ? (kicker.slice(0, m.index) + kicker.slice(m.index! + m[0].length)).trim() : kicker;
 }
 
 /**
@@ -1337,6 +1892,8 @@ export async function planGraphics(input: PlanInput): Promise<PlanResult> {
   // still reads every list, so a list said after a mid-roll CTA is located after it, not on an earlier
   // copy of its words.
   const offered = listsWhereGraphicsGo(words, film, lists);
+  /** The parts the film counts aloud, which a chapter series must label (`countsSaidAloud`). */
+  const countedAloud = countsSaidAloud(words, film);
 
   const validate = async (newSpecs: CueSpec[], final: boolean) => {
     const problems: PlanProblem[] = [];
@@ -1356,7 +1913,28 @@ export async function planGraphics(input: PlanInput): Promise<PlanResult> {
       placed.push({ spec, t: 0, kept: true });
     }
     const resolveAll = () => resolveCues(placed.map(p => p.spec), words, opts);
+    /** A cue's shown words in the script's spelling (`respellCue`, job 411's "migratorious"), read
+     * where it resolved, and the sheet resolved again — or undefined when nothing changed. A sheet that
+     * would no longer resolve keeps the words as they were (the script's spelling is the same word to
+     * the resolver, so it should never happen). */
+    const respelled = (spec: CueSpec, at: ResolvedCue): ResolvedCue[] | undefined => {
+      const was = structuredClone(spec.props);
+      if (!respellCue(spec, at, film, words).length) return undefined;
+      try {
+        return resolveAll();
+      } catch {
+        spec.props = was;
+        return undefined;
+      }
+    };
     let resolved: ResolvedCue[] = placed.length ? resolveAll() : [];
+    // An approved graphic is SHOWN in the script's spelling too: a word changes, never a time, and
+    // nothing approved is dropped for it.
+    for (const p of placed) {
+      const at = resolved.find(r => r.id === p.spec.id);
+      const fixed = at && respelled(p.spec, at);
+      if (fixed) resolved = fixed;
+    }
     for (const r of resolved) placed.find(p => p.spec.id === r.id)!.t = r.start;
     for (const p of checkRules(resolved, film)) problems.push({ cue: `[kept] ${p.cue}`, problem: p.problem });
 
@@ -1466,6 +2044,14 @@ export async function planGraphics(input: PlanInput): Promise<PlanResult> {
       }
       let mine = next.find(r => r.id === spec.id)!;
       startsAt.set(spec.id, startWordNear(spec, mine.start));
+      // NOTHING ON SCREEN IS THE TRANSCRIPT'S SPELLING OF A SCRIPT WORD (`respellCue`): job 411's term
+      // card read "migratorious" beside a field guide printing the script's "migratorius". Before every
+      // check below, so each reads the words as they will be drawn.
+      const fixed = respelled(spec, mine);
+      if (fixed) {
+        next = fixed;
+        mine = next.find(r => r.id === spec.id)!;
+      }
       // A QUOTE is signed with the host's name, so it must be the host's own words — job 399 signed
       // "Could I keep the rest of the can, please?", the line the host tells the viewer to say after
       // "speak up." (`notTheHostsWords`). Read where it resolved: the words leading into it, and
@@ -1489,23 +2075,48 @@ export async function planGraphics(input: PlanInput): Promise<PlanResult> {
           continue;
         }
       }
+      // A CARD SAYS WHAT THE VOICE SAYS, read where it resolved: a number graphic counts a real figure
+      // with the words said right after it (`numberCardProblem`: job 412 counted "a hundred times
+      // before" up to 100, job 414 showed "24 skills" for "24 together"); a myth stamp stamps the belief
+      // the voice calls false (`mythStampProblem`: job 414 stamped "The title says lost"); a before and
+      // after is a change the voice says (`beforeAfterProblem`: job 411's "Hardly sings → Soft
+      // clucking", both said of one winter).
+      const notAsSaid =
+        typeof spec.props.value === "number"
+          ? numberCardProblem(spec, mine, words)
+          : spec.template === "MythStamp"
+            ? mythStampProblem(spec, mine, words)
+            : spec.template === "BeforeAfter"
+              ? beforeAfterProblem(spec, mine, words)
+              : undefined;
+      if (notAsSaid) {
+        undo();
+        bad(notAsSaid);
+        continue;
+      }
       // A LIST WINDOW is a list the narrator says (`listCheck`): Gideon's job 400 (1:41) numbered "1 Two
       // thousand years ago / 2 Seneca wrote a short / 3 Furious / 4 Loving essay" on ONE sentence,
       // the planner's own list. A list the pipeline found passed the same rules when it was found
-      // (`fromAFoundList`). Read around where it resolved.
-      if (LIST_WINDOWS.has(spec.template) && input.listCheck) {
-        const rows = listRows(spec.props.items);
-        const why =
-          rows.length && !fromAFoundList(rows, lists)
-            ? input.listCheck(scriptAround(film, mine.start, mine.contentEnd ?? mine.end), rows, { points: spec.template === "HostListWindow" })
-            : undefined;
+      // (`fromAFoundList`). So is a CHECKLIST (`ROW_LISTS`: job 413's "The usual crime" ticked the fix
+      // after the script's dash as two more crimes). Read around where it resolved, each row in the
+      // script's own words (`rowsAsWritten`), so a dash the voice read as a comma is still a dash.
+      if (ROW_LISTS.has(spec.template) && input.listCheck) {
+        const script = scriptAround(film, mine.start, mine.contentEnd ?? mine.end);
+        const rows = rowsAsWritten(listRows(spec.props.items), script);
+        const why = rows.length && !fromAFoundList(rows, lists) ? input.listCheck(script, rows, { points: spec.template === "HostListWindow" }) : undefined;
         if (why) {
           undo();
-          const title = typeof spec.props.title === "string" && spec.props.title.trim() ? `"${spec.props.title.trim()}"` : "The list window";
+          const checklist = spec.template === "Checklist";
+          const title = typeof spec.props.title === "string" && spec.props.title.trim() ? `"${spec.props.title.trim()}"` : checklist ? "The checklist" : "The list window";
           bad(
-            `${title} is not a list the narrator says: ${why}. A list window numbers separate things he names one after ` +
-              `another ("a pen, a notebook, and a lamp"), each row on that item's own words — never a sentence chopped at ` +
-              `its commas, a time or describing words. Show the line another way (a caption or a statement), or drop it`
+            checklist
+              ? `${title} is not a list the narrator says: ${why}. A checklist ticks separate things he names one after ` +
+                  `another, every row one of what its title names, said in the same run of the sentence — never a sentence chopped ` +
+                  `at its commas, and never the words after a dash or a colon (what it means, what it takes, what it costs). ` +
+                  `Show the line another way (a caption or a statement), or drop it`
+              : `${title} is not a list the narrator says: ${why}. A list window numbers separate things he names one after ` +
+                  `another ("a pen, a notebook, and a lamp"), each row on that item's own words — never a sentence chopped at ` +
+                  `its commas, a time or describing words. Show the line another way (a caption or a statement), or drop it`
           );
           continue;
         }
@@ -1544,6 +2155,8 @@ export async function planGraphics(input: PlanInput): Promise<PlanResult> {
         // The mended steps are what is drawn, and a graphic's reading time grows with the words it
         // shows ("Catch" given back "a flight attendant" holds longer): placed again, so every check
         // below — and the timing handed on — measures the steps as drawn, not as the planner wrote them.
+        // Words given back from what was heard are put in the script's spelling first (`respellCue`).
+        respellCue(spec, mine, film, words);
         if (JSON.stringify(steps) !== asPlanned) {
           try {
             next = resolveAll();
@@ -1570,7 +2183,7 @@ export async function planGraphics(input: PlanInput): Promise<PlanResult> {
       // onto the next shot instead. (A title was raised above.)
       if (!structural.has(spec.template) && tooShortToRead(mine, FPS)) {
         undo();
-        bad(`on screen ${((mine.endFrame - mine.startFrame) / FPS).toFixed(2)} s — too short to read (at least ${MIN_ON_SCREEN_SEC} s); join it to the next sentence or drop it`);
+        bad(`on screen ${(readableFrames(mine, FPS) / FPS).toFixed(2)} s — too short to read (at least ${MIN_ON_SCREEN_SEC} s); join it to the next sentence or drop it`);
         continue;
       }
       // NO BLINK OF FOOTAGE beside a graphic that hides the picture — QA's own test (`blinkBeside`),
@@ -1634,19 +2247,44 @@ export async function planGraphics(input: PlanInput): Promise<PlanResult> {
     }
 
     // Chapter labels are a SERIES: "2 of 3" with no 1 or 3 is a broken promise on screen. A new
-    // series that came out incomplete is dropped; an approved one never is.
+    // series that came out incomplete is dropped; an approved one never is. COMPLETE means every part
+    // the FILM counts, not the total a kicker promises: Gary's job 413, a 3-minute excerpt of a script
+    // promising seventeen businesses, counted "Number one" and "number two" aloud; the planner labelled
+    // both "· 1 of 17" and "· 2 of 17", and the series was dropped whole for missing 3-17, which the
+    // film never says — so neither counted part had its title. The parts the film reaches: the highest
+    // label asked for (placed or refused) and the highest count it says aloud outside the call to
+    // action, up to the promised total (`countsSaidAloud`). A part below that with no label still drops
+    // the series; a promise past it leaves the kicker ("· 1 of 17" → "· 1"), so the screen never
+    // promises parts the film does not show. The film's counts are trusted only when every label
+    // sits on one of them: a film that counts some other way ("Tip three:", or "two" heard as "to")
+    // shows no count here, and a label it forgot would look like the end of the film — there the
+    // promise stands, as before.
     const chapters = placed.filter(p => p.spec.template === "ChapterLabel");
-    const total = Math.max(0, ...chapters.map(p => Number(/of\s+(\d+)/i.exec(String(p.spec.props.kicker ?? ""))?.[1] ?? 0)));
-    const have = new Set(chapters.map(p => Number(p.spec.props.number)));
-    const lost = Array.from({ length: total }, (_, i) => i + 1).filter(n => !have.has(n));
-    if (chapters.length && lost.length) {
-      for (const n of lost) problems.push({ cue: `chapter ${n}`, problem: `chapter ${n} of ${total} is missing — label every counted part or none` });
-      if (final) {
-        for (const p of chapters.filter(p => !p.kept)) {
-          problems.push({ cue: p.spec.id, problem: "dropped with its incomplete chapter series" });
-          placed.splice(placed.indexOf(p), 1);
+    if (chapters.length) {
+      const numberOf = (s: CueSpec) => Number(s.props?.number);
+      const promised = Math.max(0, ...chapters.map(p => kickerTotal(p.spec)));
+      const asked = [...kept0, ...newSpecs].filter(s => s.template === "ChapterLabel").map(numberOf).filter(n => Number.isInteger(n) && n > 0);
+      const heard = asked.every(n => countedAloud.has(n));
+      const reached = Math.max(0, ...asked, ...(heard ? Array.from(countedAloud).filter(n => n <= promised) : [promised]));
+      const have = new Set(chapters.map(p => numberOf(p.spec)));
+      const lost = Array.from({ length: reached }, (_, i) => i + 1).filter(n => !have.has(n));
+      if (lost.length) {
+        for (const n of lost) problems.push({ cue: `chapter ${n}`, problem: `chapter ${n} of ${reached} is missing — label every counted part or none` });
+        if (final) {
+          for (const p of chapters.filter(p => !p.kept)) {
+            problems.push({ cue: p.spec.id, problem: "dropped with its incomplete chapter series" });
+            placed.splice(placed.indexOf(p), 1);
+          }
+          resolved = placed.length ? resolveAll() : [];
         }
-        resolved = placed.length ? resolveAll() : [];
+      } else if (promised > reached) {
+        const was = chapters.map(p => p.spec.props.kicker);
+        for (const p of chapters) if (!p.kept && typeof p.spec.props.kicker === "string") p.spec.props.kicker = withoutPromisedTotal(p.spec.props.kicker);
+        try {
+          resolved = resolveAll();
+        } catch {
+          chapters.forEach((p, k) => (p.spec.props.kicker = was[k]));
+        }
       }
     }
     return { cues: placed.map(p => p.spec), resolved, problems, startsAt };
@@ -1675,7 +2313,8 @@ ${offered.map((l, i) => `${i + 1}. ${l.kind === "steps" ? "[steps] " : ""}${l.it
 ${verdict.problems.filter(p => !p.cue.startsWith("[kept]")).map(p => `- ${p.cue}: ${p.problem}`).join("\n")}
 
 Return the corrected NEW cues (JSON only, the whole list of new ones). Fix each failed cue — use words the
-narrator really says, numbers he says, move it to where it may go, or drop it. Keep the ones that passed.`;
+narrator really says (spelled as the script spells them), numbers he says, move it to where it may go, or
+drop it. Keep the ones that passed.`;
     specs = parseSheet(
       await ask(system, [
         { role: "user", content: user },
@@ -1732,7 +2371,8 @@ still applies. Return JSON only: {"cues": [ ...the NEW cues only... ]}, with ids
 ${failed.map(p => `- ${p.cue}: ${p.problem}`).join("\n")}
 
 Return the corrected ADDED cues (JSON only, {"cues": [...]}, only the ones you added). Fix each — use
-words the narrator really says, a whole sentence where the template needs one, or drop it.`;
+words the narrator really says (spelled as the script spells them), a whole sentence where the template
+needs one, or drop it.`;
         try {
           const fixed = parseSheet(await ask(system, [...base, { role: "user", content: fill + "\n\nYOUR ADDED CUES WERE:\n" + JSON.stringify({ cues: added }) + "\n\n" + fix }])).filter(c => !taken.has(c.id) && !keptIds.has(c.id));
           next = await validate(structuredClone([...accepted, ...fixed]), true);
